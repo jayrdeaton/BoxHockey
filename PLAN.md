@@ -14,3 +14,6 @@ I wonder if we should have savable, multi-user support, because I plan on pass a
 
 I don't remember how the 'tipoff works'.  We could have a setting where its either random, or a coin flip, or if you each have to react in your own respective well.  That last one might be the winner, at a random time interval a light could turn on and each player has to press their half of the screen, their coart, whoever wins wins the tipoff and it goes towards the other user
 
+The physics from Swirlio would be useful in here, and the haptic feedback on hitting the sides.  Also I think the gravity well feature would be interesting, maybe with randomized or custom boards
+
+Might be fun to have a 'shootout' mode eventually, where the user is set in a certain position and given a shot, which progressively get more difficult as far as position and obstacles and whatnot.  Could have multiplayer elimination or a HORSE kind of game.

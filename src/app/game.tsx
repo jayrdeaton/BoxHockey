@@ -1,44 +1,84 @@
-import * as Haptics from 'expo-haptics'
-import { router, useLocalSearchParams } from 'expo-router'
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler'
+import { useAutoPaperTheme } from '@rific/auto-paper'
+import { Button, FAB, useVibration } from '@rific/feedback-press'
+import { useToast } from '@rific/toaster'
+import { router } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native'
-import { runOnJS } from 'react-native-reanimated'
-import { Button, IconButton, Text } from 'react-native-paper'
+import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
+import { Gesture, GestureDetector } from 'react-native-gesture-handler'
+import { Text } from 'react-native-paper'
+import Animated, { runOnJS, useAnimatedReaction } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import Board from '@/components/Board'
-import { COLORS } from '@/constants/game'
+import Board from '@/components/BoardHost'
+import { BOARD_DEFAULT_ZOOM, STRIKE_DURATION_MS } from '@/constants/game'
+import { useAIOpponent } from '@/hooks/useAIOpponent'
+import { useBoardCamera } from '@/hooks/useBoardCamera'
+import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameState } from '@/hooks/useGameState'
-import { BoardVariant, GamePhase, Player, PuckState } from '@/types'
-import { computeBoardLayout } from '@/utils/board'
+import { Player, PuckState } from '@/types'
+import { computeBoardLayout, computeViewportSize } from '@/utils/board'
+import { screenDeltaToBoard, screenToBoard } from '@/utils/camera'
+import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
+
+const MONO_FONT = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' })
 
 export default function GameScreen() {
-  const { scoreTo: scoreToParam, layout: layoutParam } = useLocalSearchParams<{ scoreTo: string; layout: string }>()
-  const scoreToWin = Math.max(1, parseInt(scoreToParam ?? '5', 10))
-  const layout = (layoutParam ?? 'classic') as BoardVariant
+  // Committed once by /loadout when every human player readied up (see commitRoundSettings) —
+  // falls back to defaults for a direct/deep link to this screen, which never went through
+  // /loadout to commit anything. orientationMode is a /loadout-only layout setting (see
+  // types/index.ts) and never reaches here — the device stays fixed-portrait (see app.json).
+  const { activeRoundSettings } = useGameSettings()
+  const roundSettings = activeRoundSettings ?? DEFAULT_SETTINGS
+  const scoreToWin = roundSettings.scoreToWin
+  const layout = roundSettings.boardVariant
+  // Only P2 can be CPU-controlled for now — pass-and-play stays the default, single-player just
+  // swaps who takes P2's turns (see useAIOpponent, which plays the exact same gesture contract).
+  const aiPlayer: Player | null = roundSettings.gameMode === 'vsCpu' ? 2 : null
+  const aiDifficulty = roundSettings.aiDifficulty
 
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
 
   const board = useMemo(() => computeBoardLayout(width, height, insets, layout), [width, height, insets, layout])
+  const viewport = useMemo(() => computeViewportSize(width, height, insets), [width, height, insets])
+  const camera = useBoardCamera(viewport.width, viewport.height)
 
-  const { state, tryAimStart, aimUpdate, aimCancel, shoot, nextRound, resetGame } = useGameState(board, scoreToWin)
-  const { phase, puck, aim, currentPlayer, scores, bounceCount, lastScoredGoal } = state
+  const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame } = useGameState(board, scoreToWin)
+  const { phase, puck, aim, currentPlayer, scores, bounceCount, lastScoredGoal, wellEnterCount, lastWellPolarity } = state
 
-  // ─── Turn handoff overlay ─────────────────────────────────────────────────
-  const [showHandoff, setShowHandoff] = useState(false)
-  const handoffPlayerRef = useRef<Player>(1)
-  const prevPhaseRef = useRef<GamePhase>('idle')
+  useAIOpponent(state, board, aiPlayer, aiDifficulty, { tryAimStart, aimUpdate, shoot })
 
-  useEffect(() => {
-    const prev = prevPhaseRef.current
-    prevPhaseRef.current = phase
-    if (phase === 'idle' && (prev === 'simulating' || prev === 'scored')) {
-      handoffPlayerRef.current = currentPlayer
-      setShowHandoff(true)
+  const playerLabel = useCallback((p: Player) => (aiPlayer === p ? 'CPU' : `P${p}`), [aiPlayer])
+
+  const vibration = useVibration()
+  const vibrationRef = useRef(vibration)
+  vibrationRef.current = vibration
+
+  const { success: toastSuccess } = useToast()
+
+  const { dark } = useAutoPaperTheme()
+
+  // High-contrast retro look, matching the home screen: literal black/white by appearance, not
+  // auto-paper's own (slightly tinted) background role.
+  const bg = dark ? '#000000' : '#FFFFFF'
+  const fg = dark ? '#FFFFFF' : '#000000'
+  const fgMuted = dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'
+  const cardBg = dark ? '#111111' : '#F2F2F2'
+  const cardBorder = dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
+  const fabBg = dark ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.08)'
+
+  // ─── Corner FABs (back, fit-to-view) ──────────────────────────────────────
+  // Both hide while aiming — nothing to declutter a shot lining up in the corners for — and the
+  // fit button additionally only shows once there's actually something to reset (camera.scale/
+  // translateX/translateY live on the UI thread as SharedValues, so bridging "am I at the default
+  // view" to a plain JS boolean FAB can read needs useAnimatedReaction rather than a direct read).
+  const [isDefaultZoom, setIsDefaultZoom] = useState(true)
+  useAnimatedReaction(
+    () => camera.scale.value === BOARD_DEFAULT_ZOOM && camera.translateX.value === 0 && camera.translateY.value === 0,
+    (atDefault, prevAtDefault) => {
+      if (atDefault !== prevAtDefault) runOnJS(setIsDefaultZoom)(atDefault)
     }
-  }, [phase, currentPlayer])
+  )
 
   // ─── Auto-advance from 'scored' ───────────────────────────────────────────
   useEffect(() => {
@@ -47,21 +87,51 @@ export default function GameScreen() {
     return () => clearTimeout(t)
   }, [phase, board, nextRound])
 
+  // ─── Strike swing: pull-back released, stick rushes the puck ─────────────
+  // The puck's velocity is already computed (see useGameState's shoot) but held in
+  // `pendingShot` until this fires — Board.tsx spends this window animating the stick from the
+  // pulled-back finger position to the puck, then APPLY_STRIKE sets it moving.
+  useEffect(() => {
+    if (phase !== 'striking') return
+    const t = setTimeout(() => applyStrike(), STRIKE_DURATION_MS)
+    return () => clearTimeout(t)
+  }, [phase, applyStrike])
+
   // ─── Haptics ──────────────────────────────────────────────────────────────
   const firstBounceRender = useRef(true)
   useEffect(() => {
-    if (firstBounceRender.current) { firstBounceRender.current = false; return }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+    if (firstBounceRender.current) {
+      firstBounceRender.current = false
+      return
+    }
+    vibrationRef.current.short()
   }, [bounceCount])
+
+  const firstWellRender = useRef(true)
+  useEffect(() => {
+    if (firstWellRender.current) {
+      firstWellRender.current = false
+      return
+    }
+    if (lastWellPolarity === 'repel') vibrationRef.current.long()
+    else vibrationRef.current.medium()
+  }, [wellEnterCount]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const prevScoresRef = useRef(scores)
   useEffect(() => {
     const [prevP1, prevP2] = prevScoresRef.current
     prevScoresRef.current = scores
     if (scores[0] !== prevP1 || scores[1] !== prevP2) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+      vibrationRef.current.notification()
     }
   }, [scores])
+
+  // ─── Game over toast ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== 'gameOver') return
+    const winner: Player = scores[0] >= scoreToWin ? 1 : 2
+    toastSuccess(`${playerLabel(winner)} Wins!`, `${scores[0]} – ${scores[1]}`)
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Gesture bridge ───────────────────────────────────────────────────────
   const puckRef = useRef<PuckState>(puck)
@@ -69,117 +139,121 @@ export default function GameScreen() {
   const puckRadiusRef = useRef(board.puckRadius)
   puckRadiusRef.current = board.puckRadius
 
-  const stableAimStart = useCallback((x: number, y: number) => {
-    const started = tryAimStart(x, y, puckRef.current, puckRadiusRef.current)
-    if (started) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-  }, [tryAimStart])
+  const stableAimStart = useCallback(
+    (x: number, y: number) => {
+      const started = tryAimStart(x, y, puckRef.current, puckRadiusRef.current)
+      if (started) vibrationRef.current.short()
+    },
+    [tryAimStart]
+  )
 
-  const stableAimUpdate = useCallback((x: number, y: number) => { aimUpdate(x, y) }, [aimUpdate])
-  const stableShoot = useCallback((tx: number, ty: number) => { shoot(tx, ty) }, [shoot])
-  const stableAimCancel = useCallback(() => { aimCancel() }, [aimCancel])
+  const stableAimUpdate = useCallback(
+    (x: number, y: number) => {
+      aimUpdate(x, y)
+    },
+    [aimUpdate]
+  )
+  const stableShoot = useCallback(
+    (tx: number, ty: number) => {
+      shoot(tx, ty)
+    },
+    [shoot]
+  )
+  const stableAimCancel = useCallback(() => {
+    aimCancel()
+  }, [aimCancel])
 
+  // Restricted to a single pointer so that a second finger touching down mid-drag makes this
+  // gesture fail (RNGH's maxPointers behavior) rather than fight the board's pinch/pan camera —
+  // see useBoardCamera.ts. Touches arrive in the outer, untransformed container's own coordinate
+  // space (unaffected by the camera's transform on its inner wrapper), so they're converted back
+  // to board space here before reaching game state, which never sees the camera at all.
   const panGesture = useMemo(
     () =>
       Gesture.Pan()
-        .onStart((e) => { runOnJS(stableAimStart)(e.x, e.y) })
-        .onChange((e) => { runOnJS(stableAimUpdate)(e.x, e.y) })
-        .onEnd((e) => { runOnJS(stableShoot)(e.translationX, e.translationY) })
-        .onFinalize(() => { runOnJS(stableAimCancel)() })
+        .maxPointers(1)
+        .onStart((e) => {
+          const p = screenToBoard(e.x, e.y, { scale: camera.scale.value, translateX: camera.translateX.value, translateY: camera.translateY.value })
+          runOnJS(stableAimStart)(p.x, p.y)
+        })
+        .onChange((e) => {
+          const p = screenToBoard(e.x, e.y, { scale: camera.scale.value, translateX: camera.translateX.value, translateY: camera.translateY.value })
+          runOnJS(stableAimUpdate)(p.x, p.y)
+        })
+        .onEnd((e) => {
+          const d = screenDeltaToBoard(e.translationX, e.translationY, camera.scale.value)
+          runOnJS(stableShoot)(d.x, d.y)
+        })
+        .onFinalize(() => {
+          runOnJS(stableAimCancel)()
+        })
         .minDistance(0),
-    [stableAimStart, stableAimUpdate, stableShoot, stableAimCancel]
+    [stableAimStart, stableAimUpdate, stableShoot, stableAimCancel, camera.scale, camera.translateX, camera.translateY]
   )
 
   // ─── Derived display values ───────────────────────────────────────────────
-  const gestureEnabled = (phase === 'idle' || phase === 'aiming') && !showHandoff
-  const handoffColor = handoffPlayerRef.current === 1 ? COLORS.p1 : COLORS.p2
-  const p1Active = currentPlayer === 1 && (phase === 'idle' || phase === 'aiming')
-  const p2Active = currentPlayer === 2 && (phase === 'idle' || phase === 'aiming')
-  const turnDotColor = currentPlayer === 1 ? COLORS.p1 : COLORS.p2
+  // Also gated on it not being the CPU's turn, so a stray touch during single-player can't hijack
+  // its shot — pass-and-play (aiPlayer === null) keeps its original "whoever touches goes" rule.
+  const gestureEnabled = (phase === 'idle' || phase === 'aiming') && currentPlayer !== aiPlayer
 
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <View style={[styles.root, styles.bg]}>
-
-        {/* Score bar */}
-        <View style={[styles.scoreBar, { marginTop: insets.top }]}>
-          <View style={styles.playerScore}>
-            <Text variant='labelSmall' style={[styles.playerLabel, { color: p1Active ? COLORS.p1 : 'rgba(255,255,255,0.4)' }]}>P1</Text>
-            <Text variant='headlineMedium' style={[styles.scoreText, { color: COLORS.p1 }]}>{scores[0]}</Text>
-          </View>
-
-          <View style={styles.centerInfo}>
-            {phase === 'gameOver' ? (
-              <Text variant='labelMedium' style={styles.statusText}>GAME OVER</Text>
-            ) : phase === 'scored' ? (
-              <Text variant='labelMedium' style={[styles.statusText, { color: turnDotColor }]}>GOAL!</Text>
-            ) : (
-              <View style={[styles.turnDot, { backgroundColor: turnDotColor }]} />
-            )}
-            <Text variant='labelSmall' style={styles.targetText}>First to {scoreToWin}</Text>
-          </View>
-
-          <View style={[styles.playerScore, styles.playerScoreRight]}>
-            <Text variant='labelSmall' style={[styles.playerLabel, { color: p2Active ? COLORS.p2 : 'rgba(255,255,255,0.4)' }]}>P2</Text>
-            <Text variant='headlineMedium' style={[styles.scoreText, { color: COLORS.p2 }]}>{scores[1]}</Text>
-          </View>
-        </View>
-
-        {/* Board + gesture layer */}
-        <GestureDetector gesture={gestureEnabled ? panGesture : Gesture.Pan().enabled(false)}>
-          <View style={styles.boardArea}>
-            <Board board={board} puck={puck} aim={aim} phase={phase} currentPlayer={currentPlayer} lastScoredGoal={lastScoredGoal} />
+    <View style={[styles.root, { backgroundColor: bg }]}>
+      {/* Board + gesture layer, starting right at the safe area (marginTop: insets.top) — no
+          score bar or turn indicator above it: the puck's own color already says whose turn it
+          is, and the score lives on the board itself as pips at each goal (see Board.tsx).
+          camera.cameraGesture (pinch to zoom + a separate two-finger pan, see useBoardCamera)
+          always runs; the one-finger aim gesture only races it during idle/aiming — both are
+          attached to the untransformed View below, while only the inner Animated.View gets the
+          camera's transform (`overflow: hidden` on the outermost View keeps a zoomed-in board
+          from bleeding past this container). camera.boardAreaRef sits on this outer View rather
+          than GestureDetector's own child, which manages that child's ref internally — a web-only
+          wheel listener (trackpad pinch/scroll, see useBoardCamera.ts) attaches there instead. */}
+      <View ref={camera.boardAreaRef} style={[styles.boardArea, { marginTop: insets.top }]}>
+        <GestureDetector gesture={Gesture.Race(camera.cameraGesture, panGesture.enabled(gestureEnabled))}>
+          <View style={styles.boardAreaTouchable}>
+            <Animated.View style={[styles.boardInner, camera.animatedStyle]}>
+              <Board board={board} puck={puck} aim={aim} phase={phase} currentPlayer={currentPlayer} lastScoredGoal={lastScoredGoal} scores={scores} scoreToWin={scoreToWin} camera={{ scale: camera.scale, translateX: camera.translateX, translateY: camera.translateY }} />
+            </Animated.View>
           </View>
         </GestureDetector>
-
-        {/* Turn handoff overlay */}
-        {showHandoff && (
-          <TouchableOpacity activeOpacity={1} style={styles.handoffOverlay} onPress={() => setShowHandoff(false)}>
-            <View style={[styles.handoffCard, { borderColor: handoffColor }]}>
-              <Text variant='headlineMedium' style={[styles.handoffTitle, { color: handoffColor }]}>
-                P{handoffPlayerRef.current}'s Turn
-              </Text>
-              <Text variant='bodySmall' style={styles.handoffHint}>Tap to shoot</Text>
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {/* Game Over overlay */}
-        {phase === 'gameOver' && (
-          <View style={styles.overlay}>
-            <View style={styles.overlayCard}>
-              <Text variant='headlineLarge' style={styles.overlayTitle}>
-                {scores[0] >= scoreToWin ? 'P1 Wins!' : 'P2 Wins!'}
-              </Text>
-              <Text variant='bodyLarge' style={styles.overlayScore}>{scores[0]} – {scores[1]}</Text>
-              <Button mode='contained' onPress={() => resetGame(board)} style={styles.overlayButton}>Play Again</Button>
-              <Button mode='outlined' onPress={() => router.back()} style={styles.overlayButton}>Menu</Button>
-            </View>
-          </View>
-        )}
-
-        <IconButton icon='arrow-left' iconColor='rgba(255,255,255,0.5)' size={22} style={[styles.backButton, { top: insets.top + 4 }]} onPress={() => router.back()} />
       </View>
-    </GestureHandlerRootView>
+
+      {/* Game Over overlay */}
+      {phase === 'gameOver' && (
+        <View style={styles.overlay}>
+          <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            <Text variant='headlineLarge' style={[styles.overlayTitle, { color: fg, fontFamily: MONO_FONT }]}>
+              {playerLabel(scores[0] >= scoreToWin ? 1 : 2)} Wins!
+            </Text>
+            <Text variant='bodyLarge' style={[styles.overlayScore, { color: fgMuted, fontFamily: MONO_FONT }]}>
+              {scores[0]} – {scores[1]}
+            </Text>
+            <Button mode='contained' onPress={() => resetGame(board)} style={styles.overlayButton}>
+              Play Again
+            </Button>
+            <Button mode='outlined' onPress={() => router.back()} style={styles.overlayButton}>
+              Loadout
+            </Button>
+          </View>
+        </View>
+      )}
+
+      <FAB icon='arrow-left' color={fgMuted} customSize={36} mode='flat' visible={phase !== 'aiming'} style={[styles.backButton, { top: insets.top + 4, backgroundColor: fabBg }]} onPress={() => router.back()} />
+      <FAB icon='crop-free' color={fgMuted} customSize={36} mode='flat' visible={!isDefaultZoom && phase !== 'aiming'} style={[styles.resetZoomButton, { top: insets.top + 4, backgroundColor: fabBg }]} onPress={() => camera.reset()} />
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
   backButton: { left: 4, position: 'absolute' },
-  bg: { backgroundColor: '#0A1628' },
-  boardArea: { flex: 1 },
-  centerInfo: { alignItems: 'center', flex: 1, gap: 2 },
-  handoffCard: {
-    alignItems: 'center',
-    backgroundColor: '#0D1F3C',
-    borderRadius: 20,
-    borderWidth: 1.5,
-    gap: 8,
-    paddingHorizontal: 40,
-    paddingVertical: 28
-  },
-  handoffHint: { color: 'rgba(255,255,255,0.4)' },
-  handoffOverlay: { alignItems: 'center', bottom: 0, justifyContent: 'center', left: 0, position: 'absolute', right: 0, top: 0 },
-  handoffTitle: { fontWeight: 'bold' },
+  // overflow: 'hidden' clips the inner board once it's zoomed past this container's own bounds —
+  // without it a zoomed-in board would bleed off the screen edges.
+  boardArea: { flex: 1, overflow: 'hidden' },
+  boardAreaTouchable: { flex: 1 },
+  // transformOrigin pins the camera's scale to the top-left corner (see useBoardCamera.ts) so its
+  // `transform: [{translateX},{translateY},{scale}]` matches camera.ts's own screen = translate +
+  // board*scale convention exactly, with no center-pivot compensation needed.
+  boardInner: { flex: 1, transformOrigin: 'left top' },
   overlay: {
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.72)',
@@ -193,22 +267,13 @@ const styles = StyleSheet.create({
   overlayButton: { width: 160 },
   overlayCard: {
     alignItems: 'center',
-    backgroundColor: '#0D1F3C',
-    borderColor: 'rgba(200,216,240,0.2)',
     borderRadius: 20,
     borderWidth: 1,
     gap: 16,
     padding: 32
   },
-  overlayScore: { color: 'rgba(255,255,255,0.7)' },
-  overlayTitle: { color: '#FFFFFF', fontWeight: 'bold' },
-  playerLabel: { fontWeight: 'bold', letterSpacing: 1 },
-  playerScore: { alignItems: 'flex-start', flexDirection: 'row', gap: 8, width: 80 },
-  playerScoreRight: { justifyContent: 'flex-end' },
-  root: { flex: 1 },
-  scoreBar: { alignItems: 'center', flexDirection: 'row', height: 76, justifyContent: 'space-between', paddingHorizontal: 24 },
-  scoreText: { color: '#FFFFFF', fontWeight: 'bold', lineHeight: 32, marginTop: 2 },
-  statusText: { color: '#FFFFFF', fontWeight: 'bold', letterSpacing: 1 },
-  targetText: { color: 'rgba(255,255,255,0.35)', fontSize: 10 },
-  turnDot: { borderRadius: 5, height: 10, width: 10 }
+  overlayScore: {},
+  overlayTitle: { fontWeight: 'bold' },
+  resetZoomButton: { position: 'absolute', right: 4 },
+  root: { flex: 1 }
 })

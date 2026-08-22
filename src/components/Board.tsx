@@ -1,32 +1,84 @@
-import { Canvas, Circle, DashPathEffect, Group, Line, Path, RadialGradient, Rect, Skia, vec } from '@shopify/react-native-skia'
+import { getContrastColor, useAutoPaperTheme } from '@rific/auto-paper'
+import { Canvas, Circle, Group, Line, Path, Rect, Skia, vec } from '@shopify/react-native-skia'
 import { useEffect, useMemo } from 'react'
-import { StyleSheet, Text, View } from 'react-native'
-import { cancelAnimation, Easing, useDerivedValue, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated'
+import { StyleSheet, View } from 'react-native'
+import { cancelAnimation, Easing, SharedValue, useDerivedValue, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated'
 
-import { COLORS, MAX_DRAG_PIXELS, MAX_SPEED, MIN_SHOOT_DRAG, WALL_THICKNESS } from '@/constants/game'
+import { BOARD_DEFAULT_ZOOM, COLORS, MIN_SHOOT_DRAG, STRIKE_DURATION_MS } from '@/constants/game'
 import { AimIndicator, BoardLayout, GamePhase, Player, PuckState } from '@/types'
-import { computeTrajectory } from '@/utils/physics'
+import { computeScorePipLayout } from '@/utils/scorePips'
 
-interface Props {
+import { GravityWellMarker } from './GravityWellMarker'
+
+const AIM_CHEVRON_COUNT = 3
+
+export interface BoardCamera {
+  scale: SharedValue<number>
+  translateX: SharedValue<number>
+  translateY: SharedValue<number>
+}
+
+export interface BoardProps {
   board: BoardLayout
   puck: PuckState
   aim: AimIndicator | null
   phase: GamePhase
   currentPlayer: Player
   lastScoredGoal: 'top' | 'bottom' | null
+  scores: [number, number]
+  scoreToWin: number
+  camera: BoardCamera
 }
 
-export default function Board({ board, puck, aim, phase, currentPlayer, lastScoredGoal }: Props) {
-  const { x, y, width, height, goalLeft, goalRight, puckRadius, obstacles } = board
-  const wt = WALL_THICKNESS
+export default function Board({ board, puck, aim, phase, currentPlayer, lastScoredGoal, scores, scoreToWin, camera }: BoardProps) {
+  const { x, y, width, height, goalLeft, goalRight, wallThickness, puckRadius, obstacles, gravityWells } = board
 
   const goalAbsLeft = x + goalLeft
   const goalAbsRight = x + goalRight
   const goalCX = x + width / 2
 
-  const puckColor = currentPlayer === 1 ? COLORS.p1 : COLORS.p2
-  const puckLight = currentPlayer === 1 ? COLORS.p1Light : COLORS.p2Light
-  const puckDark = currentPlayer === 1 ? COLORS.p1Dark : COLORS.p2Dark
+  const { colors: themeColors, dark } = useAutoPaperTheme()
+
+  // Retro-vector palette: the board's structure (walls/obstacles) is the same literal
+  // black/white-by-appearance foreground used elsewhere (index.tsx, game.tsx) rather than a themed
+  // color — the box itself is neutral scaffolding, not a gameplay signal. Everything else that
+  // isn't gameplay-signal color (a player's puck, the gravity wells' attract/repel accents) is a
+  // flat neutral that flips with light/dark too — there's no filled board-surface panel anymore, so
+  // the screen's own true-black/white background shows through and these neutrals have to read
+  // against either.
+  const wallColor = dark ? '#FFFFFF' : '#000000'
+  const lineColor = dark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)'
+  const glowColor = dark ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.13)'
+  const aimIndicatorColor = dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'
+  const wellHoleColor = dark ? '#000000' : '#FFFFFF'
+
+  const p1Color = themeColors.primary
+  const p2Color = themeColors.secondary
+  const puckColor = currentPlayer === 1 ? p1Color : p2Color
+  const puckStroke = getContrastColor(puckColor)
+
+  // ─── Perimeter wall visibility ────────────────────────────────────────────
+  // The walls (see the Rects below) are drawn outward from the play field, not inward — at the
+  // camera's default fit-to-screen position they'd just add visual noise hugging the screen edge,
+  // so they stay hidden there and only fade in once the camera actually departs from that resting
+  // position (see useBoardCamera.ts), whether by zooming out or panning. Driven straight off the
+  // camera's own shared values (not the JS-thread `isDefaultZoom` state game.tsx derives from the
+  // same values for its reset FAB) so this tracks the live gesture with no bridge lag.
+  const wallOpacity = useDerivedValue(() => {
+    const zoomed = Math.abs(camera.scale.value - BOARD_DEFAULT_ZOOM) > 0.001
+    const panned = Math.abs(camera.translateX.value) > 0.5 || Math.abs(camera.translateY.value) > 0.5
+    return zoomed || panned ? 1 : 0
+  })
+
+  // ─── Score pips ───────────────────────────────────────────────────────────
+  // One row per goal, filled in with that player's own color as they score — positioned at their
+  // own goal (like foosball's scoring beads) rather than as a top-of-screen HUD readout. Sized to
+  // fill a fixed fraction of the board's width regardless of scoreToWin, so "first to 3" isn't
+  // three tiny dots and "first to 10" isn't ten overflowing ones.
+  const pipLayout = useMemo(() => computeScorePipLayout(width * 0.6, scoreToWin), [width, scoreToWin])
+  const pipInset = width * 0.055
+  const p1PipY = y + pipInset
+  const p2PipY = y + height - pipInset
 
   // ─── Pulsing glow (idle) / static glow (aiming) ──────────────────────────
   const glowR = useSharedValue(puckRadius * 1.3)
@@ -40,6 +92,15 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
       glowR.value = phase === 'aiming' ? puckRadius * 1.45 : puckRadius * 1.3
     }
   }, [phase, puckRadius]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Gravity well particle clock ──────────────────────────────────────────
+  // Decorative, independent of the physics loop — runs continuously regardless
+  // of game phase, same "clock owned once by Board.tsx" idea as glowR above.
+  const wellParticleProgress = useSharedValue(0)
+
+  useEffect(() => {
+    wellParticleProgress.value = withRepeat(withTiming(1, { duration: 2200, easing: Easing.linear }), -1, false)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Goal celebration rings ───────────────────────────────────────────────
   // Keep puckRadius and maxRingR as shared values so derived values stay current
@@ -71,110 +132,115 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
   const ring3O = useDerivedValue(() => (1 - ring3P.value) * 0.75)
 
   const celebCY = lastScoredGoal === 'top' ? y : y + height
-  const celebColor = lastScoredGoal === 'top' ? COLORS.p1 : COLORS.p2
+  const celebColor = lastScoredGoal === 'top' ? p1Color : p2Color
 
-  // ─── Trajectory preview ───────────────────────────────────────────────────
-  const trajectoryPath = useMemo(() => {
+  // ─── Aim direction chevrons ────────────────────────────────────────────────
+  // Deliberately NOT a simulated trajectory: showing the full bounced-off-everything path told
+  // the player exactly where the puck would end up before they even shot, which left no guessing
+  // (and no skill) in banking a shot off a wall/obstacle. A few short chevrons just past the stick
+  // convey "this is the direction you're about to fire" without previewing the outcome.
+  // Pull-back aiming: the puck fires in the OPPOSITE direction from the drag (like a slingshot
+  // or pool cue), so the chevrons point from the puck toward -drag, not toward the drag itself.
+  const aimChevronsPath = useMemo(() => {
     if (!aim || phase !== 'aiming') return null
-    const dx = aim.currentX - aim.startX
-    const dy = aim.currentY - aim.startY
-    if (Math.sqrt(dx * dx + dy * dy) < MIN_SHOOT_DRAG) return null
-    const points = computeTrajectory(puck.x, puck.y, dx, dy, board, MAX_DRAG_PIXELS, MAX_SPEED)
-    if (points.length < 2) return null
-    const path = Skia.Path.Make()
-    path.moveTo(points[0].x, points[0].y)
-    for (const pt of points.slice(1)) path.lineTo(pt.x, pt.y)
-    return path
-  }, [aim, puck.x, puck.y, board, phase])
+    const dx = aim.startX - aim.currentX
+    const dy = aim.startY - aim.currentY
+    const dragDist = Math.sqrt(dx * dx + dy * dy)
+    if (dragDist < MIN_SHOOT_DRAG) return null
 
-  // ─── Aim arrow ────────────────────────────────────────────────────────────
-  const aimData = (() => {
-    if (!aim || phase !== 'aiming') return null
-    const dx = aim.currentX - aim.startX
-    const dy = aim.currentY - aim.startY
-    const dist = Math.sqrt(dx * dx + dy * dy)
-    if (dist < 4) return null
-    const power = Math.min(dist / MAX_DRAG_PIXELS, 1)
-    const nx = dx / dist
-    const ny = dy / dist
-    const len = power * 90
-    const toX = puck.x + nx * len
-    const toY = puck.y + ny * len
-    const aw = 8
-    const al = 14
-    return { fromX: puck.x, fromY: puck.y, toX, toY, ax1: toX - nx * al + ny * aw, ay1: toY - ny * al - nx * aw, ax2: toX - nx * al - ny * aw, ay2: toY - ny * al + nx * aw }
-  })()
+    const ux = dx / dragDist
+    const uy = dy / dragDist
+    const px = -uy
+    const py = ux
 
-  const aimLinePath = useMemo(() => {
-    if (!aimData) return null
+    const chevronWidth = puckRadius * 0.5
+    const chevronDepth = puckRadius * 0.45
+    const spacing = puckRadius * 0.75
+    const startOffset = puckRadius * 1.7 // clears the stick circle (r = puckRadius * 1.15)
+
     const path = Skia.Path.Make()
-    path.moveTo(aimData.fromX, aimData.fromY)
-    path.lineTo(aimData.toX, aimData.toY)
+    for (let i = 0; i < AIM_CHEVRON_COUNT; i++) {
+      const tipDist = startOffset + i * spacing
+      const tipX = puck.x + ux * tipDist
+      const tipY = puck.y + uy * tipDist
+      const backX = tipX - ux * chevronDepth
+      const backY = tipY - uy * chevronDepth
+      path.moveTo(backX + px * chevronWidth, backY + py * chevronWidth)
+      path.lineTo(tipX, tipY)
+      path.lineTo(backX - px * chevronWidth, backY - py * chevronWidth)
+    }
     return path
-  }, [aimData])
+  }, [aim, puck.x, puck.y, puckRadius, phase])
+
+  // ─── Stick/paddle ─────────────────────────────────────────────────────────
+  // While aiming, the stick sits right where the player's finger is (pulled back from the
+  // puck). It tracks the finger 1:1, so no animation is needed here — that's reserved for the
+  // strike swing below.
+  const stickRadius = puckRadius * 1.15
+
+  // On release, the stick swings from that pulled-back spot to the puck over STRIKE_DURATION_MS
+  // (see useGameState/game.tsx) — captured once per swing, not re-triggered by later renders.
+  const strikeX = useSharedValue(0)
+  const strikeY = useSharedValue(0)
+
+  useEffect(() => {
+    if (phase !== 'striking' || !aim) return
+    strikeX.value = aim.currentX
+    strikeY.value = aim.currentY
+    strikeX.value = withTiming(puck.x, { duration: STRIKE_DURATION_MS, easing: Easing.in(Easing.cubic) })
+    strikeY.value = withTiming(puck.y, { duration: STRIKE_DURATION_MS, easing: Easing.in(Easing.cubic) })
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <View style={styles.container}>
       <Canvas style={StyleSheet.absoluteFill}>
-        {/* Board surface */}
-        <Rect x={x} y={y} width={width} height={height} color={COLORS.boardSurface} />
-
         {/* Center line */}
-        <Line p1={vec(x + wt, y + height / 2)} p2={vec(x + width - wt, y + height / 2)} color={COLORS.centerLine} strokeWidth={1} />
-
-        {/* Goal zones */}
-        <Rect x={goalAbsLeft} y={y} width={goalAbsRight - goalAbsLeft} height={puckRadius * 2.2} color={COLORS.goalOpening} />
-        <Rect x={goalAbsLeft} y={y + height - puckRadius * 2.2} width={goalAbsRight - goalAbsLeft} height={puckRadius * 2.2} color={COLORS.goalOpening} />
+        <Line p1={vec(x, y + height / 2)} p2={vec(x + width, y + height / 2)} color={lineColor} strokeWidth={1} />
 
         {/* Goal lines */}
-        <Line p1={vec(goalAbsLeft, y)} p2={vec(goalAbsRight, y)} color={COLORS.goalLine} strokeWidth={2} />
-        <Line p1={vec(goalAbsLeft, y + height)} p2={vec(goalAbsRight, y + height)} color={COLORS.goalLine} strokeWidth={2} />
+        <Line p1={vec(goalAbsLeft, y)} p2={vec(goalAbsRight, y)} color={lineColor} strokeWidth={2} />
+        <Line p1={vec(goalAbsLeft, y + height)} p2={vec(goalAbsRight, y + height)} color={lineColor} strokeWidth={2} />
 
-        {/* Walls */}
-        <Rect x={x} y={y} width={goalLeft} height={wt} color={COLORS.wall} />
-        <Rect x={goalAbsRight} y={y} width={width - goalRight} height={wt} color={COLORS.wall} />
-        <Rect x={x} y={y + height - wt} width={goalLeft} height={wt} color={COLORS.wall} />
-        <Rect x={goalAbsRight} y={y + height - wt} width={width - goalRight} height={wt} color={COLORS.wall} />
-        <Rect x={x} y={y} width={wt} height={height} color={COLORS.wall} />
-        <Rect x={x + width - wt} y={y} width={wt} height={height} color={COLORS.wall} />
+        {/* Perimeter walls — filled bars the same thickness and color as the center divider
+            (below), so the whole structure reads as one piece built from the same material,
+            rather than a thin outline around solid obstacles. They sit flush against the play
+            field's boundary but extend outward from it (not inward, which would eat into
+            gameplay space) and fade in only once the camera leaves its default resting position
+            (see wallOpacity above) — hidden at rest so they don't add visual noise hugging the
+            screen edge, but there to find once the player zooms out or pans. */}
+        <Group opacity={wallOpacity}>
+          <Rect x={x - wallThickness} y={y - wallThickness} width={wallThickness} height={height + wallThickness * 2} color={wallColor} />
+          <Rect x={x + width} y={y - wallThickness} width={wallThickness} height={height + wallThickness * 2} color={wallColor} />
+          <Rect x={x} y={y - wallThickness} width={goalAbsLeft - x} height={wallThickness} color={wallColor} />
+          <Rect x={goalAbsRight} y={y - wallThickness} width={x + width - goalAbsRight} height={wallThickness} color={wallColor} />
+          <Rect x={x} y={y + height} width={goalAbsLeft - x} height={wallThickness} color={wallColor} />
+          <Rect x={goalAbsRight} y={y + height} width={x + width - goalAbsRight} height={wallThickness} color={wallColor} />
+        </Group>
 
         {/* Obstacles */}
         {obstacles.map((obs, i) => (
-          <Rect key={i} x={obs.x} y={obs.y} width={obs.width} height={obs.height} color={COLORS.wall} />
+          <Rect key={i} x={obs.x} y={obs.y} width={obs.width} height={obs.height} color={wallColor} />
         ))}
 
-        {/* Trajectory preview */}
-        {trajectoryPath && (
-          <Path path={trajectoryPath} style='stroke' strokeWidth={1.5} color='rgba(255,255,255,0.2)' strokeCap='round' strokeJoin='round'>
-            <DashPathEffect intervals={[4, 7]} />
-          </Path>
-        )}
+        {/* Gravity wells */}
+        {gravityWells.map((well, i) => (
+          <GravityWellMarker key={i} x={well.x} y={well.y} holeRadius={well.radius} attracting={well.strength >= 0} progress={wellParticleProgress} foreground={well.strength >= 0 ? COLORS.wellAttract : COLORS.wellRepel} background={wellHoleColor} />
+        ))}
 
-        {/* Aim arrow */}
-        {aimData && aimLinePath && (
-          <Group>
-            <Path path={aimLinePath} style='stroke' strokeWidth={2} color={COLORS.aimLine} strokeCap='round'>
-              <DashPathEffect intervals={[8, 6]} />
-            </Path>
-            <Line p1={vec(aimData.toX, aimData.toY)} p2={vec(aimData.ax1, aimData.ay1)} color={COLORS.aimArrow} strokeWidth={2.5} strokeCap='round' />
-            <Line p1={vec(aimData.toX, aimData.toY)} p2={vec(aimData.ax2, aimData.ay2)} color={COLORS.aimArrow} strokeWidth={2.5} strokeCap='round' />
-          </Group>
-        )}
+        {/* Aim direction chevrons */}
+        {aimChevronsPath && <Path path={aimChevronsPath} style='stroke' strokeWidth={2.5} color={aimIndicatorColor} strokeCap='round' strokeJoin='round' />}
+
+        {/* Stick/paddle — sits at the pulled-back finger position while aiming, then swings in
+            to strike the puck once released */}
+        {phase === 'aiming' && aim && <Circle cx={aim.currentX} cy={aim.currentY} r={stickRadius} style='stroke' strokeWidth={3} color={puckColor} />}
+        {phase === 'striking' && <Circle cx={strikeX} cy={strikeY} r={stickRadius} style='stroke' strokeWidth={3} color={puckColor} />}
 
         {/* Puck glow */}
-        {(phase === 'idle' || phase === 'aiming') && (
-          <Circle cx={puck.x} cy={puck.y} r={glowR} color='rgba(255,255,255,0.13)' />
-        )}
+        {(phase === 'idle' || phase === 'aiming') && <Circle cx={puck.x} cy={puck.y} r={glowR} color={glowColor} />}
 
-        {/* Puck */}
-        <Circle cx={puck.x} cy={puck.y} r={puckRadius}>
-          <RadialGradient
-            c={vec(puck.x - puckRadius * 0.25, puck.y - puckRadius * 0.3)}
-            r={puckRadius * 1.5}
-            colors={['#FFFFFF', puckLight, puckColor, puckDark, '#000000']}
-            positions={[0, 0.1, 0.45, 0.75, 1]}
-          />
-        </Circle>
+        {/* Puck — flat fill + bold contrasting outline, no gradient */}
+        <Circle cx={puck.x} cy={puck.y} r={puckRadius} color={puckColor} />
+        <Circle cx={puck.x} cy={puck.y} r={puckRadius} style='stroke' strokeWidth={2} color={puckStroke} />
 
         {/* Celebration rings */}
         {lastScoredGoal !== null && (
@@ -190,21 +256,17 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
             </Group>
           </Group>
         )}
-      </Canvas>
 
-      {/* Goal direction labels */}
-      <View style={[styles.goalLabel, { top: y + 2, left: goalAbsLeft, width: goalAbsRight - goalAbsLeft }]}>
-        <Text style={[styles.goalLabelText, { color: COLORS.p1 }]}>P1 ▲</Text>
-      </View>
-      <View style={[styles.goalLabel, { top: y + height - 14, left: goalAbsLeft, width: goalAbsRight - goalAbsLeft }]}>
-        <Text style={[styles.goalLabelText, { color: COLORS.p2 }]}>▼ P2</Text>
-      </View>
+        {/* Score pips — one row per goal, filled with that player's color as they score */}
+        <Group>
+          {pipLayout.centerXs.map((dx, i) => (i < scores[0] ? <Circle key={`p1-pip-${i}`} cx={goalCX + dx} cy={p1PipY} r={pipLayout.radius} color={p1Color} /> : <Circle key={`p1-pip-${i}`} cx={goalCX + dx} cy={p1PipY} r={pipLayout.radius} style='stroke' strokeWidth={1.5} color={lineColor} />))}
+          {pipLayout.centerXs.map((dx, i) => (i < scores[1] ? <Circle key={`p2-pip-${i}`} cx={goalCX + dx} cy={p2PipY} r={pipLayout.radius} color={p2Color} /> : <Circle key={`p2-pip-${i}`} cx={goalCX + dx} cy={p2PipY} r={pipLayout.radius} style='stroke' strokeWidth={1.5} color={lineColor} />))}
+        </Group>
+      </Canvas>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  goalLabel: { alignItems: 'center', position: 'absolute' },
-  goalLabelText: { fontSize: 9, fontWeight: 'bold', letterSpacing: 1, opacity: 0.7 }
+  container: { flex: 1 }
 })

@@ -1,151 +1,72 @@
+import { useAutoPaperTheme } from '@rific/auto-paper'
+import { Button, IconButton } from '@rific/feedback-press'
 import { router } from 'expo-router'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
-import { Button, IconButton, Text, TouchableRipple } from 'react-native-paper'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { COLORS } from '@/constants/game'
-import { BoardVariant } from '@/types'
-import { BOARD_VARIANT_LABELS } from '@/utils/board'
-
-const SCORE_OPTIONS = [3, 5, 7, 10]
-const LAYOUT_OPTIONS: BoardVariant[] = ['classic', 'open', 'gauntlet']
-
-const LAYOUT_DESCRIPTIONS: Record<BoardVariant, string> = {
-  classic: 'Staggered walls',
-  open: 'No obstacles',
-  gauntlet: 'Narrow center gap'
-}
+import { HeroTitle } from '@/components/HeroTitle'
+import { SettingsDialog } from '@/components/SettingsDialog'
+import { useGameSettings } from '@/hooks/useGameSettings'
+import { GameMode } from '@/types'
 
 export default function HomeScreen() {
-  const [scoreTo, setScoreTo] = useState(5)
-  const [layout, setLayout] = useState<BoardVariant>('classic')
+  const { setSettings } = useGameSettings()
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const { colors, dark } = useAutoPaperTheme()
+  const insets = useSafeAreaInsets()
+
+  // High-contrast retro look: literal black/white, flipped by appearance, rather than auto-paper's
+  // own (slightly tinted) background role.
+  const bg = dark ? '#000000' : '#FFFFFF'
+  const fg = dark ? '#FFFFFF' : '#000000'
+  const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
+
+  const chooseMode = useCallback(
+    (gameMode: GameMode) => {
+      setSettings({ gameMode })
+      router.push({ pathname: '/loadout', params: { mode: gameMode } })
+    },
+    [setSettings]
+  )
 
   return (
-    <View style={styles.container}>
-      <IconButton icon='cog' iconColor='rgba(255,255,255,0.5)' size={24} style={styles.settings} onPress={() => router.push('/settings')} />
+    <View style={[styles.container, { backgroundColor: bg }]}>
+      <IconButton icon='cog' iconColor={fgMuted} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 
-      <Text variant='displaySmall' style={styles.title}>
-        Box Hockey
-      </Text>
+      <HeroTitle color={fg} p1Color={colors.primary} p2Color={colors.secondary} />
 
-      <View style={styles.section}>
-        <Text variant='labelMedium' style={styles.sectionLabel}>
-          FIRST TO WIN
-        </Text>
-        <View style={styles.chipRow}>
-          {SCORE_OPTIONS.map((n) => {
-            const selected = scoreTo === n
-            return (
-              <TouchableRipple key={n} onPress={() => setScoreTo(n)} borderless style={[styles.chip, selected && styles.chipSelected]}>
-                <Text variant='titleMedium' style={[styles.chipText, selected && styles.chipTextSelected]}>
-                  {n}
-                </Text>
-              </TouchableRipple>
-            )
-          })}
-        </View>
+      <View style={styles.actions}>
+        <Button mode='contained' icon='account' onPress={() => chooseMode('vsCpu')} style={styles.actionButton}>
+          One Player
+        </Button>
+        <Button mode='contained' icon='account-multiple' onPress={() => chooseMode('twoPlayer')} style={styles.actionButton} buttonColor={colors.secondary} textColor={colors.onSecondary}>
+          Two Player
+        </Button>
       </View>
 
-      <View style={styles.section}>
-        <Text variant='labelMedium' style={styles.sectionLabel}>
-          BOARD
-        </Text>
-        <View style={styles.chipRow}>
-          {LAYOUT_OPTIONS.map((v) => {
-            const selected = layout === v
-            return (
-              <TouchableRipple key={v} onPress={() => setLayout(v)} borderless style={[styles.layoutChip, selected && styles.chipSelected]}>
-                <View style={styles.layoutChipInner}>
-                  <Text variant='labelMedium' style={[styles.chipText, selected && styles.chipTextSelected]}>
-                    {BOARD_VARIANT_LABELS[v]}
-                  </Text>
-                  <Text variant='labelSmall' style={[styles.layoutDesc, selected && styles.layoutDescSelected]}>
-                    {LAYOUT_DESCRIPTIONS[v]}
-                  </Text>
-                </View>
-              </TouchableRipple>
-            )
-          })}
-        </View>
-      </View>
-
-      <Button mode='contained' onPress={() => router.push({ pathname: '/game', params: { scoreTo: String(scoreTo), layout } })} style={styles.playButton}>
-        Play
-      </Button>
+      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  chip: {
+  actionButton: {
+    minWidth: 180
+  },
+  actions: {
     alignItems: 'center',
-    borderColor: 'rgba(200,216,240,0.25)',
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 52,
-    justifyContent: 'center',
-    width: 60
-  },
-  chipRow: {
-    flexDirection: 'row',
-    gap: 10
-  },
-  chipSelected: {
-    backgroundColor: COLORS.p1,
-    borderColor: COLORS.p1
-  },
-  chipText: {
-    color: 'rgba(255,255,255,0.5)'
-  },
-  chipTextSelected: {
-    color: '#FFFFFF',
-    fontWeight: 'bold'
+    gap: 16
   },
   container: {
     alignItems: 'center',
-    backgroundColor: '#0A1628',
     flex: 1,
-    gap: 32,
+    gap: 48,
     justifyContent: 'center'
   },
-  layoutChip: {
-    alignItems: 'center',
-    borderColor: 'rgba(200,216,240,0.25)',
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10
-  },
-  layoutChipInner: {
-    alignItems: 'center',
-    gap: 3
-  },
-  layoutDesc: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 9
-  },
-  layoutDescSelected: {
-    color: 'rgba(255,255,255,0.7)'
-  },
-  playButton: {
-    minWidth: 140
-  },
-  section: {
-    alignItems: 'center',
-    gap: 12
-  },
-  sectionLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 2
-  },
-  settings: {
+  topRight: {
     position: 'absolute',
     right: 8,
     top: 8
-  },
-  title: {
-    color: '#FFFFFF',
-    fontWeight: 'bold'
   }
 })

@@ -1,22 +1,37 @@
+import { Toaster, ToastProvider } from '@rific/toaster'
 import { useUpdater } from '@rific/updater'
+import * as Haptics from 'expo-haptics'
 import { Stack } from 'expo-router'
-import { StatusBar } from 'expo-status-bar'
-import { useColorScheme } from 'react-native'
-import { MD3DarkTheme, MD3LightTheme, PaperProvider } from 'react-native-paper'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
+import * as RNPaper from 'react-native-paper'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
-export default function RootLayout() {
-  useUpdater()
+import { Haptic } from '@/components/Haptic'
+import { Sound } from '@/components/Sound'
+import { Theme } from '@/components/Theme'
+import { GameSettingsProvider } from '@/hooks/useGameSettings'
 
-  const colorScheme = useColorScheme()
-  const theme = colorScheme === 'dark' ? MD3DarkTheme : MD3LightTheme
+export default function RootLayout() {
+  // Silent background staging: games shouldn't get an update dialog interrupting a pass-and-play
+  // session. Settings exposes a manual "Check for Updates" button for the confirm-and-reload flow.
+  useUpdater({ autoPrompt: false })
 
   return (
-    <SafeAreaProvider>
-      <PaperProvider theme={theme}>
-        <StatusBar style='light' />
-        <Stack screenOptions={{ headerShown: false }} />
-      </PaperProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <Haptic>
+          <Sound>
+            <Theme>
+              <GameSettingsProvider>
+                <ToastProvider haptics={Haptics} paper={RNPaper}>
+                  <Stack screenOptions={{ headerShown: false }} />
+                  <Toaster />
+                </ToastProvider>
+              </GameSettingsProvider>
+            </Theme>
+          </Sound>
+        </Haptic>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   )
 }

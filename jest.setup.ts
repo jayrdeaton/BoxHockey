@@ -68,7 +68,6 @@ jest.mock('react-native-worklets', () => ({
   runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
   runOnUI: (fn: (...args: unknown[]) => unknown) => fn
 }))
-
 ;(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true
 
 // @expo/vector-icons
@@ -87,7 +86,6 @@ jest.mock('@expo/vector-icons/createIconSet', () => {
   const Icon = ({ children }: any) => children || null
   return Icon
 })
-
 
 // expo-splash-screen
 jest.mock('expo-splash-screen', () => ({

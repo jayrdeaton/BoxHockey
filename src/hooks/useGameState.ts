@@ -5,14 +5,7 @@ import { BoardLayout, GameState, Player, PuckState } from '@/types'
 import { centerPuck } from '@/utils/board'
 import { computeAimVector, stepPhysics } from '@/utils/physics'
 
-type Action =
-  | { type: 'AIM_START'; x: number; y: number }
-  | { type: 'AIM_UPDATE'; x: number; y: number }
-  | { type: 'AIM_CANCEL' }
-  | { type: 'SHOOT'; vx: number; vy: number }
-  | { type: 'PHYSICS_STEP'; board: BoardLayout; dt: number }
-  | { type: 'NEXT_ROUND'; board: BoardLayout }
-  | { type: 'RESET'; board: BoardLayout }
+type Action = { type: 'AIM_START'; x: number; y: number } | { type: 'AIM_UPDATE'; x: number; y: number } | { type: 'AIM_CANCEL' } | { type: 'STRIKE'; vx: number; vy: number } | { type: 'APPLY_STRIKE' } | { type: 'PHYSICS_STEP'; board: BoardLayout; dt: number } | { type: 'NEXT_ROUND'; board: BoardLayout } | { type: 'RESET'; board: BoardLayout }
 
 function otherPlayer(p: Player): Player {
   return p === 1 ? 2 : 1
@@ -25,8 +18,11 @@ function makeInitialState(board: BoardLayout): GameState {
     scores: [0, 0],
     puck: { ...centerPuck(board), vx: 0, vy: 0 },
     aim: null,
+    pendingShot: null,
     bounceCount: 0,
-    lastScoredGoal: null
+    lastScoredGoal: null,
+    wellEnterCount: 0,
+    lastWellPolarity: null
   }
 }
 
@@ -45,9 +41,17 @@ function makeReducer(scoreToWin: number) {
         if (state.phase !== 'aiming') return state
         return { ...state, phase: 'idle', aim: null }
 
-      case 'SHOOT':
+      // Pull-back release: velocity is computed now (from the drag, reversed — see
+      // useGameState().shoot below) but not applied to the puck yet. `aim` is kept as-is so
+      // Board.tsx can animate the player's stick from the pulled-back finger position to the
+      // puck over the 'striking' phase, and only APPLY_STRIKE actually sets the puck moving.
+      case 'STRIKE':
         if (state.phase !== 'aiming') return state
-        return { ...state, phase: 'simulating', aim: null, puck: { ...state.puck, vx: action.vx, vy: action.vy } }
+        return { ...state, phase: 'striking', pendingShot: { vx: action.vx, vy: action.vy } }
+
+      case 'APPLY_STRIKE':
+        if (state.phase !== 'striking' || !state.pendingShot) return state
+        return { ...state, phase: 'simulating', aim: null, pendingShot: null, puck: { ...state.puck, vx: state.pendingShot.vx, vy: state.pendingShot.vy } }
 
       case 'PHYSICS_STEP': {
         if (state.phase !== 'simulating') return state
@@ -68,7 +72,13 @@ function makeReducer(scoreToWin: number) {
           return { ...state, phase: 'idle', currentPlayer: otherPlayer(state.currentPlayer), puck: { ...result, vx: 0, vy: 0 } }
         }
 
-        return { ...state, puck: result, bounceCount: result.bounced ? state.bounceCount + 1 : state.bounceCount }
+        return {
+          ...state,
+          puck: result,
+          bounceCount: result.bounced ? state.bounceCount + 1 : state.bounceCount,
+          wellEnterCount: result.enteredWell ? state.wellEnterCount + 1 : state.wellEnterCount,
+          lastWellPolarity: result.enteredWell ?? state.lastWellPolarity
+        }
       }
 
       case 'NEXT_ROUND':
@@ -141,11 +151,20 @@ export function useGameState(board: BoardLayout, scoreToWin: number) {
     dispatch({ type: 'AIM_CANCEL' })
   }, [])
 
+  // dx/dy is the raw drag (finger position minus puck/start position) — a pull-back gesture, so
+  // the puck fires in the OPPOSITE direction, like a slingshot or pool cue.
   const shoot = useCallback((dx: number, dy: number) => {
     const dist = Math.sqrt(dx * dx + dy * dy)
-    if (dist < MIN_SHOOT_DRAG) { dispatch({ type: 'AIM_CANCEL' }); return }
-    const { vx, vy } = computeAimVector(dx, dy, MAX_DRAG_PIXELS, MAX_SPEED)
-    dispatch({ type: 'SHOOT', vx, vy })
+    if (dist < MIN_SHOOT_DRAG) {
+      dispatch({ type: 'AIM_CANCEL' })
+      return
+    }
+    const { vx, vy } = computeAimVector(-dx, -dy, MAX_DRAG_PIXELS, MAX_SPEED)
+    dispatch({ type: 'STRIKE', vx, vy })
+  }, [])
+
+  const applyStrike = useCallback(() => {
+    dispatch({ type: 'APPLY_STRIKE' })
   }, [])
 
   const nextRound = useCallback((currentBoard: BoardLayout) => {
@@ -154,9 +173,12 @@ export function useGameState(board: BoardLayout, scoreToWin: number) {
 
   const resetGame = useCallback((currentBoard: BoardLayout) => {
     activeRef.current = false
-    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null }
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
     dispatch({ type: 'RESET', board: currentBoard })
   }, [])
 
-  return { state, tryAimStart, aimUpdate, aimCancel, shoot, nextRound, resetGame }
+  return { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame }
 }

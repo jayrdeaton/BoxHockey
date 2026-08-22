@@ -5,13 +5,18 @@
   },
   "build": {
     "development": {
-      "developmentClient": true,
-      "distribution": "internal"
-    },
-    "staging": {
       "distribution": "internal",
       "autoIncrement": true,
-      "channel": "staging",
+      "channel": "development",
+      "environment": "development"
+    },
+    "preview": {
+      "autoIncrement": true,
+      "channel": "preview",
+      "environment": "preview",
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "EXPO_PUBLIC_ENABLE_DEV_TOOLS": "true"
       }
@@ -19,12 +24,14 @@
     "production": {
       "autoIncrement": true,
       "channel": "production",
+      "environment": "production",
       "ios": {
         "resourceClass": "m-medium"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {},
+    "preview": {}
   }
 }
