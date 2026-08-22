@@ -13,7 +13,8 @@
     ],
     "updates": {
       "fallbackToCacheTimeout": 0,
-      "checkAutomatically": "ON_LOAD"
+      "checkAutomatically": "ON_LOAD",
+      "url": "https://u.expo.dev/240d10a3-e3dd-41cc-88b5-b75c61aa087c"
     },
     "runtimeVersion": {
       "policy": "fingerprint"
@@ -62,7 +63,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": ""
+        "projectId": "240d10a3-e3dd-41cc-88b5-b75c61aa087c"
       }
     },
     "owner": "jayrdeaton"
