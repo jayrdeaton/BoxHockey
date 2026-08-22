@@ -1,4 +1,4 @@
-import { MAX_DRAG_PIXELS, MAX_SPEED, MIN_SHOOT_DRAG } from '@/constants/game'
+import { FRICTION_LEVELS, MAX_DRAG_PIXELS, MAX_SPEED, MIN_SHOOT_DRAG } from '@/constants/game'
 import { BoardLayout, Player, PuckState } from '@/types'
 import { stepPhysics } from '@/utils/physics'
 
@@ -50,11 +50,11 @@ interface SimResult {
 // Runs the exact same stepPhysics the real game loop uses, so "will this shot score" is answered
 // by replaying it rather than by a closed-form angle formula — the only way to account for wall
 // banks, obstacles and gravity wells without duplicating that logic.
-function simulateShot(puck: PuckState, board: BoardLayout, vx: number, vy: number): SimResult {
+function simulateShot(puck: PuckState, board: BoardLayout, vx: number, vy: number, friction: number = FRICTION_LEVELS.medium): SimResult {
   let p: PuckState = { x: puck.x, y: puck.y, vx, vy }
   let bounces = 0
   for (let i = 0; i < SIM_MAX_STEPS; i++) {
-    const result = stepPhysics(p, board, 1)
+    const result = stepPhysics(p, board, 1, friction)
     p = { x: result.x, y: result.y, vx: result.vx, vy: result.vy }
     if (result.bounced) bounces++
     if (result.scored !== null) return { scored: result.scored, finalX: p.x, finalY: p.y, bounces }
@@ -78,8 +78,10 @@ export interface PlannedShot {
 // Picks a shot for `aiPlayer` by simulating a batch of candidate (angle, power) pairs and scoring
 // each by its outcome, then choosing among the top candidates and blurring the choice by
 // difficulty — the same search runs at every tier, only its breadth/accuracy differ.
-export function planAIShot(puck: PuckState, board: BoardLayout, aiPlayer: Player, difficulty: AIDifficulty): PlannedShot {
+export function planAIShot(puck: PuckState, board: BoardLayout, aiPlayer: Player, difficulty: AIDifficulty, friction: number = FRICTION_LEVELS.medium): PlannedShot {
   const tuning = TUNING[difficulty]
+  // Attacks the OPPONENT's goal, not the AI's own crease — see physics.ts's stepPhysics for the
+  // matching scored:1/2 convention this must stay in sync with.
   const targetY = aiPlayer === 1 ? board.y : board.y + board.height
   const ownGoalY = aiPlayer === 1 ? board.y + board.height : board.y
   const goalCenterX = board.x + (board.goalLeft + board.goalRight) / 2
@@ -102,7 +104,7 @@ export function planAIShot(puck: PuckState, board: BoardLayout, aiPlayer: Player
       const fx = Math.cos(angleRad)
       const fy = Math.sin(angleRad)
       const speed = power * MAX_SPEED
-      const sim = simulateShot(puck, board, fx * speed, fy * speed)
+      const sim = simulateShot(puck, board, fx * speed, fy * speed, friction)
 
       let score: number
       if (sim.scored === aiPlayer) {
@@ -138,5 +140,20 @@ export function planAIShot(puck: PuckState, board: BoardLayout, aiPlayer: Player
 
 export function randomAIThinkDelayMs(difficulty: AIDifficulty): number {
   const [min, max] = TUNING[difficulty].thinkMs
+  return min + Math.random() * (max - min)
+}
+
+// Tip-off reaction time (ms after the live window opens) — a separate, much tighter tuning table
+// from thinkMs above, since a faceoff tests raw reaction speed rather than shot planning. Easy is
+// slow and inconsistent; Hard is fast and tight, matching that tier's near-zero aimNoiseDeg/
+// powerNoise above.
+const FACEOFF_REACTION_MS: Record<AIDifficulty, [number, number]> = {
+  easy: [280, 550],
+  medium: [180, 380],
+  hard: [90, 220]
+}
+
+export function randomFaceoffReactionMs(difficulty: AIDifficulty): number {
+  const [min, max] = FACEOFF_REACTION_MS[difficulty]
   return min + Math.random() * (max - min)
 }

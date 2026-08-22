@@ -24,7 +24,7 @@ export default function RootLayout() {
             <Theme>
               <GameSettingsProvider>
                 <ToastProvider haptics={Haptics} paper={RNPaper}>
-                  <Stack screenOptions={{ headerShown: false }} />
+                  <Stack screenOptions={{ headerShown: false, gestureEnabled: false }} />
                   <Toaster />
                 </ToastProvider>
               </GameSettingsProvider>

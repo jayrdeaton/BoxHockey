@@ -7,11 +7,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { HeroTitle } from '@/components/HeroTitle'
 import { SettingsDialog } from '@/components/SettingsDialog'
+import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { useGameSettings } from '@/hooks/useGameSettings'
+import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { GameMode } from '@/types'
 
 export default function HomeScreen() {
-  const { setSettings } = useGameSettings()
+  const { settings, setSettings } = useGameSettings()
+  // orientationMode just follows the device's current physical shape (see useDeviceOrientation),
+  // so the title screen rotates along with everywhere else as soon as the phone is turned — Lock
+  // Orientation (see SettingsDialog) is the opt-in for pinning it.
+  const orientationMode = useDeviceOrientation()
+  useOrientationLock(settings.lockOrientation, orientationMode)
+
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { colors, dark } = useAutoPaperTheme()
   const insets = useSafeAreaInsets()

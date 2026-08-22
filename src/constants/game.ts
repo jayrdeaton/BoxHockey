@@ -1,44 +1,121 @@
-export const FRICTION = 0.986
+import { FrictionLevel, PuckSizeLevel, ShotPreviewLength } from '@/types'
+
+// Per-round puck deceleration tier (see types/index.ts's FrictionLevel and stepPhysics in
+// utils/physics.ts, where frictionFactor = FRICTION_LEVELS[level] ** dt). Closer to 1 means less
+// resistance, so the puck glides farther per shot. 'medium' is unchanged from the single fixed
+// FRICTION constant this replaces, so a round with no explicit choice plays identically to before.
+export const FRICTION_LEVELS: Record<FrictionLevel, number> = {
+  low: 0.992,
+  medium: 0.986,
+  high: 0.976
+}
+
+// How far the aim chevron trajectory preview reaches, as a fraction of board.width — see
+// ShotPreviewLength in types/index.ts and Board.tsx's chevron rendering. The board is much
+// taller than it is wide (BOARD_ASPECT_RATIO ~0.41), so the side walls (~width/2 from center)
+// are the only walls a length-capped preview can plausibly reach: 'long' comfortably clears one
+// from most starting points with room for a second bounce segment beyond it, 'medium' just barely
+// reaches one from dead-center, 'short' essentially never does, 'off' shows nothing.
+export const SHOT_PREVIEW_LENGTH_RATIOS: Record<ShotPreviewLength, number> = {
+  off: 0,
+  short: 0.35,
+  medium: 0.55,
+  long: 1.4
+}
 export const WALL_RESTITUTION = 0.72
 export const MAX_SPEED = 22
 export const MAX_DRAG_PIXELS = 160
 export const MIN_SHOOT_DRAG = 12
-export const PUCK_RADIUS_RATIO = 0.058
-export const GOAL_WIDTH_RATIO = 0.27
+
+// Per-round puck radius, as a fraction of board.width — see PuckSizeLevel in types/index.ts.
+// 'medium' is unchanged from the single fixed PUCK_RADIUS_RATIO constant this replaces, so a
+// round with no explicit choice plays identically to before.
+export const PUCK_SIZE_RATIOS: Record<PuckSizeLevel, number> = {
+  small: 0.045,
+  medium: 0.058,
+  large: 0.074
+}
+// Both the goal opening (computeBoardLayout's goalWidth) and the classic board variant's
+// center-divider holes (buildObstacles) are sized as this multiple of the CURRENT puckRadius —
+// deliberately the same formula in both places (see PuckSizeLevel's doc comment) so the two
+// openings a puck has to fit through are always the same size as each other, and both scale
+// together when puck size changes rather than the goal staying a fixed board-width fraction.
+// Scoring (stepPhysics in physics.ts) requires the puck's WHOLE diameter (2x puckRadius) to
+// clear the opening, not just its center — so the actual margin for error is
+// (this multiplier - 2) puck radii total, split across both sides. A single shared value of 3
+// (only half a puck radius of slack per side) turned out to make the GOAL itself nearly
+// impossible to hit even on a well-aimed "clear" shot, since that's well within normal shot
+// variance — bumped to 4 for a full puck radius of margin per side, matching what the old fixed
+// GOAL_WIDTH_RATIO (~4.66x puck radius, pre-puckSize-setting) always gave for goal-scoring.
+// Per user feedback, puck size now doubles as a difficulty/accessibility tier, not just a visual
+// scale: a bigger puck should feel MORE forgiving, not just proportionally identical-but-bigger,
+// so this margin grows with puckSize rather than staying one constant. 'medium' keeps the
+// verified-working value of 4 unchanged; 'small' is tighter (more precision-demanding) and
+// 'large' looser (easier to land a shot), while every tier still keeps a comfortably-above-2
+// multiplier so a truly dead-center shot always scores regardless of tier (see
+// boardGeometry.test.ts, which asserts this at all three levels).
+export const DIVIDER_HOLE_TO_PUCK_RADIUS: Record<PuckSizeLevel, number> = {
+  small: 3.5,
+  medium: 4,
+  large: 5
+}
 export const WALL_THICKNESS = 10
 export const STOP_THRESHOLD = 0.12
 export const SCORE_TO_WIN = 5
-export const PUCK_HIT_MULTIPLIER = 2.2
 export const STRIKE_DURATION_MS = 130
-
-// Board camera (pinch-to-zoom + pan, see useBoardCamera.ts). BOARD_DEFAULT_ZOOM (1) is the
-// fit-to-screen view the board starts at and the "reset view" button returns to — panning is a
-// no-op there since the board exactly fills the viewport either way. BOARD_MIN_ZOOM lets a player
-// pinch below that to shrink the board *smaller* than the screen and pan it — e.g. push it toward
-// one edge so a puck sitting flush against a wall gets empty screen space on the opposite side to
-// drag a full pull-back into, since the board itself has no margin (see BOARD_MARGIN below).
-export const BOARD_DEFAULT_ZOOM = 1
-export const BOARD_MIN_ZOOM = 0.5
-export const BOARD_MAX_ZOOM = 3
-
-// Web only (see useBoardCamera.ts's wheel handler): a trackpad pinch and a Ctrl/Cmd+scroll both
-// arrive as `wheel` events with ctrlKey true and no separate touch points — react-native-gesture-
-// handler's Pinch gesture needs real multi-touch, so it never fires from either. deltaY magnitude
-// varies wildly by input device (trackpad vs. mouse notch), so this is tuned by feel, not derived.
-export const WHEEL_ZOOM_SENSITIVITY = 0.01
 
 export const GRAVITY_WELL_MIN_DIST = 4
 export const GRAVITY_WELL_ATTRACT_STRENGTH = 0.32
 export const GRAVITY_WELL_REPEL_STRENGTH = -0.32
 
-// Board fills the play area edge-to-edge — no margin between the wall and the screen edge.
-export const BOARD_MARGIN = 0
+// Tip-off (see useFaceoff.ts, utils/faceoff.ts). Countdown ticks at a fixed cadence, then a
+// randomized hold (no visual cue) before the live tap window opens — the randomization keeps a
+// player from just timing a fixed 3-2-1 rhythm instead of actually reacting to "go".
+export const FACEOFF_COUNTDOWN_STEP_MS = 600
+export const FACEOFF_HOLD_MIN_MS = 150
+export const FACEOFF_HOLD_MAX_MS = 450
+// How long to wait for a human who hasn't tapped at all before awarding the draw to whoever did.
+export const FACEOFF_TAP_TIMEOUT_MS = 4000
+// Margin (ms) between the two players' presses beyond which a win is treated as maximal "no
+// defense" for angle purposes — also the margin substituted for a forfeit (wrong-zone or timeout)
+// win, since an opponent who never landed a valid press contested the puck exactly as little as a
+// blowout margin would. Drives knock ANGLE only (see computeFaceoffKnock) — how contested the race
+// was, not how hard the winner hits it.
+export const FACEOFF_MARGIN_MAX_MS = 350
+// The winner's own raw reaction time (ms, their press minus goAt) at/above which knock power
+// bottoms out at FACEOFF_KNOCK_MIN_POWER — a near-instant press approaches FACEOFF_KNOCK_MAX_POWER.
+// Drives knock POWER only — independent of the opponent's timing, so a forfeit win doesn't get a
+// free max-power shot the winner's own reflexes didn't earn.
+export const FACEOFF_REACTION_MAX_MS = 500
+// Knock power as a fraction of MAX_SPEED — MIN barely nudges the puck past center, MAX can
+// plausibly reach/enter the loser's goal mouth (a lightning-fast reaction can score outright, same
+// as real hockey occasionally allows straight off a faceoff).
+export const FACEOFF_KNOCK_MIN_POWER = 0.15
+export const FACEOFF_KNOCK_MAX_POWER = 0.95
+// Random angle jitter applied to the knock, off the straight center-line bearing toward the
+// loser's goal — wider for a close/scrappy (contested) draw, tighter for an uncontested one. Capped
+// well under 90° regardless of margin so a jittered close-margin knock can never point back across
+// the halfway line toward the winner's own net (the puck launches from dead-center, equidistant
+// from both goals, so a wider cap would risk an own-goal off the very draw the winner just took).
+export const FACEOFF_JITTER_MIN_DEG = 6
+export const FACEOFF_JITTER_MAX_DEG = 38
+// Radius (as a fraction of board width) of the rink faceoff dots that double as this draw's press
+// targets — shared between Board.tsx's rendering and the tap hit-test in game.tsx so the visible
+// circle and the tappable area never drift apart. Matches Board.tsx's pre-existing decorative
+// circle size (added by a concurrent session before this mechanic reused it for gameplay).
+export const FACEOFF_ZONE_RADIUS_RATIO = 0.15
 
-// width:height of a real box hockey table (~8ft x 3.3ft — https://en.wikipedia.org/wiki/Box_hockey),
-// kept fixed regardless of screen shape rather than stretching to fill it. Whichever screen
-// dimension is the tighter constraint gets fit exactly; the other is centered with letterboxing —
-// see computeBoardLayout(). A screen that doesn't match this ratio just won't show the whole board
-// at once — see useBoardCamera.ts for the pinch-zoom/pan that lets a player close in on it anyway.
+// Threshold (in CSS px) above which web is treated as "desktop" rather than phone-shaped — the
+// one context that fixes the board to BOARD_ASPECT_RATIO and draws the perimeter walls (see
+// game.tsx's isDesktopWeb and utils/board.ts's isDesktopLayout), since there's no physical device
+// edge of its own to lean on there the way native or mobile web has.
+export const DESKTOP_WEB_MIN_WIDTH = 768
+
+// width:height of a real box hockey table (~8ft x 3.3ft — https://en.wikipedia.org/wiki/Box_hockey).
+// Only desktop web fixes the board to this ratio (letterboxing whichever dimension isn't the
+// tighter constraint) — native and mobile web deliberately don't: the board just fills the
+// device's own screen exactly, whatever shape that happens to be, so there's never a gap between
+// the visual wall and the physical edge a bank shot actually bounces off. See computeBoardLayout().
 export const BOARD_ASPECT_RATIO = 3.3 / 8
 
 // Board/wall/player/line colors now come from the live theme (useAutoPaperTheme, see Board.tsx and
@@ -50,3 +127,10 @@ export const COLORS = {
   wellAttract: '#8B5CF6',
   wellRepel: '#F59E0B'
 } as const
+
+// Loadout player-panel area (see loadout.tsx): whenever a real device rotation changes
+// orientationMode or which physical side P1 lands on (see useP1OnRight), the panels fade out, the
+// layout underneath swaps while invisible, then they fade back in — masking what would otherwise
+// be an instant jump-cut as panels reflow or swap sides. Short and symmetric on purpose: this is
+// masking a reflow that already happened at the OS's own pace, not a deliberate reveal.
+export const LOADOUT_PANEL_SWAP_FADE_MS = 180

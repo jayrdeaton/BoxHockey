@@ -1,4 +1,4 @@
-import { FRICTION } from '@/constants/game'
+import { FRICTION_LEVELS } from '@/constants/game'
 import { BoardLayout } from '@/types'
 import { computeAimVector, computeTrajectory, stepPhysics } from '@/utils/physics'
 
@@ -85,7 +85,9 @@ describe('stepPhysics — goal detection', () => {
   const safeX = (goalAbsLeft + goalAbsRight) / 2 // 160 — dead center
 
   it('scores P1 (top) once the puck has fully cleared the top goal line', () => {
-    // Trailing edge (y + r) just past board.y — the whole puck, not just the leading edge
+    // Trailing edge (y + r) just past board.y — the whole puck, not just the leading edge.
+    // Top is P2's own crease (P1 always sits at the bottom), so a puck fully through it scores
+    // for the attacker, P1.
     const puck = { x: safeX, y: board.y - r - 1, vx: 0, vy: -5 }
     const result = stepPhysics(puck, board)
     expect(result.scored).toBe(1)
@@ -93,6 +95,7 @@ describe('stepPhysics — goal detection', () => {
   })
 
   it('scores P2 (bottom) once the puck has fully cleared the bottom goal line', () => {
+    // Bottom is P1's own crease, so a puck fully through it scores for the attacker, P2.
     const puck = { x: safeX, y: board.y + board.height + r + 1, vx: 0, vy: 5 }
     const result = stepPhysics(puck, board)
     expect(result.scored).toBe(2)
@@ -160,7 +163,7 @@ describe('stepPhysics — gravity wells', () => {
     const boardWithWell: BoardLayout = { ...board, gravityWells: [well] }
     const puck = { x: cx, y: cy, vx: 3, vy: 0 }
     const result = stepPhysics(puck, boardWithWell)
-    expect(result.vx).toBeGreaterThan(3 * FRICTION)
+    expect(result.vx).toBeGreaterThan(3 * FRICTION_LEVELS.medium)
   })
 
   it('pushes the puck away from a repeller well', () => {
@@ -168,7 +171,7 @@ describe('stepPhysics — gravity wells', () => {
     const boardWithWell: BoardLayout = { ...board, gravityWells: [well] }
     const puck = { x: cx, y: cy, vx: 3, vy: 0 }
     const result = stepPhysics(puck, boardWithWell)
-    expect(result.vx).toBeLessThan(3 * FRICTION)
+    expect(result.vx).toBeLessThan(3 * FRICTION_LEVELS.medium)
   })
 
   it('does not apply well force beyond the influence radius', () => {
@@ -176,7 +179,7 @@ describe('stepPhysics — gravity wells', () => {
     const boardWithWell: BoardLayout = { ...board, gravityWells: [well] }
     const puck = { x: cx, y: cy, vx: 3, vy: 0 }
     const result = stepPhysics(puck, boardWithWell)
-    expect(result.vx).toBeCloseTo(3 * FRICTION, 5)
+    expect(result.vx).toBeCloseTo(3 * FRICTION_LEVELS.medium, 5)
   })
 
   it('reports enteredWell "attract" when the puck crosses into an attractor radius', () => {

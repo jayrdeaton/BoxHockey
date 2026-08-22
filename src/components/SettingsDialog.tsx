@@ -7,6 +7,7 @@ import { Icon, Text } from 'react-native-paper'
 
 import { useSoundSettings } from '@/components/Sound'
 import { release } from '@/constants/release'
+import { useGameSettings } from '@/hooks/useGameSettings'
 
 interface SettingIconProps {
   source: string
@@ -32,6 +33,7 @@ export interface SettingsDialogProps {
 
 export function SettingsDialog({ visible, onDismiss }: SettingsDialogProps) {
   const { colors } = useAutoPaperTheme()
+  const { settings, setSettings } = useGameSettings()
   const { settings: hapticSettings, set: setHapticSettings } = useHapticSettings()
   const { settings: soundSettings, set: setSoundSettings } = useSoundSettings()
   const { error } = useToast()
@@ -50,6 +52,21 @@ export function SettingsDialog({ visible, onDismiss }: SettingsDialogProps) {
             APPEARANCE
           </Text>
           <AutoAppearancePicker showLabels={false} />
+        </View>
+
+        <View style={styles.row}>
+          <View style={styles.rowStart}>
+            <SettingIcon source='lock-outline' color={colors.primary} containerColor={colors.primaryContainer} />
+            <View style={styles.flexShrink}>
+              <Text variant='bodyLarge' style={{ color: colors.onSurface }}>
+                Lock Orientation
+              </Text>
+              <Text variant='bodySmall' style={{ color: colors.onSurfaceVariant }}>
+                Pin the current layout instead of following the phone as it turns
+              </Text>
+            </View>
+          </View>
+          <Switch value={settings.lockOrientation} onValueChange={(value) => setSettings({ lockOrientation: value })} />
         </View>
 
         {Platform.OS !== 'web' && (
@@ -92,6 +109,9 @@ const styles = StyleSheet.create({
   content: {
     gap: 24
   },
+  flexShrink: {
+    flexShrink: 1
+  },
   iconBadge: {
     alignItems: 'center',
     borderRadius: 10,
@@ -107,6 +127,7 @@ const styles = StyleSheet.create({
   rowStart: {
     alignItems: 'center',
     flexDirection: 'row',
+    flexShrink: 1,
     gap: 12
   },
   section: {

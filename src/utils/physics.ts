@@ -1,4 +1,4 @@
-import { FRICTION, GRAVITY_WELL_MIN_DIST, MAX_SPEED, STOP_THRESHOLD, WALL_RESTITUTION } from '@/constants/game'
+import { FRICTION_LEVELS, GRAVITY_WELL_MIN_DIST, MAX_SPEED, STOP_THRESHOLD, WALL_RESTITUTION } from '@/constants/game'
 import { BoardLayout, GravityWell, PuckState } from '@/types'
 
 export interface PhysicsResult extends PuckState {
@@ -74,12 +74,12 @@ export function circleVsRect(cx: number, cy: number, r: number, rx: number, ry: 
   return { hit: true, nx, ny, depth: r - dist }
 }
 
-export function stepPhysics(puck: PuckState, board: BoardLayout, dt = 1): PhysicsResult {
+export function stepPhysics(puck: PuckState, board: BoardLayout, dt = 1, friction: number = FRICTION_LEVELS.medium): PhysicsResult {
   let { x, y, vx, vy } = puck
   const x0 = puck.x
   const y0 = puck.y
 
-  const frictionFactor = Math.pow(FRICTION, dt)
+  const frictionFactor = Math.pow(friction, dt)
   vx *= frictionFactor
   vy *= frictionFactor
 
@@ -117,6 +117,10 @@ export function stepPhysics(puck: PuckState, board: BoardLayout, dt = 1): Physic
     }
   }
 
+  // The puck entering a goal scores for whoever ATTACKS it, not the player whose crease it is —
+  // see aiOpponent.ts's planAIShot / faceoff.ts's computeFaceoffKnock for the same convention.
+  // Player 1 always sits at the bottom (see board.ts's faceoffZoneCenters), defending the bottom
+  // goal and attacking the top one, so a puck exiting off the top scores for player 1.
   if (y + r < board.y) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null }
   if (y - r > board.y + board.height) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null }
 

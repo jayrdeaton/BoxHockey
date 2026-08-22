@@ -1,11 +1,11 @@
 import { useEffect } from 'react'
 
 import { MAX_DRAG_PIXELS } from '@/constants/game'
-import { BoardLayout, GameState, Player, PuckState } from '@/types'
+import { BoardLayout, GameState, Player } from '@/types'
 import { AIDifficulty, planAIShot, randomAIThinkDelayMs } from '@/utils/aiOpponent'
 
 interface AIControls {
-  tryAimStart: (touchX: number, touchY: number, puck: PuckState, puckRadius: number) => boolean
+  tryAimStart: (touchX: number, touchY: number) => boolean
   aimUpdate: (x: number, y: number) => void
   shoot: (dx: number, dy: number) => void
 }
@@ -19,7 +19,7 @@ const RELEASE_PAUSE_MS = 180
 // Drives a CPU-controlled seat by dispatching through the same tryAimStart/aimUpdate/shoot path a
 // human drag uses — no reducer or physics changes needed, the AI just plays the existing gesture
 // contract on the puck's behalf once it's `aiPlayer`'s turn.
-export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Player | null, difficulty: AIDifficulty, controls: AIControls): void {
+export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Player | null, difficulty: AIDifficulty, friction: number, controls: AIControls): void {
   const { tryAimStart, aimUpdate, shoot } = controls
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
     if (state.phase !== 'idle' || state.currentPlayer !== aiPlayer) return
 
     const puck = state.puck
-    const shot = planAIShot(puck, board, aiPlayer, difficulty)
+    const shot = planAIShot(puck, board, aiPlayer, difficulty, friction)
     const dragMag = shot.power * MAX_DRAG_PIXELS
     const dragX = -shot.fx * dragMag
     const dragY = -shot.fy * dragMag
@@ -43,7 +43,7 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
     }
 
     after(randomAIThinkDelayMs(difficulty), () => {
-      if (!tryAimStart(puck.x, puck.y, puck, board.puckRadius)) return
+      if (!tryAimStart(puck.x, puck.y)) return
       after(WINDUP_STEP_MS, () => aimUpdate(puck.x + dragX * 0.55, puck.y + dragY * 0.55))
       after(WINDUP_STEP_MS * 2, () => aimUpdate(targetX, targetY))
       after(WINDUP_STEP_MS * 2 + RELEASE_PAUSE_MS, () => shoot(dragX, dragY))
@@ -52,5 +52,13 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
     return () => {
       timers.forEach(clearTimeout)
     }
-  }, [state.phase, state.currentPlayer, state.puck, aiPlayer, difficulty, board, tryAimStart, aimUpdate, shoot])
+    // state.phase is deliberately omitted: tryAimStart/shoot above dispatch AIM_START/STRIKE,
+    // which flip phase through 'aiming'/'striking' as an expected result of this very effect. If
+    // phase were a dep, that self-triggered change would tear this effect down mid-sequence —
+    // cancelling the windup/shoot timers just scheduled onto the same `timers` array before they
+    // fire, stranding the CPU in 'aiming' forever. state.puck already gets a new object reference
+    // at every point a fresh CPU turn should actually start (a physics stop, a reset, a faceoff
+    // launch) and stays stable through the CPU's own aiming/striking, so it's the correct trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.currentPlayer, state.puck, aiPlayer, difficulty, friction, board, tryAimStart, aimUpdate, shoot])
 }
