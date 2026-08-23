@@ -6,6 +6,13 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["expo", "start", "--web", "--port", "8102"],
       "port": 8102
+    },
+    {
+      "name": "box-hockey-metro",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start", "--port", "8081"],
+      "port": 8081,
+      "url": "http://localhost:8081"
     }
   ]
 }

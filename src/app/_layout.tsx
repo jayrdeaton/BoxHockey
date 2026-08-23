@@ -12,9 +12,7 @@ import { Theme } from '@/components/Theme'
 import { GameSettingsProvider } from '@/hooks/useGameSettings'
 
 export default function RootLayout() {
-  // Silent background staging: games shouldn't get an update dialog interrupting a pass-and-play
-  // session. Settings exposes a manual "Check for Updates" button for the confirm-and-reload flow.
-  useUpdater({ autoPrompt: false })
+  useUpdater()
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

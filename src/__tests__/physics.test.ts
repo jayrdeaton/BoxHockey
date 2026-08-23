@@ -1,4 +1,4 @@
-import { FRICTION_LEVELS, STOP_THRESHOLD } from '@/constants/game'
+import { FRICTION_LEVELS } from '@/constants/game'
 import { BoardLayout } from '@/types'
 import { applyGravityWellForces, computeAimVector, computeTrajectory, stepPhysics } from '@/utils/physics'
 
@@ -18,7 +18,8 @@ const board: BoardLayout = {
   obstacles: [],
   gravityWells: [],
   cornerRadius: 0,
-  behindGoalDepth: 0
+  behindGoalDepth: 0,
+  faceoffOffsetYRatio: 0.42
 }
 
 const cx = board.x + board.width / 2 // 160

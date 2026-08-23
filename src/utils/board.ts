@@ -94,22 +94,21 @@ function buildObstacles(variant: BoardVariant, x: number, y: number, width: numb
       return []
 
     case 'gauntletPlus': {
-      // Alternating goal -> 2-hole -> 1-hole (center) -> 2-hole -> goal. The outer two walls use a
-      // NARROWER gap than classic's goal-matching DIVIDER_HOLE_TO_PUCK_RADIUS formula (these are
-      // mid-board challenge gates, not the goal itself, so there's no reason to tie their width to
-      // goal-scoring precision) and are offset further from center than the faceoff dot's own
-      // 0.27w offset (see faceoffZoneCenters below) so a dead-straight shot from the dot doesn't
-      // thread the near wall's gate for free — see boardGeometry.test.ts's dot-clearance
-      // assertion, which is the actual authority on whether this offset is wide enough, not this
-      // comment. The center wall's single gap reuses today's 'gauntlet' formula verbatim.
+      // Alternating goal -> 2-hole -> 1-hole (center) -> 2-hole -> goal, per explicit user
+      // correction: every gap is the SAME size, using the exact same puckRadius-derived formula
+      // classic's own holes use (DIVIDER_HOLE_TO_PUCK_RADIUS[puckSize] × puckRadius) — not a
+      // separate, narrower "challenge gate" size. The 3 walls also sit at y-fractions 0.25/0.5/0.75
+      // so the two goal lines + 3 walls divide the rink into 4 equal-height zones, also per
+      // explicit correction (this does put the outer two walls closer to the faceoff dots than is
+      // fully comfortable — see faceoffZoneCenters below — but the equal-quarters requirement takes
+      // priority; there was no slack left to also keep the old, wider clearance).
       const centerX = x + width / 2
-      const outerGapW = puckRadius * 2.2
-      const outerOffset = width * 0.38
-      const centerGapW = puckRadius * 3.2
-      const topY = y + height * 0.32 - wt / 2
+      const gapW = puckRadius * DIVIDER_HOLE_TO_PUCK_RADIUS[puckSize]
+      const outerOffset = width * 0.3 // same offset as classic's own holes, for the same reason (see classic's case above)
+      const topY = y + height * 0.25 - wt / 2
       const midY = y + height * 0.5 - wt / 2
-      const botY = y + height * 0.68 - wt / 2
-      return [...buildWallWithGaps(x, width, topY, wt, [centerX - outerOffset, centerX + outerOffset], outerGapW), ...buildWallWithGaps(x, width, midY, wt, [centerX], centerGapW), ...buildWallWithGaps(x, width, botY, wt, [centerX - outerOffset, centerX + outerOffset], outerGapW)]
+      const botY = y + height * 0.75 - wt / 2
+      return [...buildWallWithGaps(x, width, topY, wt, [centerX - outerOffset, centerX + outerOffset], gapW), ...buildWallWithGaps(x, width, midY, wt, [centerX], gapW), ...buildWallWithGaps(x, width, botY, wt, [centerX - outerOffset, centerX + outerOffset], gapW)]
     }
 
     case 'gravityClassic':
@@ -118,31 +117,34 @@ function buildObstacles(variant: BoardVariant, x: number, y: number, width: numb
       return buildObstacles('classic', x, y, width, height, wt, puckRadius, puckSize, behindGoalDepth)
 
     case 'rink': {
-      // A solid wall spanning exactly the goal's own x-range, flush against the true outer
-      // boundary behind each goal (behindGoalDepth back from board.y/board.y+height — see
-      // computeBoardLayout, which extends the true collision boundary out there while board.y/
-      // board.height keep meaning "the front goal line" for every other consumer, same as always).
-      // This is what makes "can't score from behind" true: the goal-scoring check in stepPhysics
-      // only looks at current position (whole puck body past the line, within goal x-range), not
-      // which direction the puck arrived from — without this wall, a puck that wrapped around via
-      // a rounded corner into the pocket could drift sideways into the goal's x-range while
-      // already past the line and trigger an accidental score. This wall physically closes off
-      // that one region, so satisfying the score condition still always means coming at it from
-      // the front, same as every other variant.
+      // A real net shape — a back wall PLUS two side posts, open only at the front (the goal
+      // mouth itself) — not just a back wall. physics.ts's true outer boundary (see
+      // boardCornerQuadrant) now lets a puck reach behind the front line anywhere it isn't
+      // blocked, not just via the rounded corners, so a back wall alone would leave the net's
+      // sides wide open: a puck already behind the line just outside the goal mouth could drift
+      // sideways straight into the goal's own x-range and register an accidental score, without
+      // ever having crossed through the mouth. The side posts close that off, the same way a real
+      // net's posts do — the ONLY way in or out is through the front opening, which is also where
+      // scoring is actually detected (see stepPhysics' inGoalX-gated score check).
       const goalW = puckRadius * DIVIDER_HOLE_TO_PUCK_RADIUS[puckSize]
       const goalCenterX = x + width / 2
-      const netWallX = goalCenterX - goalW / 2
-      const topNetY = y - behindGoalDepth
-      const botNetY = y + height + behindGoalDepth - wt
+      const netLeft = goalCenterX - goalW / 2
+      const netRight = goalCenterX + goalW / 2
+      const topBackY = y - behindGoalDepth
+      const botBackY = y + height + behindGoalDepth - wt
       return [
-        { x: netWallX, y: topNetY, width: goalW, height: wt },
-        { x: netWallX, y: botNetY, width: goalW, height: wt }
+        { x: netLeft, y: topBackY, width: goalW, height: wt },
+        { x: netLeft - wt, y: topBackY, width: wt, height: behindGoalDepth },
+        { x: netRight, y: topBackY, width: wt, height: behindGoalDepth },
+        { x: netLeft, y: botBackY, width: goalW, height: wt },
+        { x: netLeft - wt, y: y + height, width: wt, height: behindGoalDepth },
+        { x: netRight, y: y + height, width: wt, height: behindGoalDepth }
       ]
     }
   }
 }
 
-function buildGravityWells(variant: BoardVariant, x: number, y: number, width: number, height: number): GravityWell[] {
+function buildGravityWells(variant: BoardVariant, x: number, y: number, width: number, height: number, puckRadius: number, puckSize: PuckSizeLevel): GravityWell[] {
   switch (variant) {
     case 'classic':
     case 'gauntlet':
@@ -175,19 +177,26 @@ function buildGravityWells(variant: BoardVariant, x: number, y: number, width: n
       const cornerOffsetY = height * 0.08
       // Per explicit design direction: the pull well sits exactly at the board's true center,
       // literally coincident with classic's solid center wall, rather than tucked into one of its
-      // two gaps. This is physically sound as-is — applyGravityWellForces only needs a target
-      // coordinate, not a reachable one; a puck approaching from either half gets pulled toward
-      // the wall face and then collides with the wall's own Obstacle rect well before it could
-      // ever reach the literal center point, same as it already can't tunnel through any other
-      // wall. Rendered so it visibly sits on/over the wall segment there (see Board.tsx).
+      // two gaps. Radius is NOT an arbitrary constant — it's derived from classic's own hole
+      // geometry (see buildObstacles' 'classic' case) so it's guaranteed reachable regardless of
+      // puckSize: a fixed radius here (originally width*0.11) turned out to land entirely inside
+      // the solid wall segment for every puck size, never once reaching either hole's open space —
+      // a puck could physically never get within range of it, a well that could never affect
+      // anything by construction, not a tuning problem. holeOffset here matches classic's exactly
+      // (0.3w); reaching to holeOffset itself lands right at each hole's own center, and the extra
+      // 0.15×holeW pushes a bit past that so the pull is felt meaningfully while threading through,
+      // not just grazed at the entrance.
       const centerX = x + width / 2
       const centerY = y + height / 2
+      const holeOffset = width * 0.3
+      const holeW = puckRadius * DIVIDER_HOLE_TO_PUCK_RADIUS[puckSize]
+      const centerWellR = holeOffset + holeW * 0.15
       return [
         { x: x + cornerOffsetX, y: y + cornerOffsetY, radius: cornerR, strength: GRAVITY_WELL_CORNER_REPEL_STRENGTH, activeAtRest: true },
         { x: x + width - cornerOffsetX, y: y + cornerOffsetY, radius: cornerR, strength: GRAVITY_WELL_CORNER_REPEL_STRENGTH, activeAtRest: true },
         { x: x + cornerOffsetX, y: y + height - cornerOffsetY, radius: cornerR, strength: GRAVITY_WELL_CORNER_REPEL_STRENGTH, activeAtRest: true },
         { x: x + width - cornerOffsetX, y: y + height - cornerOffsetY, radius: cornerR, strength: GRAVITY_WELL_CORNER_REPEL_STRENGTH, activeAtRest: true },
-        { x: centerX, y: centerY, radius: width * 0.11, strength: GRAVITY_WELL_ATTRACT_STRENGTH }
+        { x: centerX, y: centerY, radius: centerWellR, strength: GRAVITY_WELL_ATTRACT_STRENGTH }
       ]
     }
   }
@@ -274,13 +283,19 @@ export function computeBoardLayout(screenWidth: number, screenHeight: number, in
   // clip on the puck's own rendering (see Board.tsx) is what keeps this invisible to the player —
   // the depth is physically necessary but never actually seen.
   const behindGoalDepth = variant === 'rink' ? puckRadius * 2.5 + WALL_THICKNESS : 0
-  // Must be >= behindGoalDepth or the rounded corner's own arc (see boardCornerQuadrant in
-  // physics.ts, which only exempts the flat front-wall check within cornerRadius of the TRUE
-  // outer corner) never actually reaches back to the front line (board.y) — leaving a flat,
-  // un-exempted wall segment between where the quadrant starts and the front line, which would
-  // silently seal the pocket off from the field entirely. 1.15x leaves a little slack beyond the
-  // bare minimum so the curve visibly opens rather than just barely grazing the line.
-  const cornerRadius = variant === 'rink' ? behindGoalDepth * 1.15 : 0
+  // Purely a visual/physical corner-rounding radius now — see physics.ts's boardCornerQuadrant
+  // and the "outside the corner and the goal, the true wall sits at outerTop/outerBottom" fix
+  // there. Earlier this had to be >= behindGoalDepth because the flat wall stayed at the FRONT
+  // line (board.y) everywhere except this one small notch, so the notch's own arc was the ONLY
+  // path into the pocket at all, and had to reach all the way back on its own. Now that the flat
+  // wall itself sits at the true outer boundary for the whole width outside the corners, the arc
+  // only has to round off the literal 4 corners — a modest, fixed proportion of board width reads
+  // better visually than the old dramatic curve did.
+  const cornerRadius = variant === 'rink' ? width * 0.12 : 0
+
+  // See BoardLayout's own doc comment — only gauntletPlus's wall positions force this off the
+  // default.
+  const faceoffOffsetYRatio = variant === 'gauntletPlus' ? 0.3 : 0.42
 
   const y = outerY + behindGoalDepth
   const fieldHeight = height - behindGoalDepth * 2
@@ -298,9 +313,10 @@ export function computeBoardLayout(screenWidth: number, screenHeight: number, in
     centerX: x + width / 2,
     centerY: y + fieldHeight / 2,
     obstacles: buildObstacles(variant, x, y, width, fieldHeight, WALL_THICKNESS, puckRadius, puckSize, behindGoalDepth),
-    gravityWells: buildGravityWells(variant, x, y, width, fieldHeight),
+    gravityWells: buildGravityWells(variant, x, y, width, fieldHeight, puckRadius, puckSize),
     cornerRadius,
-    behindGoalDepth
+    behindGoalDepth,
+    faceoffOffsetYRatio
   }
 }
 
@@ -317,7 +333,7 @@ export function centerPuck(board: BoardLayout): { x: number; y: number } {
 export function faceoffZoneCenters(board: BoardLayout, player: Player): { x: number; y: number }[] {
   const goalCX = board.x + (board.goalLeft + board.goalRight) / 2
   const offsetX = board.width * 0.27
-  const offsetY = (board.height / 2) * 0.42
+  const offsetY = (board.height / 2) * board.faceoffOffsetYRatio
   // Player 1 always sits at the bottom (matching /loadout's own "P1 is the device's owner, near
   // the bottom" seating convention) — every other top/bottom-keyed spot in the app (goal scoring
   // in physics.ts, AI targeting in aiOpponent.ts, the faceoff knock in faceoff.ts, the crease/

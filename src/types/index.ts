@@ -99,6 +99,13 @@ export interface BoardLayout {
   // Both 0 for every variant except 'rink' — see buildRinkGeometry in utils/board.ts.
   cornerRadius: number // rounded-corner radius at the 4 outer boundary corners
   behindGoalDepth: number // how far the true collision boundary extends past board.y/board.y+height behind each goal
+  // How far each faceoff dot sits from its own goal line, as a fraction of height/2 — see
+  // faceoffZoneCenters in utils/board.ts, which is the only reader. 0.42 (today's value) on every
+  // variant except 'gauntletPlus', whose walls at y-fractions 0.25/0.75 (see buildObstacles'
+  // 'gauntletPlus' case) sit too close to the default 0.42 for the dots to clear them — pulling
+  // the dots in for that one variant is the "tweak to the faceoff zones" a wall-position change
+  // can require.
+  faceoffOffsetYRatio: number
 }
 
 export interface PuckState {

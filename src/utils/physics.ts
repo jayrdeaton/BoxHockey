@@ -158,18 +158,30 @@ export function stepPhysics(puck: PuckState, board: BoardLayout, dt = 1, frictio
       bounced = true
     }
   } else {
-    // A puck merely touching the goal line doesn't count — it has to fully clear it, trailing
-    // edge and all, same as real box hockey. So the goal opening simply has no wall (the puck
-    // passes through uncollided while lined up with it) and scoring is a separate check below for
-    // "has the whole puck now passed the line", not "has any part of it reached the line".
-    if (y - r < board.y && !inGoalX) {
-      y = board.y + r
+    // The TRUE outer boundary — board.y/board.height on every non-'rink' board (behindGoalDepth
+    // === 0 there, so this is identical to the old board.y-based check), but on 'rink' this sits
+    // behindGoalDepth further back. That's the actual fix for "can go behind the goal": earlier
+    // this stayed at board.y even outside the corner notch, so the front line was still solid
+    // wall across nearly the whole width and 'rink' just shrank the playable board.height for
+    // nothing. Real hockey has no wall AT the goal line at all — just open boards, with a small
+    // enclosed net at the mouth (see buildObstacles' 'rink' case) — this matches that: outside the
+    // goal mouth and the rounded corners, the wall now only exists at the TRUE edge, so a puck can
+    // freely sail past board.y anywhere along the boards, not just through the narrow corner arc.
+    //
+    // A puck merely touching the line doesn't count — it has to fully clear it, trailing edge and
+    // all, same as real box hockey. So the goal opening simply has no wall (the puck passes
+    // through uncollided while lined up with it) and scoring is a separate check below for "has
+    // the whole puck now passed the line", not "has any part of it reached the line".
+    const outerTop = board.y - board.behindGoalDepth
+    const outerBottom = board.y + board.height + board.behindGoalDepth
+    if (y - r < outerTop && !inGoalX) {
+      y = outerTop + r
       vy = Math.abs(vy) * WALL_RESTITUTION
       bounced = true
     }
 
-    if (y + r > board.y + board.height && !inGoalX) {
-      y = board.y + board.height - r
+    if (y + r > outerBottom && !inGoalX) {
+      y = outerBottom - r
       vy = -Math.abs(vy) * WALL_RESTITUTION
       bounced = true
     }
@@ -276,15 +288,17 @@ export function computeTrajectory(startX: number, startY: number, dragDx: number
         bounced = true
       }
     } else {
-      // Same "must fully clear the line" rule as stepPhysics: no collision while lined up with
-      // the goal, and the preview only ends once the whole puck has passed it.
-      if (y - r < board.y && !inGoalX) {
-        y = board.y + r
+      // Mirrors stepPhysics' outerTop/outerBottom fix exactly — see its own comment for why this
+      // has to be the true outer boundary, not board.y, on 'rink' boards.
+      const outerTop = board.y - board.behindGoalDepth
+      const outerBottom = board.y + board.height + board.behindGoalDepth
+      if (y - r < outerTop && !inGoalX) {
+        y = outerTop + r
         vy = Math.abs(vy) * WALL_RESTITUTION
         bounced = true
       }
-      if (y + r > board.y + board.height && !inGoalX) {
-        y = board.y + board.height - r
+      if (y + r > outerBottom && !inGoalX) {
+        y = outerBottom - r
         vy = -Math.abs(vy) * WALL_RESTITUTION
         bounced = true
       }

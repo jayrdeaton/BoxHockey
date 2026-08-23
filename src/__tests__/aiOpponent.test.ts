@@ -18,7 +18,8 @@ const openBoard: BoardLayout = {
   obstacles: [],
   gravityWells: [],
   cornerRadius: 0,
-  behindGoalDepth: 0
+  behindGoalDepth: 0,
+  faceoffOffsetYRatio: 0.42
 }
 
 const puckAtCenter = { x: openBoard.centerX, y: openBoard.centerY, vx: 0, vy: 0 }
