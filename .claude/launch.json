@@ -2,11 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "boxhockey-web",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "CI=1 RCT_METRO_PORT=${PORT:-8081} npx expo start --web"],
-      "port": 8081,
-      "autoPort": true
+      "name": "box-hockey-web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start", "--web", "--port", "8102"],
+      "port": 8102
     }
   ]
 }
