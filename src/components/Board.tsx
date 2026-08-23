@@ -59,6 +59,7 @@ function walkPolyline(points: TrajectoryPoint[], distance: number): ChevronPlace
 // not index / activeCount, so a chevron's position on the ring — and therefore the sweep's
 // apparent spacing — doesn't jump as activeCount itself changes mid-drag).
 function chevronHighlight(index: number, sweepPhase: number): number {
+  'worklet'
   const slot = index / MAX_AIM_CHEVRONS
   const raw = Math.abs(sweepPhase - slot)
   const wrapped = Math.min(raw, 1 - raw)
@@ -113,6 +114,7 @@ function ChevronMark({ path, index, sweepPhase, color, fade }: { path: SkPath; i
 const PADDLE_CAP_SEGMENTS = 12
 
 function paddlePath(cx: number, cy: number, angle: number, face: number, thickness: number): SkPath {
+  'worklet'
   const capR = thickness / 2
   // Half-length of the straight run between the two caps — local y before rotation, wide along
   // local y and thin along local x, so at angle 0 (facing +x) this is a vertical rod whose round

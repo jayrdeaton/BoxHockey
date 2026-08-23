@@ -6,8 +6,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import * as RNPaper from 'react-native-paper'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
-import { Haptic } from '@/components/Haptic'
-import { Sound } from '@/components/Sound'
+import { Feedback } from '@/components/Feedback'
+import { Fonts } from '@/components/Fonts'
 import { Theme } from '@/components/Theme'
 import { GameSettingsProvider } from '@/hooks/useGameSettings'
 
@@ -19,8 +19,8 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <Haptic>
-          <Sound>
+        <Fonts>
+          <Feedback>
             <Theme>
               <GameSettingsProvider>
                 <ToastProvider haptics={Haptics} paper={RNPaper}>
@@ -29,8 +29,8 @@ export default function RootLayout() {
                 </ToastProvider>
               </GameSettingsProvider>
             </Theme>
-          </Sound>
-        </Haptic>
+          </Feedback>
+        </Fonts>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   )

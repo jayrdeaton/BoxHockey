@@ -47,6 +47,14 @@
       "expo-router",
       "expo-font",
       [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
@@ -58,7 +66,8 @@
           }
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-asset"
     ],
     "extra": {
       "router": {},

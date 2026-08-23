@@ -28,7 +28,6 @@ export default function HomeScreen() {
   // own (slightly tinted) background role.
   const bg = dark ? '#000000' : '#FFFFFF'
   const fg = dark ? '#FFFFFF' : '#000000'
-  const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   const chooseMode = useCallback(
     (gameMode: GameMode) => {
@@ -40,7 +39,7 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <IconButton icon='cog' iconColor={fgMuted} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+      <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 
       <HeroTitle color={fg} p1Color={colors.primary} p2Color={colors.secondary} />
 

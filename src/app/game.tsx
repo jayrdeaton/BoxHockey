@@ -1,23 +1,26 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
-import { Button, FAB, useVibration } from '@rific/feedback-press'
+import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { router } from 'expo-router'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Icon, Text } from 'react-native-paper'
-import { runOnJS } from 'react-native-reanimated'
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import Board from '@/components/BoardHost'
+import { SettingsDialog } from '@/components/SettingsDialog'
 import { DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, SHOT_PREVIEW_LENGTH_RATIOS, STRIKE_DURATION_MS } from '@/constants/game'
 import { useAIOpponent } from '@/hooks/useAIOpponent'
 import { useFaceoff } from '@/hooks/useFaceoff'
 import { useGameSettings } from '@/hooks/useGameSettings'
+import { useGameSound } from '@/hooks/useGameSound'
 import { useGameState } from '@/hooks/useGameState'
 import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { Player } from '@/types'
 import { computeBoardLayout, faceoffZoneCenter, faceoffZoneCenters, faceoffZoneRadius } from '@/utils/board'
 import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
+import { safeBack } from '@/utils/navigation'
 
 const MONO_FONT = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' })
 
@@ -73,6 +76,32 @@ export default function GameScreen() {
   const vibrationRef = useRef(vibration)
   vibrationRef.current = vibration
 
+  // Gameplay SFX — mirrors the haptics below one-for-one (see useGameSound): each event fires its
+  // soundRef.current.playX() beside the matching vibrationRef.current.x(), so sound and haptic
+  // feedback for a given event always stay co-located and in sync. Ref-mirrored the same way
+  // vibration is above, not called directly, so the memoized gesture callbacks further down don't
+  // need these in their dependency arrays.
+  const playSelect = useGameSound(require('../../assets/sounds/select.wav'), { poolSize: 8 })
+  const playBounce = useGameSound(require('../../assets/sounds/bounce.wav'))
+  const playWellAttract = useGameSound(require('../../assets/sounds/wellAttract.wav'))
+  const playWellRepel = useGameSound(require('../../assets/sounds/wellRepel.wav'))
+  const playFaceoffTick = useGameSound(require('../../assets/sounds/faceoffTick.wav'))
+  const playFaceoffGo = useGameSound(require('../../assets/sounds/faceoffGo.wav'))
+  const playFaceoffResolved = useGameSound(require('../../assets/sounds/faceoffResolved.wav'))
+  const playGoal = useGameSound(require('../../assets/sounds/goal.wav'))
+  const playWin = useGameSound(require('../../assets/sounds/win.wav'))
+  const soundRef = useRef({ playSelect, playBounce, playWellAttract, playWellRepel, playFaceoffTick, playFaceoffGo, playFaceoffResolved, playGoal, playWin })
+  soundRef.current = { playSelect, playBounce, playWellAttract, playWellRepel, playFaceoffTick, playFaceoffGo, playFaceoffResolved, playGoal, playWin }
+
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  // Only asked once there's a real score to lose — 0-0 exits immediately, since there's nothing
+  // yet for a confirmation to protect (mirrors LightCycles' identical quit-confirmation gate).
+  const [confirmBackVisible, setConfirmBackVisible] = useState(false)
+  const onBackPress = useCallback(() => {
+    if (scores[0] > 0 || scores[1] > 0) setConfirmBackVisible(true)
+    else safeBack()
+  }, [scores])
+
   // colors needed here (not just Board.tsx, which derives its own copy) for the web key hints'
   // text color — see FACEOFF_KEY_HINTS rendering below.
   const { dark, colors: themeColors } = useAutoPaperTheme()
@@ -80,10 +109,19 @@ export default function GameScreen() {
   // High-contrast retro look, matching the home screen: literal black/white by appearance, not
   // auto-paper's own (slightly tinted) background role.
   const bg = dark ? '#000000' : '#FFFFFF'
+  const fg = dark ? '#FFFFFF' : '#000000'
   const fgMuted = dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'
   const cardBg = dark ? '#111111' : '#F2F2F2'
   const cardBorder = dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
-  const fabBg = dark ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.08)'
+
+  // Corner buttons (back/settings) fade out during an active drag rather than just disappearing —
+  // FAB's own `visible` prop used to provide this for free, but the plain IconButton used here now
+  // (matching index.tsx/loadout.tsx's bare-icon style) has no equivalent, so it's rebuilt directly.
+  const cornerButtonsOpacity = useSharedValue(1)
+  useEffect(() => {
+    cornerButtonsOpacity.value = withTiming(phase === 'aiming' ? 0 : 1, { duration: 150 })
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  const cornerButtonsStyle = useAnimatedStyle(() => ({ opacity: cornerButtonsOpacity.value }))
 
   // On a phone (native or mobile web), the device's own physical edges already read as "the
   // wall" — no drawn perimeter needed. Desktop web has no such edge (the board just floats in an
@@ -92,11 +130,15 @@ export default function GameScreen() {
   const isDesktopWeb = Platform.OS === 'web' && width >= DESKTOP_WEB_MIN_WIDTH
 
   // ─── Auto-advance from 'scored' ───────────────────────────────────────────
+  // Also held while the quit confirmation is up — otherwise this timer keeps running underneath
+  // the dialog and silently advances the very score the player is deciding whether to walk away
+  // from. Cancelling restarts the full 1200ms wait rather than resuming mid-count, same tradeoff
+  // LightCycles' onboarding countdown makes for its own settings/quit dialogs.
   useEffect(() => {
-    if (phase !== 'scored') return
+    if (phase !== 'scored' || confirmBackVisible) return
     const t = setTimeout(() => nextRound(board), 1200)
     return () => clearTimeout(t)
-  }, [phase, board, nextRound])
+  }, [phase, board, nextRound, confirmBackVisible])
 
   // ─── Strike swing: pull-back released, stick rushes the puck ─────────────
   // The puck's velocity is already computed (see useGameState's shoot) but held in
@@ -116,6 +158,7 @@ export default function GameScreen() {
       return
     }
     vibrationRef.current.short()
+    soundRef.current.playBounce()
   }, [bounceCount])
 
   const firstWellRender = useRef(true)
@@ -124,8 +167,13 @@ export default function GameScreen() {
       firstWellRender.current = false
       return
     }
-    if (lastWellPolarity === 'repel') vibrationRef.current.long()
-    else vibrationRef.current.medium()
+    if (lastWellPolarity === 'repel') {
+      vibrationRef.current.long()
+      soundRef.current.playWellRepel()
+    } else {
+      vibrationRef.current.medium()
+      soundRef.current.playWellAttract()
+    }
   }, [wellEnterCount]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tick on each countdown number after the first (3 is already on screen at the start of a
@@ -138,14 +186,21 @@ export default function GameScreen() {
       return
     }
     vibrationRef.current.short()
+    soundRef.current.playFaceoffTick()
   }, [faceoff?.count])
 
   const prevFaceoffStageRef = useRef(faceoff?.stage)
   useEffect(() => {
     const prevStage = prevFaceoffStageRef.current
     prevFaceoffStageRef.current = faceoff?.stage
-    if (faceoff?.stage === 'live' && prevStage !== 'live') vibrationRef.current.medium()
-    if (faceoff?.stage === 'resolved' && prevStage !== 'resolved') vibrationRef.current.notification()
+    if (faceoff?.stage === 'live' && prevStage !== 'live') {
+      vibrationRef.current.medium()
+      soundRef.current.playFaceoffGo()
+    }
+    if (faceoff?.stage === 'resolved' && prevStage !== 'resolved') {
+      vibrationRef.current.notification()
+      soundRef.current.playFaceoffResolved()
+    }
   }, [faceoff?.stage])
 
   const prevScoresRef = useRef(scores)
@@ -154,14 +209,28 @@ export default function GameScreen() {
     prevScoresRef.current = scores
     if (scores[0] !== prevP1 || scores[1] !== prevP2) {
       vibrationRef.current.notification()
+      soundRef.current.playGoal()
     }
   }, [scores])
+
+  // Victory fanfare — fires once, the instant the game actually ends, distinct from the goal sound
+  // above which fires on every score including the winning one.
+  const prevPhaseRef = useRef(phase)
+  useEffect(() => {
+    if (prevPhaseRef.current !== 'gameOver' && phase === 'gameOver') {
+      soundRef.current.playWin()
+    }
+    prevPhaseRef.current = phase
+  }, [phase])
 
   // ─── Gesture bridge ───────────────────────────────────────────────────────
   const stableAimStart = useCallback(
     (x: number, y: number) => {
       const started = tryAimStart(x, y)
-      if (started) vibrationRef.current.short()
+      if (started) {
+        vibrationRef.current.short()
+        soundRef.current.playSelect()
+      }
     },
     [tryAimStart]
   )
@@ -190,6 +259,7 @@ export default function GameScreen() {
       if (!faceoff || faceoff.stage !== 'ready') return
       faceoffReady(player)
       vibrationRef.current.short()
+      soundRef.current.playSelect()
     },
     [faceoffReady, faceoff]
   )
@@ -208,6 +278,7 @@ export default function GameScreen() {
       if (!faceoff || faceoff.stage === 'resolved' || faceoff.stage === 'ready') return
       faceoffTap(player, Date.now(), zoneIndex)
       vibrationRef.current.short()
+      soundRef.current.playSelect()
     },
     [faceoffTap, faceoff]
   )
@@ -404,13 +475,55 @@ export default function GameScreen() {
         </View>
       )}
 
-      <FAB icon='arrow-left' color={fgMuted} customSize={36} mode='flat' visible={phase !== 'aiming'} style={[styles.backButton, { top: insets.top + 4, backgroundColor: fabBg }]} onPress={() => router.back()} />
+      {/* Quit confirmation — same overlay/card shell and icon+title row as the Game Over dialog
+          above, so a mid-game exit reads as the same kind of dialog rather than a system alert.
+          Cancel stays contained (the "keep playing" default, mirroring Play Again's own treatment
+          above) and Quit stays outlined (mirroring Loadout's de-emphasized "leave" treatment)
+          rather than reaching for a new color language — neither is tied to a player's own color
+          the way the Game Over title is, since there's no winner mid-game to attribute it to. */}
+      {confirmBackVisible && (
+        <View style={styles.overlay}>
+          <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+            <View style={styles.overlayTitleRow}>
+              <Icon source='alert-circle-outline' size={36} color={fg} />
+              <Text variant='headlineLarge' style={[styles.overlayTitle, { color: fg, fontFamily: MONO_FONT }]}>
+                Quit Game?
+              </Text>
+            </View>
+            <Text variant='bodyLarge' style={[styles.overlayScore, { color: fgMuted, fontFamily: MONO_FONT }]}>
+              {scores[0]} – {scores[1]}
+            </Text>
+            <Button mode='contained' onPress={() => setConfirmBackVisible(false)} style={styles.overlayButton}>
+              Cancel
+            </Button>
+            <Button mode='outlined' onPress={safeBack} style={styles.overlayButton}>
+              Quit
+            </Button>
+          </View>
+        </View>
+      )}
+
+      {/* Back + settings — plain IconButton (bare icon, no filled background), matching
+          index.tsx/loadout.tsx exactly rather than the filled-chip FAB this used previously. Both
+          fade out together during an active drag (cornerButtonsStyle above) instead of just
+          disappearing; pointerEvents follows the same condition so a faded-out button can't still
+          be tapped underneath the puck gesture layer. */}
+      <Animated.View pointerEvents={phase !== 'aiming' ? 'auto' : 'none'} style={[styles.backButton, { top: 8 + insets.top, left: 8 + insets.left }, cornerButtonsStyle]}>
+        <IconButton icon='arrow-left' iconColor={fg} size={24} onPress={onBackPress} />
+      </Animated.View>
+
+      {/* Settings — same top corner slot as every other screen's cog (index.tsx, loadout.tsx). */}
+      <Animated.View pointerEvents={phase !== 'aiming' ? 'auto' : 'none'} style={[styles.settingsButton, { top: 8 + insets.top, right: 8 + insets.right }, cornerButtonsStyle]}>
+        <IconButton icon='cog' iconColor={fg} size={24} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+      </Animated.View>
+
+      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  backButton: { left: 4, position: 'absolute' },
+  backButton: { position: 'absolute' },
   boardArea: { flex: 1 },
   boardAreaTouchable: { flex: 1 },
   faceoffZoneBottom: { bottom: 0, height: '50%', left: 0, position: 'absolute', right: 0 },
@@ -439,5 +552,6 @@ const styles = StyleSheet.create({
   overlayScore: {},
   overlayTitle: { fontWeight: 'bold' },
   overlayTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
-  root: { flex: 1 }
+  root: { flex: 1 },
+  settingsButton: { position: 'absolute' }
 })
