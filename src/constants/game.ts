@@ -67,6 +67,18 @@ export const STRIKE_DURATION_MS = 130
 export const GRAVITY_WELL_MIN_DIST = 4
 export const GRAVITY_WELL_ATTRACT_STRENGTH = 0.32
 export const GRAVITY_WELL_REPEL_STRENGTH = -0.32
+// gravityClassic's 4 corner wells only, paired with GravityWell.activeAtRest — MUCH stronger than
+// GRAVITY_WELL_REPEL_STRENGTH because these are the sole gate keeping a puck from permanently
+// dying in a corner, so a well that merely nudges (like the plain 'gravity' variant's -0.32) isn't
+// enough. Empirically (see physics.test.ts's "corner repel never stalls" test), the quadratic
+// falloff means the puck can never be GUARANTEED to clear the well's full nominal radius no matter
+// how strong this is — acceleration approaches 0 as distance approaches radius regardless of
+// strength, so friction always wins that last stretch eventually. What strength actually buys is
+// how CLOSE to the boundary (and how far from the literal corner) it settles; -10 in that test's
+// synthetic 60px-radius well reliably cleared ~89% of the radius, well clear of the corner itself,
+// vs ~81% at -4. Scaled down for this well's much smaller real radius (~0.09 * board width) — needs
+// real playtesting/tuning, this is a first-pass value, not a verified-by-feel one.
+export const GRAVITY_WELL_CORNER_REPEL_STRENGTH = -3
 
 // Tip-off (see useFaceoff.ts, utils/faceoff.ts). Countdown ticks at a fixed cadence, then a
 // randomized hold (no visual cue) before the live tap window opens — the randomization keeps a
@@ -104,6 +116,10 @@ export const FACEOFF_JITTER_MAX_DEG = 38
 // circle and the tappable area never drift apart. Matches Board.tsx's pre-existing decorative
 // circle size (added by a concurrent session before this mechanic reused it for gameplay).
 export const FACEOFF_ZONE_RADIUS_RATIO = 0.15
+// Expand+fade duration (ms) of Board.tsx's per-press ripple (see FaceoffState.pressFlash) — short
+// on purpose: the whole point is visualizing reaction SPEED, so a lazy animation would undercut
+// its own premise.
+export const FACEOFF_PRESS_RIPPLE_DURATION_MS = 280
 
 // Threshold (in CSS px) above which web is treated as "desktop" rather than phone-shaped — the
 // one context that fixes the board to BOARD_ASPECT_RATIO and draws the perimeter walls (see

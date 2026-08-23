@@ -1,6 +1,6 @@
-import { FRICTION_LEVELS } from '@/constants/game'
+import { FRICTION_LEVELS, STOP_THRESHOLD } from '@/constants/game'
 import { BoardLayout } from '@/types'
-import { computeAimVector, computeTrajectory, stepPhysics } from '@/utils/physics'
+import { applyGravityWellForces, computeAimVector, computeTrajectory, stepPhysics } from '@/utils/physics'
 
 // A standard test board with no obstacles
 const board: BoardLayout = {
@@ -16,7 +16,9 @@ const board: BoardLayout = {
   centerX: 160,
   centerY: 260,
   obstacles: [],
-  gravityWells: []
+  gravityWells: [],
+  cornerRadius: 0,
+  behindGoalDepth: 0
 }
 
 const cx = board.x + board.width / 2 // 160
@@ -220,6 +222,80 @@ describe('stepPhysics — gravity wells', () => {
       puck = { x: result.x, y: result.y, vx: result.vx, vy: result.vy }
     }
     expect(stopped).toBe(true)
+  })
+})
+
+describe('applyGravityWellForces — activeAtRest', () => {
+  it('a well WITHOUT activeAtRest applies zero force to a puck at rest (unchanged default behavior)', () => {
+    const well = { x: cx + 50, y: cy, radius: 80, strength: -5 }
+    const result = applyGravityWellForces(cx, cy, 0, 0, [well], 1)
+    expect(result.vx).toBe(0)
+    expect(result.vy).toBe(0)
+  })
+
+  it('a well WITH activeAtRest applies force to a puck at rest', () => {
+    const well = { x: cx + 50, y: cy, radius: 80, strength: -5, activeAtRest: true }
+    const result = applyGravityWellForces(cx, cy, 0, 0, [well], 1)
+    // Repeller to the right of the puck pushes it left (negative vx)
+    expect(result.vx).toBeLessThan(0)
+  })
+})
+
+describe('gravity wells — corner repel never stalls', () => {
+  it('a puck seeded at rest inside an activeAtRest repeller ends up substantially further out, not still wedged near its start', () => {
+    // Mirrors the 'never softlocks' attractor test above, but for the opposite failure mode: a
+    // repeller that's supposed to actively evict a stopped puck (gravityClassic's corner wells)
+    // rather than just fail to hold it.
+    //
+    // NOT asserting the puck clears the well's full nominal radius — the quadratic falloff
+    // ((1 - dist/radius) ** 2) means acceleration approaches exactly 0 as dist approaches radius,
+    // REGARDLESS of strength, so friction always eventually wins that last stretch and the puck
+    // settles somewhere short of the boundary no matter how strong the well is (confirmed
+    // empirically: raising this test's own strength from -4 to -10 moved the final rest point from
+    // ~81% to ~89% of the radius, not past it). "Never dies in the corner" in practice just means
+    // "ends up well clear of the corner itself," which this does check.
+    const well = { x: cx, y: cy, radius: 60, strength: -10, activeAtRest: true }
+    const boardWithWell: BoardLayout = { ...board, gravityWells: [well] }
+    const startDist = 10
+    let puck = { x: cx + startDist, y: cy, vx: 0, vy: 0 }
+    let stopped = false
+    for (let i = 0; i < 5000 && !stopped; i++) {
+      const result = stepPhysics(puck, boardWithWell)
+      stopped = result.stopped
+      puck = { x: result.x, y: result.y, vx: result.vx, vy: result.vy }
+    }
+    expect(stopped).toBe(true)
+    const finalDist = Math.hypot(puck.x - well.x, puck.y - well.y)
+    expect(finalDist).toBeGreaterThan(well.radius * 0.75)
+    expect(finalDist).toBeGreaterThan(startDist * 3)
+  })
+})
+
+describe('stepPhysics — rounded corners', () => {
+  const roundedBoard: BoardLayout = { ...board, cornerRadius: 40, behindGoalDepth: 60 }
+  // Arc center for the top-left corner, per boardCornerQuadrant's own formula.
+  const arcCenterX = roundedBoard.x + roundedBoard.cornerRadius
+  const arcCenterY = roundedBoard.y - roundedBoard.behindGoalDepth + roundedBoard.cornerRadius
+
+  it('reflects off the curved arc rather than a hard flat corner', () => {
+    // Puck approaching the corner diagonally, positioned so it's overlapping the arc boundary.
+    const puck = { x: arcCenterX - roundedBoard.cornerRadius + r - 2, y: arcCenterY, vx: -3, vy: -1 }
+    const result = stepPhysics(puck, roundedBoard, 1)
+    expect(result.bounced).toBe(true)
+    // Puck center must stay within (cornerRadius - puckRadius) of the arc center — never pushed
+    // past the curve, never left clipping through it.
+    const dist = Math.hypot(result.x - arcCenterX, result.y - arcCenterY)
+    expect(dist).toBeLessThanOrEqual(roundedBoard.cornerRadius - r + 0.01)
+  })
+
+  it('a board with cornerRadius=0 behaves exactly like today’s flat corner (no special-casing leaks through)', () => {
+    // Same starting position/velocity as the rounded case above, but on a plain board — should
+    // fall through to the ordinary flat top-wall bounce, not the arc collision.
+    const flatPuck = { x: board.x + r + 2, y: board.y + r - 2, vx: -3, vy: -1 }
+    const result = stepPhysics(flatPuck, board, 1)
+    expect(result.bounced).toBe(true)
+    expect(result.x).toBeGreaterThanOrEqual(board.x + r - 0.01)
+    expect(result.y).toBeGreaterThanOrEqual(board.y + r - 0.01)
   })
 })
 

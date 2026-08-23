@@ -114,6 +114,14 @@ export default function GameScreen() {
   const cardBg = dark ? '#111111' : '#F2F2F2'
   const cardBorder = dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
 
+  // Per-player color pair, shared by the Game Over and quit-confirmation overlays below so a
+  // given player's number/name reads in their own color everywhere on this screen, not just on
+  // the board itself.
+  const playerColor: Record<Player, string> = { 1: themeColors.primary, 2: themeColors.secondary }
+  const playerOnColor: Record<Player, string> = { 1: themeColors.onPrimary, 2: themeColors.onSecondary }
+  const winner: Player = scores[0] >= scoreToWin ? 1 : 2
+  const loser: Player = winner === 1 ? 2 : 1
+
   // Corner buttons (back/settings) fade out during an active drag rather than just disappearing —
   // FAB's own `visible` prop used to provide this for free, but the plain IconButton used here now
   // (matching index.tsx/loadout.tsx's bare-icon style) has no equivalent, so it's rebuilt directly.
@@ -251,17 +259,27 @@ export default function GameScreen() {
     aimCancel()
   }, [aimCancel])
 
+  // Mirrors vibrationRef/soundRef above — read live faceoff state through a ref instead of
+  // closing over `faceoff` directly. `faceoff` is a new object on every single sub-action
+  // (each countdown tick, hold, live flip), and these callbacks feed p1TapGesture/p2TapGesture
+  // below; closing over `faceoff` would recreate those Gesture.Tap() objects on every tick,
+  // tearing down and remounting the native/web gesture handler at the exact instant FACEOFF_LIVE
+  // fires — the moment a real tap is most likely to land — silently dropping it. Keeping these
+  // callbacks stable across a draw is what keeps the gesture handler itself stable.
+  const faceoffRef = useRef(faceoff)
+  faceoffRef.current = faceoff
+
   // Ready-check (game's first draw only — see FaceoffState's doc comment): any touch/key on a
   // player's own side counts, no need to hit a specific circle — there's nothing to aim at yet,
   // the countdown itself hasn't started. Idempotent/stage-guarded by the reducer itself.
   const stableFaceoffReady = useCallback(
     (player: Player) => {
-      if (!faceoff || faceoff.stage !== 'ready') return
+      if (!faceoffRef.current || faceoffRef.current.stage !== 'ready') return
       faceoffReady(player)
       vibrationRef.current.short()
       soundRef.current.playSelect()
     },
-    [faceoffReady, faceoff]
+    [faceoffReady]
   )
 
   // The actual dispatch: both of a player's two zones are watchable and pressable (see Board.tsx
@@ -275,12 +293,13 @@ export default function GameScreen() {
   // the reducer, not this callback, decide right-vs-wrong is what makes that enforceable.
   const stableFaceoffZoneTap = useCallback(
     (player: Player, zoneIndex: 0 | 1) => {
-      if (!faceoff || faceoff.stage === 'resolved' || faceoff.stage === 'ready') return
+      const fo = faceoffRef.current
+      if (!fo || fo.stage === 'resolved' || fo.stage === 'ready') return
       faceoffTap(player, Date.now(), zoneIndex)
       vibrationRef.current.short()
       soundRef.current.playSelect()
     },
-    [faceoffTap, faceoff]
+    [faceoffTap]
   )
 
   // Touch path: during the ready-check, any touch on the player's own side signals ready (see
@@ -292,8 +311,9 @@ export default function GameScreen() {
   // reducer.
   const stableFaceoffTouch = useCallback(
     (player: Player, x: number, y: number) => {
-      if (!faceoff) return
-      if (faceoff.stage === 'ready') {
+      const fo = faceoffRef.current
+      if (!fo) return
+      if (fo.stage === 'ready') {
         stableFaceoffReady(player)
         return
       }
@@ -302,7 +322,7 @@ export default function GameScreen() {
       if (zoneIndex === -1) return
       stableFaceoffZoneTap(player, zoneIndex as 0 | 1)
     },
-    [board, stableFaceoffZoneTap, stableFaceoffReady, faceoff]
+    [board, stableFaceoffZoneTap, stableFaceoffReady]
   )
 
   // Keyboard path (web only) — a shared touchscreen lets two people press two different spots at
@@ -452,51 +472,52 @@ export default function GameScreen() {
 
       {/* Game Over overlay — identifies the winner by their own puck color (see Board.tsx's
           p1Color/p2Color) rather than a "P1"/"P2"/"CPU" label, so it reads the same regardless of
-          game mode. */}
+          game mode. Icon stacked above the title (not an inline row) and both actions contained,
+          colored by loser/winner — same shell and button treatment as the quit confirmation below
+          and as LightCycles' own round-over dialog, rather than a one-off layout of its own. */}
       {phase === 'gameOver' && (
         <View style={styles.overlay}>
           <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-            <View style={styles.overlayTitleRow}>
-              <Icon source='trophy' size={36} color={scores[0] >= scoreToWin ? themeColors.primary : themeColors.secondary} />
-              <Text variant='headlineLarge' style={[styles.overlayTitle, { color: scores[0] >= scoreToWin ? themeColors.primary : themeColors.secondary, fontFamily: MONO_FONT }]}>
-                Wins!
-              </Text>
-            </View>
-            <Text variant='bodyLarge' style={[styles.overlayScore, { color: fgMuted, fontFamily: MONO_FONT }]}>
-              {scores[0]} – {scores[1]}
+            <Icon source='trophy' size={64} color={playerColor[winner]} />
+            <Text variant='headlineLarge' style={[styles.overlayTitle, { color: playerColor[winner], fontFamily: MONO_FONT }]}>
+              Wins!
             </Text>
-            <Button mode='contained' onPress={() => resetGame(board)} style={styles.overlayButton}>
+            <Text variant='bodyLarge' style={[styles.overlayScore, { fontFamily: MONO_FONT }]}>
+              <Text style={{ color: playerColor[1] }}>{scores[0]}</Text>
+              <Text style={{ color: fgMuted }}> – </Text>
+              <Text style={{ color: playerColor[2] }}>{scores[1]}</Text>
+            </Text>
+            <Button mode='contained' onPress={() => resetGame(board)} style={styles.overlayButton} buttonColor={playerColor[loser]} textColor={playerOnColor[loser]}>
               Play Again
             </Button>
-            <Button mode='outlined' onPress={() => router.back()} style={styles.overlayButton}>
+            <Button mode='contained' onPress={() => router.back()} style={styles.overlayButton} buttonColor={playerColor[winner]} textColor={playerOnColor[winner]}>
               Loadout
             </Button>
           </View>
         </View>
       )}
 
-      {/* Quit confirmation — same overlay/card shell and icon+title row as the Game Over dialog
-          above, so a mid-game exit reads as the same kind of dialog rather than a system alert.
-          Cancel stays contained (the "keep playing" default, mirroring Play Again's own treatment
-          above) and Quit stays outlined (mirroring Loadout's de-emphasized "leave" treatment)
-          rather than reaching for a new color language — neither is tied to a player's own color
-          the way the Game Over title is, since there's no winner mid-game to attribute it to. */}
+      {/* Quit confirmation — same overlay/card shell as the Game Over dialog above and as
+          LightCycles' own quit-confirmation: icon stacked above the title, the score spelled out
+          in each player's own color so it's clear who has what, and two contained buttons — Cancel
+          in primary (the "keep playing" default) and Quit in secondary, the same pairing
+          LightCycles uses, not tied to who's ahead since there's no winner mid-game. */}
       {confirmBackVisible && (
         <View style={styles.overlay}>
           <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-            <View style={styles.overlayTitleRow}>
-              <Icon source='alert-circle-outline' size={36} color={fg} />
-              <Text variant='headlineLarge' style={[styles.overlayTitle, { color: fg, fontFamily: MONO_FONT }]}>
-                Quit Game?
-              </Text>
-            </View>
-            <Text variant='bodyLarge' style={[styles.overlayScore, { color: fgMuted, fontFamily: MONO_FONT }]}>
-              {scores[0]} – {scores[1]}
+            <Icon source='alert-circle-outline' size={64} color={themeColors.secondary} />
+            <Text variant='headlineLarge' style={[styles.overlayTitle, { color: themeColors.secondary, fontFamily: MONO_FONT }]}>
+              Quit Match?
             </Text>
-            <Button mode='contained' onPress={() => setConfirmBackVisible(false)} style={styles.overlayButton}>
+            <Text variant='bodyLarge' style={[styles.overlayScore, { fontFamily: MONO_FONT }]}>
+              <Text style={{ color: playerColor[1] }}>{scores[0]}</Text>
+              <Text style={{ color: fgMuted }}> – </Text>
+              <Text style={{ color: playerColor[2] }}>{scores[1]}</Text>
+            </Text>
+            <Button mode='contained' onPress={() => setConfirmBackVisible(false)} style={styles.overlayButton} buttonColor={themeColors.primary} textColor={themeColors.onPrimary}>
               Cancel
             </Button>
-            <Button mode='outlined' onPress={safeBack} style={styles.overlayButton}>
+            <Button mode='contained' onPress={safeBack} style={styles.overlayButton} buttonColor={themeColors.secondary} textColor={themeColors.onSecondary}>
               Quit
             </Button>
           </View>
@@ -551,7 +572,6 @@ const styles = StyleSheet.create({
   },
   overlayScore: {},
   overlayTitle: { fontWeight: 'bold' },
-  overlayTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   root: { flex: 1 },
   settingsButton: { position: 'absolute' }
 })

@@ -37,6 +37,7 @@ function initialFaceoffState(zones: [0 | 1, 0 | 1], requiresReady: boolean): Fac
     goAt: null,
     tapAt: [null, null] as [number | null, number | null],
     disqualified: [false, false],
+    pressFlash: [null, null] as [number | null, number | null],
     result: null
   }
 }
@@ -198,6 +199,12 @@ function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction: numbe
         const otherIdx = otherPlayer(action.player) - 1
         if (fo.tapAt[idx] !== null || fo.disqualified[idx]) return state // idempotent — this player's press already committed this draw
 
+        // Every real press (right zone or wrong) stamps pressFlash — purely a visual timing cue
+        // for Board.tsx's press ripple, never read by the win/knock logic below (see
+        // FaceoffState's own comment on pressFlash).
+        const pressFlash: [number | null, number | null] = [...fo.pressFlash]
+        pressFlash[idx] = action.atMs
+
         // Wrong zone: pressed the one that never colored. Disqualifies this player from winning
         // immediately — pressing (or tapping) both zones "to be safe" is still a real gamble, not
         // a free guaranteed win — but unlike a plain instant forfeit, it does NOT resolve the draw
@@ -215,7 +222,7 @@ function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction: numbe
           if (disqualified[otherIdx]) {
             return {
               ...state,
-              faceoff: { ...fo, disqualified, stage: 'resolved', result: { winner: action.player, marginMs: FACEOFF_MARGIN_MAX_MS, reactionMs: FACEOFF_REACTION_MAX_MS, forfeit: true } }
+              faceoff: { ...fo, disqualified, pressFlash, stage: 'resolved', result: { winner: action.player, marginMs: FACEOFF_MARGIN_MAX_MS, reactionMs: FACEOFF_REACTION_MAX_MS, forfeit: true } }
             }
           }
 
@@ -225,13 +232,13 @@ function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction: numbe
           if (otherTap !== null) {
             return {
               ...state,
-              faceoff: { ...fo, disqualified, stage: 'resolved', result: { winner: otherPlayer(action.player), marginMs: FACEOFF_MARGIN_MAX_MS, reactionMs: otherTap - fo.goAt, forfeit: true } }
+              faceoff: { ...fo, disqualified, pressFlash, stage: 'resolved', result: { winner: otherPlayer(action.player), marginMs: FACEOFF_MARGIN_MAX_MS, reactionMs: otherTap - fo.goAt, forfeit: true } }
             }
           }
 
           // Other player hasn't pressed yet — record the disqualification and keep waiting for
           // their real press (or their own timeout).
-          return { ...state, faceoff: { ...fo, disqualified } }
+          return { ...state, faceoff: { ...fo, disqualified, pressFlash } }
         }
 
         const tapAt: [number | null, number | null] = [...fo.tapAt]
@@ -240,16 +247,16 @@ function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction: numbe
         // The other player already disqualified themselves — this press is the only real one
         // this draw will ever get, so it alone determines both who won and how hard the knock hits.
         if (fo.disqualified[otherIdx]) {
-          return { ...state, faceoff: { ...fo, tapAt, stage: 'resolved', result: { winner: action.player, marginMs: FACEOFF_MARGIN_MAX_MS, reactionMs: action.atMs - fo.goAt, forfeit: true } } }
+          return { ...state, faceoff: { ...fo, tapAt, pressFlash, stage: 'resolved', result: { winner: action.player, marginMs: FACEOFF_MARGIN_MAX_MS, reactionMs: action.atMs - fo.goAt, forfeit: true } } }
         }
 
         const otherTap = tapAt[otherIdx]
-        if (otherTap === null) return { ...state, faceoff: { ...fo, tapAt } }
+        if (otherTap === null) return { ...state, faceoff: { ...fo, tapAt, pressFlash } }
 
         const marginMs = Math.abs(action.atMs - otherTap)
         const winner: Player = action.atMs <= otherTap ? action.player : otherPlayer(action.player)
         const winnerTap = winner === action.player ? action.atMs : otherTap
-        return { ...state, faceoff: { ...fo, tapAt, stage: 'resolved', result: { winner, marginMs, reactionMs: winnerTap - fo.goAt, forfeit: false } } }
+        return { ...state, faceoff: { ...fo, tapAt, pressFlash, stage: 'resolved', result: { winner, marginMs, reactionMs: winnerTap - fo.goAt, forfeit: false } } }
       }
 
       case 'FACEOFF_TIMEOUT': {

@@ -157,3 +157,17 @@ export function randomFaceoffReactionMs(difficulty: AIDifficulty): number {
   const [min, max] = FACEOFF_REACTION_MS[difficulty]
   return min + Math.random() * (max - min)
 }
+
+// Chance the AI misreads which of its two dots actually lit up and presses the wrong one — same
+// forfeit consequence a human gets for the same mistake (see useGameState.ts's FACEOFF_TAP). Easy
+// should feel like a beginner who's still learning to watch the right spot, not just a slow-but-
+// flawless opponent; Hard stays perfect, matching its near-zero aim/power noise above.
+const FACEOFF_WRONG_ZONE_CHANCE: Record<AIDifficulty, number> = {
+  easy: 0.22,
+  medium: 0.08,
+  hard: 0
+}
+
+export function rollFaceoffWrongZone(difficulty: AIDifficulty): boolean {
+  return Math.random() < FACEOFF_WRONG_ZONE_CHANCE[difficulty]
+}

@@ -3,7 +3,7 @@ import { AppState } from 'react-native'
 
 import { FACEOFF_COUNTDOWN_STEP_MS, FACEOFF_HOLD_MAX_MS, FACEOFF_HOLD_MIN_MS, FACEOFF_TAP_TIMEOUT_MS } from '@/constants/game'
 import { BoardLayout, GameState, Player } from '@/types'
-import { AIDifficulty, randomFaceoffReactionMs } from '@/utils/aiOpponent'
+import { AIDifficulty, randomFaceoffReactionMs, rollFaceoffWrongZone } from '@/utils/aiOpponent'
 import { computeFaceoffKnock } from '@/utils/faceoff'
 
 interface FaceoffControls {
@@ -75,11 +75,13 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
       after(holdMs, () => {
         faceoffLive()
 
-        // The CPU always presses its own correct zone — it isn't "watching" the flash the way a
-        // human has to, so unlike a human it can't fall for the wrong-zone forfeit (see
-        // useGameState.ts's FACEOFF_TAP). Only its reaction *time* varies by difficulty.
+        // The CPU doesn't get to "watch" the flash any more reliably than a human does — see
+        // rollFaceoffWrongZone in aiOpponent.ts: Easy has a real chance of pressing the dot that
+        // never colored, forfeiting exactly like a human who reacts to the wrong one. Reaction
+        // *time* is still the separate axis below.
         if (aiPlayer !== null && state.faceoff) {
-          const zoneIndex = state.faceoff.zones[aiPlayer - 1]
+          const correctZone = state.faceoff.zones[aiPlayer - 1]
+          const zoneIndex: 0 | 1 = rollFaceoffWrongZone(difficulty) ? (correctZone === 0 ? 1 : 0) : correctZone
           after(randomFaceoffReactionMs(difficulty), () => faceoffTap(aiPlayer, Date.now(), zoneIndex))
         }
 

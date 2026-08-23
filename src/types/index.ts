@@ -2,7 +2,7 @@ export type Player = 1 | 2
 
 export type GamePhase = 'idle' | 'aiming' | 'striking' | 'simulating' | 'scored' | 'gameOver' | 'faceoff'
 
-export type BoardVariant = 'classic' | 'gauntlet' | 'gravity'
+export type BoardVariant = 'classic' | 'gauntlet' | 'gauntletPlus' | 'gravity' | 'gravityClassic' | 'rink'
 
 export type GameMode = 'twoPlayer' | 'vsCpu'
 
@@ -74,6 +74,12 @@ export interface GravityWell {
   y: number
   radius: number // influence radius (px); force is 0 at/beyond this distance
   strength: number // signed peak accel at well center; + = attract, − = repel
+  // true = this well applies even to a puck at rest, bypassing the STOP_THRESHOLD gate that
+  // otherwise stops applyGravityWellForces entirely below that speed (see its own doc comment) —
+  // for wells whose entire purpose is to actively evict a stalled puck (corner repellers) rather
+  // than pull it toward a resting equilibrium. Default/undefined keeps today's gated behavior;
+  // only ever set true on a repeller, never an attractor (see gravityClassic in utils/board.ts).
+  activeAtRest?: boolean
 }
 
 export interface BoardLayout {
@@ -90,6 +96,9 @@ export interface BoardLayout {
   centerY: number
   obstacles: Obstacle[]
   gravityWells: GravityWell[]
+  // Both 0 for every variant except 'rink' — see buildRinkGeometry in utils/board.ts.
+  cornerRadius: number // rounded-corner radius at the 4 outer boundary corners
+  behindGoalDepth: number // how far the true collision boundary extends past board.y/board.y+height behind each goal
 }
 
 export interface PuckState {
@@ -151,6 +160,16 @@ export interface FaceoffState {
   // press before `result` is set, so a winner's knock power always comes from a genuine reactionMs
   // rather than an automatic max (see useGameState.ts's FACEOFF_TAP case).
   disqualified: [boolean, boolean]
+  // Set to the raw press timestamp on EVERY FACEOFF_TAP for that player — right zone or wrong —
+  // completely independent of tapAt/disqualified/result above (which only ever reflect a
+  // CORRECT press or a wrong-zone forfeit respectively) and never itself read for win/knock
+  // determination. Exists purely so a visual layer (Board.tsx's press ripple) can react to ANY
+  // press the instant it lands, including a CPU press (useFaceoff.ts dispatches straight to the
+  // reducer, bypassing game.tsx's client-side tap feedback entirely) or a wrong-zone human press,
+  // neither of which tapAt ever records. Reset to [null, null] at the same three call sites as
+  // tapAt/disqualified (see initialFaceoffState in useGameState.ts) so a ripple from a previous
+  // draw never leaks into the next one.
+  pressFlash: [number | null, number | null]
   // forfeit: true means the winner is credited by default (opponent's wrong-zone press or
   // timeout) rather than a genuine two-sided race — marginMs is pinned to FACEOFF_MARGIN_MAX_MS
   // ("no defense") in this case, but reactionMs still reflects the winner's own real press (or, in

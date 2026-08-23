@@ -26,9 +26,12 @@ import { safeBack } from '@/utils/navigation'
 const BOARD_VARIANT_DESCRIPTIONS: Record<BoardVariant, string> = {
   classic: 'Off-center holes',
   gauntlet: 'Narrow center gap',
-  gravity: 'Pull & push zones'
+  gauntletPlus: 'Three alternating walls',
+  gravity: 'Pull & push zones',
+  gravityClassic: 'Classic walls + corner pushes',
+  rink: 'Rounded corners, net pockets'
 }
-const BOARD_VARIANT_OPTIONS: IconDropdownOption<BoardVariant>[] = (['classic', 'gauntlet', 'gravity'] as BoardVariant[]).map((value) => ({ value, label: BOARD_VARIANT_LABELS[value], description: BOARD_VARIANT_DESCRIPTIONS[value] }))
+const BOARD_VARIANT_OPTIONS: IconDropdownOption<BoardVariant>[] = (['classic', 'gauntlet', 'gauntletPlus', 'gravity', 'gravityClassic', 'rink'] as BoardVariant[]).map((value) => ({ value, label: BOARD_VARIANT_LABELS[value], description: BOARD_VARIANT_DESCRIPTIONS[value] }))
 
 const FRICTION_OPTIONS: IconDropdownOption<FrictionLevel>[] = [
   { value: 'low', label: 'Low', description: 'Puck glides farther', icon: 'speedometer' },

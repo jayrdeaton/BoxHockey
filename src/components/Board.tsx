@@ -1,10 +1,10 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Canvas, Circle, Group, Line, Path, Rect, Skia, SkPath, vec } from '@shopify/react-native-skia'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { cancelAnimation, Easing, SharedValue, useDerivedValue, useFrameCallback, useSharedValue, withDelay, withRepeat, withTiming } from 'react-native-reanimated'
 
-import { COLORS, FACEOFF_COUNTDOWN_STEP_MS, MAX_DRAG_PIXELS, MAX_SPEED, MIN_SHOOT_DRAG, STRIKE_DURATION_MS } from '@/constants/game'
+import { COLORS, FACEOFF_COUNTDOWN_STEP_MS, FACEOFF_PRESS_RIPPLE_DURATION_MS, MAX_DRAG_PIXELS, MAX_SPEED, MIN_SHOOT_DRAG, STRIKE_DURATION_MS } from '@/constants/game'
 import { AimIndicator, BoardLayout, FaceoffState, GamePhase, Player, PuckState } from '@/types'
 import { faceoffZoneCenter, faceoffZoneRadius } from '@/utils/board'
 import { computeGoalWedges } from '@/utils/goalWedges'
@@ -150,6 +150,13 @@ function paddlePath(cx: number, cy: number, angle: number, face: number, thickne
   }
   path.close()
   return path
+}
+
+// The faceoff zone circles only ever come in this one pair per player — flipping between them is
+// how the press ripple (see the pressFlash effect below) locates a WRONG-zone press, which always
+// lands on whichever of a player's two zones ISN'T faceoff.zones[idx].
+function otherZoneIndex(z: 0 | 1): 0 | 1 {
+  return z === 0 ? 1 : 0
 }
 
 export interface BoardProps {
@@ -343,7 +350,6 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
     chevronFrame.setActive(phase === 'aiming')
   }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
-
   // ─── Goal crease / score arcs ──────────────────────────────────────────────
   // The crease doubles as the score meter: a half-circle outline bulging from each goal mouth
   // into the field, sized to the goal itself (radius = half the goal width) — but instead of one
@@ -443,6 +449,55 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
   }, [faceoff?.count]) // eslint-disable-line react-hooks/exhaustive-deps
   const faceoffLive = faceoff !== null && (faceoff.stage === 'live' || faceoff.stage === 'resolved')
 
+  // ─── Face-off press ripple ────────────────────────────────────────────────
+  // One progress value per PLAYER (not per zone) — a player only ever has one live press per draw
+  // (see FaceoffState.pressFlash's idempotency), so which of their two zones it actually paints on
+  // is captured once, at press time, into p1RippleZone/p2RippleZone below rather than needing a
+  // second SharedValue per zone. Driven off faceoff.pressFlash — set on EVERY press, right or
+  // wrong, and (unlike faceoff.count above) the only faceoff field that also covers a CPU press,
+  // which never runs through game.tsx's own client-side tap feedback (see useFaceoff.ts). A plain
+  // "value changed" check isn't enough here the way it is for faceoffPulse's count watcher above:
+  // pressFlash also changes back to null at the start of every fresh draw (initialFaceoffState),
+  // and that reset must NOT replay a ripple — so prevPressFlashRef exists specifically to tell "a
+  // new press landed" (null -> a timestamp) apart from "a new draw began" (a timestamp -> null),
+  // mirroring game.tsx's own prevFaceoffStageRef guard for the identical reason.
+  //
+  // WHICH zone to paint is captured into REACT STATE (not re-derived from the live `faceoff` prop
+  // at render time) because a draw's own resolution nulls out `faceoff` almost immediately after —
+  // useFaceoff.ts's "no announcement, no pause" resolved-to-knock handoff dispatches FACEOFF_LAUNCH
+  // on the very next tick, and FACEOFF_LAUNCH sets `faceoff: null`. The press that WINS the draw is
+  // exactly the one whose ripple would otherwise render for at most a frame before vanishing —
+  // silently defeating the "see how fast they hit it" point for the single most interesting press
+  // of the draw. Latching the target zone (and letting p1RippleProgress/p2RippleProgress keep
+  // animating independently of `faceoff`'s own lifecycle) lets every ripple finish its full
+  // FACEOFF_PRESS_RIPPLE_DURATION_MS regardless of how quickly the draw resolves afterward.
+  const p1RippleProgress = useSharedValue(0)
+  const p2RippleProgress = useSharedValue(0)
+  const [p1RippleZone, setP1RippleZone] = useState<0 | 1 | null>(null)
+  const [p2RippleZone, setP2RippleZone] = useState<0 | 1 | null>(null)
+  const prevPressFlashRef = useRef<[number | null, number | null]>(faceoff?.pressFlash ?? [null, null])
+  useEffect(() => {
+    const prev = prevPressFlashRef.current
+    const curr = faceoff?.pressFlash ?? [null, null]
+    prevPressFlashRef.current = curr
+    if (curr[0] !== null && curr[0] !== prev[0] && faceoff) {
+      setP1RippleZone(faceoff.disqualified[0] ? otherZoneIndex(faceoff.zones[0]) : faceoff.zones[0])
+      p1RippleProgress.value = 0
+      p1RippleProgress.value = withTiming(1, { duration: FACEOFF_PRESS_RIPPLE_DURATION_MS, easing: Easing.out(Easing.cubic) })
+    }
+    if (curr[1] !== null && curr[1] !== prev[1] && faceoff) {
+      setP2RippleZone(faceoff.disqualified[1] ? otherZoneIndex(faceoff.zones[1]) : faceoff.zones[1])
+      p2RippleProgress.value = 0
+      p2RippleProgress.value = withTiming(1, { duration: FACEOFF_PRESS_RIPPLE_DURATION_MS, easing: Easing.out(Easing.cubic) })
+    }
+  }, [faceoff?.pressFlash]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const faceoffRippleExpand = faceoffRadius * 0.85
+  const p1RippleR = useDerivedValue(() => faceoffRadius + p1RippleProgress.value * faceoffRippleExpand)
+  const p2RippleR = useDerivedValue(() => faceoffRadius + p2RippleProgress.value * faceoffRippleExpand)
+  const p1RippleO = useDerivedValue(() => (1 - p1RippleProgress.value) * 0.85)
+  const p2RippleO = useDerivedValue(() => (1 - p2RippleProgress.value) * 0.85)
+
   // ─── Zone lines ───────────────────────────────────────────────────────────
   // A rink's blue-line equivalent: a bold full-width bar, in each player's own color, sitting
   // further out than the crease/faceoff circles but short of center — real blue lines sit about
@@ -453,6 +508,39 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
   const zoneLineFraction = 0.72
   const p1ZoneLineY = y + height - (height / 2) * zoneLineFraction
   const p2ZoneLineY = y + (height / 2) * zoneLineFraction
+
+  // ─── 'rink' perimeter (rounded corners) ───────────────────────────────────
+  // A single continuous stroked path (centerline + strokeWidth=wallThickness, not 4 filled Rects
+  // like the square-corner variants below) — the existing square-corner approach was deliberately
+  // NOT extended to RoundedRect per-segment (see the comment on the plain-Rect block further down)
+  // because independently-rounded segments left a visible notch where two pieces met; one
+  // continuous path sidesteps that by construction. Built off the TRUE outer boundary (extended by
+  // behindGoalDepth — see computeBoardLayout), not board.y/height, so the wall visually recedes
+  // into the pocket depth near each goal rather than sitting flush at the front line. Uses the
+  // same Skia.PathBuilder.addArc API the goal-crease arcs above already use.
+  const rinkPerimeterPath = useMemo(() => {
+    if (board.cornerRadius <= 0) return null
+    const cr = board.cornerRadius
+    const outerTop = y - board.behindGoalDepth
+    const outerBottom = y + height + board.behindGoalDepth
+    const left = x
+    const right = x + width
+    return Skia.PathBuilder.Make()
+      .moveTo(left + cr, outerTop)
+      .lineTo(goalAbsLeft, outerTop)
+      .moveTo(goalAbsRight, outerTop)
+      .lineTo(right - cr, outerTop)
+      .addArc({ x: right - cr * 2, y: outerTop, width: cr * 2, height: cr * 2 }, 270, 90)
+      .lineTo(right, outerBottom - cr)
+      .addArc({ x: right - cr * 2, y: outerBottom - cr * 2, width: cr * 2, height: cr * 2 }, 0, 90)
+      .lineTo(goalAbsRight, outerBottom)
+      .moveTo(goalAbsLeft, outerBottom)
+      .lineTo(left + cr, outerBottom)
+      .addArc({ x: left, y: outerBottom - cr * 2, width: cr * 2, height: cr * 2 }, 90, 90)
+      .lineTo(left, outerTop + cr)
+      .addArc({ x: left, y: outerTop, width: cr * 2, height: cr * 2 }, 180, 90)
+      .detach()
+  }, [board.cornerRadius, board.behindGoalDepth, x, y, width, height, goalAbsLeft, goalAbsRight])
 
   // ─── Stick/paddle ─────────────────────────────────────────────────────────
   // While aiming, the paddle sits at puck position + drag offset rather than at the raw touch
@@ -546,6 +634,19 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
           // "you're set, waiting on the other player" cue, reverting to the normal dim ring once
           // the countdown actually starts.
           const isReady = faceoff !== null && faceoff.stage === 'ready' && faceoff.ready[c.player - 1]
+          // Which of this player's two zones their press ripple belongs on — latched into
+          // p1RippleZone/p2RippleZone at press time (see the pressFlash effect above), NOT
+          // re-derived from the live faceoff.zones/disqualified here, so the ripple survives
+          // faceoff going null when the draw resolves (see that effect's comment for why). Reading
+          // it fresh from `faceoff` here would also reintroduce the exact bug the latching was
+          // added to fix: faceoff.disqualified defaults to false and faceoff.zones is populated
+          // from the start of the draw, so an ungated re-derivation would resolve to the CORRECT
+          // zone the instant the draw begins — long before either player has pressed anything —
+          // silently revealing the answer before the intended 'live' flash.
+          const pressedZoneIndex = c.player === 1 ? p1RippleZone : p2RippleZone
+          const showRipple = pressedZoneIndex === c.zoneIndex
+          const rippleR = c.player === 1 ? p1RippleR : p2RippleR
+          const rippleO = c.player === 1 ? p1RippleO : p2RippleO
           return (
             <Group key={i}>
               {pulsing && (
@@ -562,6 +663,11 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
                 <Circle cx={c.cx} cy={c.cy} r={faceoffRadius} style='stroke' strokeWidth={1.5} color={c.color} />
               </Group>
               <Circle cx={c.cx} cy={c.cy} r={faceoffDotRadius} color={c.color} />
+              {showRipple && (
+                <Group opacity={rippleO}>
+                  <Circle cx={c.cx} cy={c.cy} r={rippleR} style='stroke' strokeWidth={2.5} color={c.color} />
+                </Group>
+              )}
             </Group>
           )
         })}
@@ -587,7 +693,8 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
             eat into gameplay space). Desktop-web only — see BoardProps. Square corners (plain
             Rect, not RoundedRect) — independently-rounded segments left a small rounded notch
             where two walls met at a boundary corner instead of a clean square joint. */}
-        {showWalls && (
+        {showWalls && rinkPerimeterPath && <Path path={rinkPerimeterPath} style='stroke' strokeWidth={wallThickness} strokeCap='round' color={wallColor} />}
+        {showWalls && !rinkPerimeterPath && (
           <>
             <Rect x={x - wallThickness} y={y - wallThickness} width={wallThickness} height={height + wallThickness * 2} color={wallColor} />
             <Rect x={x + width} y={y - wallThickness} width={wallThickness} height={height + wallThickness * 2} color={wallColor} />
@@ -611,9 +718,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
         {/* Aim direction chevrons — dashed trail (base color + a brighter sweeping highlight per
             chevron, see ChevronMark above) bending to follow a bank shot's post-bounce direction
             wherever previewLengthPx reaches far enough to reveal it. */}
-        {chevronPlacements.map(
-          (path, i) => path && <ChevronMark key={i} path={path} index={i} sweepPhase={chevronSweepPhase} color={activePlayerColor} fade={chevronFade(i, chevronPlacements.length)} />
-        )}
+        {chevronPlacements.map((path, i) => path && <ChevronMark key={i} path={path} index={i} sweepPhase={chevronSweepPhase} color={activePlayerColor} fade={chevronFade(i, chevronPlacements.length)} />)}
 
         {/* Phantom paddle + phantom puck — a drag-distance indicator distinct from the real
             paddle/puck below: the phantom puck stays anchored at the exact point you first
@@ -638,15 +743,24 @@ export default function Board({ board, puck, aim, phase, currentPlayer, lastScor
         {phase === 'aiming' && aim && <Path path={aimingPaddlePath} color={activePlayerColor} />}
         {phase === 'striking' && <Path path={strikingPaddlePath} color={activePlayerColor} />}
 
-        {/* Puck glow */}
-        {(phase === 'idle' || phase === 'aiming') && <Circle cx={puck.x} cy={puck.y} r={glowR} color={glowColor} />}
+        {/* Puck (+ glow, ring) — on 'rink' boards only (behindGoalDepth > 0), clipped to the
+            front-line play rectangle so a puck that's crossed into a goal or a corner pocket
+            visually slides into a slot and disappears, the "portal" effect standing in for real,
+            visible board depth behind the net (see behindGoalDepth's own comment in
+            utils/board.ts — the depth is physically necessary for correct collision, but the clip
+            is what keeps it from ever actually being seen). A no-op clip on every other variant,
+            so no separate unclipped branch is needed. */}
+        <Group clip={board.behindGoalDepth > 0 ? Skia.XYWHRect(x, y, width, height) : undefined}>
+          {/* Puck glow */}
+          {(phase === 'idle' || phase === 'aiming') && <Circle cx={puck.x} cy={puck.y} r={glowR} color={glowColor} />}
 
-        {/* Puck — always a flat black fill, in every phase and regardless of theme. The ring
-            recolors to activePlayerColor and pulses only while waiting for a shot (idle); every
-            other phase it's a plain, literal white — see idlePulseT/ringColor/ringOpacity above. */}
-        <Circle cx={puck.x} cy={puck.y} r={puckRadius} color='#000000' />
-        <Group opacity={ringOpacity}>
-          <Circle cx={puck.x} cy={puck.y} r={puckRadius} style='stroke' strokeWidth={2} color={ringColor} />
+          {/* Puck — always a flat black fill, in every phase and regardless of theme. The ring
+              recolors to activePlayerColor and pulses only while waiting for a shot (idle); every
+              other phase it's a plain, literal white — see idlePulseT/ringColor/ringOpacity above. */}
+          <Circle cx={puck.x} cy={puck.y} r={puckRadius} color='#000000' />
+          <Group opacity={ringOpacity}>
+            <Circle cx={puck.x} cy={puck.y} r={puckRadius} style='stroke' strokeWidth={2} color={ringColor} />
+          </Group>
         </Group>
 
         {/* Celebration rings */}
