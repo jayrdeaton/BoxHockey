@@ -126,8 +126,17 @@ export const FACEOFF_KNOCK_MAX_POWER = 0.95
 // well under 90° regardless of margin so a jittered close-margin knock can never point back across
 // the halfway line toward the winner's own net (the puck launches from dead-center, equidistant
 // from both goals, so a wider cap would risk an own-goal off the very draw the winner just took).
-export const FACEOFF_JITTER_MIN_DEG = 6
-export const FACEOFF_JITTER_MAX_DEG = 38
+//
+// Widened from the original 6°/38° per real user feedback ("a direct shot on goal after a tipoff
+// is far too common, it should be harder to get the angle perfect"). The goal's own angular width
+// as seen from center ice is small — roughly a puck-goal's half-width over the center-to-goal-line
+// distance, only a few degrees for a typical board — so even the OLD minimum (6°, a decisive/
+// uncontested win's jitter) was already comparable to the goal's own half-width, meaning a clean
+// win landed inside the goal mouth far more often than "a hard shot to line up" should. These
+// values push scoring off the knock itself back to a genuine longshot at every margin, not a
+// near-guarantee on a fast/decisive win.
+export const FACEOFF_JITTER_MIN_DEG = 22
+export const FACEOFF_JITTER_MAX_DEG = 55
 // Radius (as a fraction of board width) of the rink faceoff dots that double as this draw's press
 // targets — shared between Board.tsx's rendering and the tap hit-test in game.tsx so the visible
 // circle and the tappable area never drift apart. Matches Board.tsx's pre-existing decorative
