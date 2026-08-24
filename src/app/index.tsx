@@ -1,5 +1,6 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton } from '@rific/feedback-press'
+import { useDeviceOrientation, useOrientationLock } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -7,9 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { HeroTitle } from '@/components/HeroTitle'
 import { SettingsDialog } from '@/components/SettingsDialog'
-import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { useGameSettings } from '@/hooks/useGameSettings'
-import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { GameMode } from '@/types'
 
 export default function HomeScreen() {

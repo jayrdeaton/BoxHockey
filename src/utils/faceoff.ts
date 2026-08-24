@@ -1,12 +1,4 @@
-import {
-  FACEOFF_JITTER_MAX_DEG,
-  FACEOFF_JITTER_MIN_DEG,
-  FACEOFF_KNOCK_MAX_POWER,
-  FACEOFF_KNOCK_MIN_POWER,
-  FACEOFF_MARGIN_MAX_MS,
-  FACEOFF_REACTION_MAX_MS,
-  MAX_SPEED
-} from '@/constants/game'
+import { FACEOFF_JITTER_MAX_DEG, FACEOFF_JITTER_MIN_DEG, FACEOFF_KNOCK_MAX_POWER, FACEOFF_KNOCK_MIN_POWER, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, MAX_SPEED } from '@/constants/game'
 import { BoardLayout, Player } from '@/types'
 
 // The tip-off winner's knock, launched from center toward the goal THEY attack (same convention
@@ -20,6 +12,13 @@ import { BoardLayout, Player } from '@/types'
 // regardless of margin — the puck starts dead-center, equidistant from both goals, so an uncapped
 // wide jitter on a close draw could otherwise point the knock back across the halfway line into
 // the WINNER's own net.
+//
+// Real user feedback, explicit: the puck must come off the draw with genuine velocity, not be
+// teleported/placed somewhere with none — this IS a real physical knock. And the winner must
+// NEVER get a follow-up shot off of it, hit or miss — see FACEOFF_LAUNCH's own comment in
+// useGameState.ts: PHYSICS_STEP's 'scored'/'stopped' branches are both unconditional, so the very
+// next real turn always goes to the loser regardless of how this knock resolves. The knock into
+// the loser's own territory IS the winner's entire reward for the draw — nothing more.
 export function computeFaceoffKnock(board: BoardLayout, winner: Player, marginMs: number, reactionMs: number): { vx: number; vy: number } {
   const targetY = winner === 1 ? board.y : board.y + board.height
   const goalCenterX = board.x + (board.goalLeft + board.goalRight) / 2

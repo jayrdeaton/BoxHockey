@@ -1,6 +1,8 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
+import { useOrientationLock } from '@tastic/split-screen'
 import { router } from 'expo-router'
+import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
@@ -10,13 +12,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import Board from '@/components/BoardHost'
 import { SettingsDialog } from '@/components/SettingsDialog'
-import { DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, SHOT_PREVIEW_LENGTH_RATIOS, STRIKE_DURATION_MS } from '@/constants/game'
+import { COIN_FLIP_TOTAL_MS, DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, MIN_SHOOT_DRAG, SHOT_PREVIEW_LENGTH_RATIOS, STRIKE_DURATION_MS } from '@/constants/game'
 import { useAIOpponent } from '@/hooks/useAIOpponent'
 import { useFaceoff } from '@/hooks/useFaceoff'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameSound } from '@/hooks/useGameSound'
 import { useGameState } from '@/hooks/useGameState'
-import { useOrientationLock } from '@/hooks/useOrientationLock'
 import { Player } from '@/types'
 import { computeBoardLayout, faceoffZoneCenter, faceoffZoneCenters, faceoffZoneRadius } from '@/utils/board'
 import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
@@ -40,7 +41,7 @@ export default function GameScreen() {
   // assumes a tall aspect ratio, unlike /loadout's panel arrangement, which reads fine either way.
   // Native orientation is no longer fixed at the app.json level (see /loadout and /index, which do
   // rotate), so this screen has to pin it explicitly rather than relying on that global lock.
-  useOrientationLock(true, 'portrait')
+  useOrientationLock(true, 'faceToFace')
 
   // Committed once by /loadout when every human player readied up (see commitRoundSettings) —
   // falls back to defaults for a direct/deep link to this screen, which never went through
@@ -53,6 +54,7 @@ export default function GameScreen() {
   const tipoffMode = roundSettings.tipoffMode
   const friction = FRICTION_LEVELS[roundSettings.friction]
   const puckSize = roundSettings.puckSize
+  const controlScheme = roundSettings.controlScheme
   // Only P2 can be CPU-controlled for now — pass-and-play stays the default, single-player just
   // swaps who takes P2's turns (see useAIOpponent, which plays the exact same gesture contract).
   const aiPlayer: Player | null = roundSettings.gameMode === 'vsCpu' ? 2 : null
@@ -61,16 +63,32 @@ export default function GameScreen() {
   const { width, height } = useWindowDimensions()
   const insets = useSafeAreaInsets()
 
-  const board = useMemo(() => computeBoardLayout(width, height, insets, layout, puckSize), [width, height, insets, layout, puckSize])
+  const rink = roundSettings.rink
+  const board = useMemo(() => computeBoardLayout(width, height, insets, layout, puckSize, rink), [width, height, insets, layout, puckSize, rink])
   // Resolved to pixels here (not inside Board.tsx) for the same reason `friction` is resolved
   // above — the enum→number mapping is a settings concern, board.width isn't known until here.
   const shotPreviewLengthPx = board.width * SHOT_PREVIEW_LENGTH_RATIOS[roundSettings.shotPreviewLength]
 
-  const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart } = useGameState(board, scoreToWin, tipoffMode, friction)
+  // Settings/quit-confirm dialogs pause gameplay while open — declared up here, ahead of
+  // useGameState/useAIOpponent/useFaceoff below, so `paused` exists in time to thread into all
+  // three (each halts its own timers/RAF loop while true — see their own comments).
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  // Only asked once there's a real score to lose — 0-0 exits immediately, since there's nothing
+  // yet for a confirmation to protect (mirrors LightCycles' identical quit-confirmation gate).
+  const [confirmBackVisible, setConfirmBackVisible] = useState(false)
+  const paused = settingsOpen || confirmBackVisible
+
+  const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart } = useGameState(board, scoreToWin, tipoffMode, friction, controlScheme, paused)
   const { phase, puck, aim, currentPlayer, scores, bounceCount, lastScoredGoal, wellEnterCount, lastWellPolarity, faceoff } = state
 
-  useAIOpponent(state, board, aiPlayer, aiDifficulty, friction, { tryAimStart, aimUpdate, shoot })
-  useFaceoff(state, board, aiPlayer, aiDifficulty, { faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart })
+  useAIOpponent(state, board, aiPlayer, aiDifficulty, friction, controlScheme, paused, { tryAimStart, aimUpdate, shoot })
+  useFaceoff(state, board, aiPlayer, aiDifficulty, paused, { faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart })
+
+  // 'coinFlip' mode's ceremony (Board.tsx) doesn't play on its own — it waits on this, which only a
+  // tap (see stableCoinFlipTap below) ever flips true. Reset back to false the instant a fresh
+  // draw begins (see the prevPhaseRef effect further down), so "Play Again" gets its own tap too,
+  // not a free ride on the previous game's.
+  const [coinFlipStarted, setCoinFlipStarted] = useState(false)
 
   const vibration = useVibration()
   const vibrationRef = useRef(vibration)
@@ -93,10 +111,6 @@ export default function GameScreen() {
   const soundRef = useRef({ playSelect, playBounce, playWellAttract, playWellRepel, playFaceoffTick, playFaceoffGo, playFaceoffResolved, playGoal, playWin })
   soundRef.current = { playSelect, playBounce, playWellAttract, playWellRepel, playFaceoffTick, playFaceoffGo, playFaceoffResolved, playGoal, playWin }
 
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  // Only asked once there's a real score to lose — 0-0 exits immediately, since there's nothing
-  // yet for a confirmation to protect (mirrors LightCycles' identical quit-confirmation gate).
-  const [confirmBackVisible, setConfirmBackVisible] = useState(false)
   const onBackPress = useCallback(() => {
     if (scores[0] > 0 || scores[1] > 0) setConfirmBackVisible(true)
     else safeBack()
@@ -122,14 +136,24 @@ export default function GameScreen() {
   const winner: Player = scores[0] >= scoreToWin ? 1 : 2
   const loser: Player = winner === 1 ? 2 : 1
 
-  // Corner buttons (back/settings) fade out during an active drag rather than just disappearing —
-  // FAB's own `visible` prop used to provide this for free, but the plain IconButton used here now
-  // (matching index.tsx/loadout.tsx's bare-icon style) has no equivalent, so it's rebuilt directly.
+  // Corner buttons (back/settings) fade out during an active drag or swing rather than just
+  // disappearing — FAB's own `visible` prop used to provide this for free, but the plain
+  // IconButton used here now (matching index.tsx/loadout.tsx's bare-icon style) has no
+  // equivalent, so it's rebuilt directly. Covers 'striking' as well as 'aiming': not just gameplay
+  // polish — it closes the window where a CPU turn's own windup/shoot timer chain (see
+  // useAIOpponent.ts) could otherwise get interrupted mid-flight by a just-opened dialog. With
+  // both phases covered, `paused` can only ever turn true while nothing in that chain is pending.
+  const cornerButtonsVisible = phase !== 'aiming' && phase !== 'striking'
   const cornerButtonsOpacity = useSharedValue(1)
   useEffect(() => {
-    cornerButtonsOpacity.value = withTiming(phase === 'aiming' ? 0 : 1, { duration: 150 })
-  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
+    cornerButtonsOpacity.value = withTiming(cornerButtonsVisible ? 1 : 0, { duration: 150 })
+  }, [cornerButtonsVisible]) // eslint-disable-line react-hooks/exhaustive-deps
   const cornerButtonsStyle = useAnimatedStyle(() => ({ opacity: cornerButtonsOpacity.value }))
+
+  // Coin flip's tap-target is live until this flips false — the invite itself (a plain pulsing
+  // ring at board center) is Board.tsx's job, same visual language as 'faceoff' mode's own
+  // ready-check pulse, no separate prompt chrome needed here.
+  const coinFlipAwaitingTap = phase === 'coinFlip' && !coinFlipStarted
 
   // On a phone (native or mobile web), the device's own physical edges already read as "the
   // wall" — no drawn perimeter needed. Desktop web has no such edge (the board just floats in an
@@ -138,15 +162,29 @@ export default function GameScreen() {
   const isDesktopWeb = Platform.OS === 'web' && width >= DESKTOP_WEB_MIN_WIDTH
 
   // ─── Auto-advance from 'scored' ───────────────────────────────────────────
-  // Also held while the quit confirmation is up — otherwise this timer keeps running underneath
-  // the dialog and silently advances the very score the player is deciding whether to walk away
-  // from. Cancelling restarts the full 1200ms wait rather than resuming mid-count, same tradeoff
-  // LightCycles' onboarding countdown makes for its own settings/quit dialogs.
+  // Also held while paused (settings or quit-confirm dialog up) — otherwise this timer keeps
+  // running underneath the dialog and silently advances the very score the player is deciding
+  // whether to walk away from, or opened settings during. Cancelling restarts the full 1200ms
+  // wait rather than resuming mid-count, same tradeoff LightCycles' onboarding countdown makes for
+  // its own settings/quit dialogs.
   useEffect(() => {
-    if (phase !== 'scored' || confirmBackVisible) return
+    if (phase !== 'scored' || paused) return
     const t = setTimeout(() => nextRound(board), 1200)
     return () => clearTimeout(t)
-  }, [phase, board, nextRound, confirmBackVisible])
+  }, [phase, board, nextRound, paused])
+
+  // ─── Auto-advance from 'coinFlip' ──────────────────────────────────────────
+  // Gated on coinFlipStarted (the tap that kicks off Board.tsx's ceremony — see stableCoinFlipTap
+  // below) in addition to phase/paused: the winner/puck placement are already decided
+  // (useGameState.ts's makeInitialState), but nothing should count down toward handing over
+  // control until a player has actually tapped to flip. Otherwise mirrors the 'scored' auto-advance
+  // above one-for-one, including the `paused` gate (restarting the full wait rather than resuming
+  // mid-ceremony if a dialog opens mid-flip).
+  useEffect(() => {
+    if (phase !== 'coinFlip' || !coinFlipStarted || paused) return
+    const t = setTimeout(() => coinFlipDone(), COIN_FLIP_TOTAL_MS)
+    return () => clearTimeout(t)
+  }, [phase, coinFlipStarted, coinFlipDone, paused])
 
   // ─── Strike swing: pull-back released, stick rushes the puck ─────────────
   // The puck's velocity is already computed (see useGameState's shoot) but held in
@@ -168,6 +206,29 @@ export default function GameScreen() {
     vibrationRef.current.short()
     soundRef.current.playBounce()
   }, [bounceCount])
+
+  // Ticks once whenever a live drag crosses the MIN_SHOOT_DRAG cancel-zone boundary in either
+  // direction (back inside it, or out past it) — the phantom-puck circle (Board.tsx) is the only
+  // visual cue for that boundary today, so this gives it a tactile confirmation too. Deliberately
+  // does NOT fire for the trivial "just touched down at distance 0" state (aimActive flips
+  // false→true) or the drag ending (aimActive flips true→false) — both `wasAimActive` and
+  // `aimActive` have to be true for a crossing to count, so only a real mid-drag boundary cross
+  // qualifies; the touch-down moment already gets its own haptic via stableAimStart.
+  const aimActive = phase === 'aiming' && !!aim
+  const aimDragDist = aim ? Math.hypot(aim.currentX - aim.startX, aim.currentY - aim.startY) : 0
+  const inCancelZone = aimActive && aimDragDist < MIN_SHOOT_DRAG
+  const prevAimActiveRef = useRef(aimActive)
+  const prevInCancelZoneRef = useRef(inCancelZone)
+  useEffect(() => {
+    const wasAimActive = prevAimActiveRef.current
+    const wasInCancelZone = prevInCancelZoneRef.current
+    prevAimActiveRef.current = aimActive
+    prevInCancelZoneRef.current = inCancelZone
+    if (!wasAimActive || !aimActive) return
+    if (wasInCancelZone !== inCancelZone) {
+      vibrationRef.current.short()
+    }
+  }, [aimActive, inCancelZone])
 
   const firstWellRender = useRef(true)
   useEffect(() => {
@@ -228,6 +289,13 @@ export default function GameScreen() {
     if (prevPhaseRef.current !== 'gameOver' && phase === 'gameOver') {
       soundRef.current.playWin()
     }
+    // Reset the tap-to-flip gate the instant a fresh coin-flip draw begins (game start, or a new
+    // game via Game Over's "Play Again") — see coinFlipStarted/stableCoinFlipTap below. This is the
+    // only thing that ever flips it back to false; stableCoinFlipTap is the only thing that ever
+    // flips it back to true.
+    if (prevPhaseRef.current !== 'coinFlip' && phase === 'coinFlip') {
+      setCoinFlipStarted(false)
+    }
     prevPhaseRef.current = phase
   }, [phase])
 
@@ -258,6 +326,19 @@ export default function GameScreen() {
   const stableAimCancel = useCallback(() => {
     aimCancel()
   }, [aimCancel])
+
+  // The coin-flip ceremony's own "go" tap (see Board.tsx and coinFlipStarted above) — anyone's tap
+  // anywhere on the board counts, same "no specific target" spirit as stableFaceoffReady below,
+  // just for a ceremony with only one beat instead of two players' worth. Idempotent via the
+  // `coinFlipStarted` check itself (the tap gesture below is also disabled the instant it flips
+  // true, but a second stray delivery landing before that teardown finishes shouldn't double-fire
+  // the haptic/sound either).
+  const stableCoinFlipTap = useCallback(() => {
+    if (coinFlipStarted) return
+    setCoinFlipStarted(true)
+    vibrationRef.current.short()
+    soundRef.current.playSelect()
+  }, [coinFlipStarted])
 
   // Mirrors vibrationRef/soundRef above — read live faceoff state through a ref instead of
   // closing over `faceoff` directly. `faceoff` is a new object on every single sub-action
@@ -391,19 +472,50 @@ export default function GameScreen() {
   // pointerEvents is toggled the same way below so these transparent zones don't intercept the
   // normal puck-drag gesture underneath them the rest of the time, even though they're mounted as
   // later (and so visually topmost) siblings of the board.
+  //
+  // MUST use e.absoluteX/e.absoluteY here, never the plain e.x/e.y — RNGH reports x/y relative to
+  // whichever view the gesture is physically attached to, not to boardArea. p2TapGesture's own
+  // view (faceoffZoneTop) happens to start at the same origin as boardArea (top: 0), so its e.y
+  // was accidentally already boardArea-relative — but p1TapGesture's view (faceoffZoneBottom) is
+  // offset halfway down boardArea, so its e.y was relative to THAT view's own top edge, off by
+  // roughly half the screen height from what stableFaceoffTouch's hit-test (faceoffZoneCenters,
+  // in board/boardArea-local coordinates) expects. That mismatch made every P1 live-window tap
+  // silently miss the hit-test (zoneIndex resolves to -1, no dispatch at all — not even a
+  // wrong-zone forfeit), while the 'ready' stage stayed unaffected since it skips the hit-test
+  // entirely (see stableFaceoffTouch). absoluteX/Y are screen-relative regardless of which nested
+  // view the gesture sits on, and boardArea itself starts at screen (0, board.boardMarginTop) — no
+  // left margin, and marginTop: board.boardMarginTop is boardArea's only offset from the screen
+  // origin — so subtracting board.boardMarginTop from absoluteY (and using absoluteX as-is)
+  // converts back to exactly the same board-local space board.x/board.y and faceoffZoneCenters
+  // already assume, for BOTH zones uniformly, rather than relying on one of them coincidentally
+  // matching by construction. board.boardMarginTop, NOT the raw insets.top — the rink pocket
+  // setting moves boardArea's actual origin up into the safe-area inset (see boardMarginTop's own doc comment on
+  // BoardLayout), and this conversion has to track wherever the container's real origin is, same
+  // as it already had to for the two zones' differing view origins.
   const p1TapGesture = useMemo(
     () =>
       Gesture.Tap()
-        .onBegin((e) => runOnJS(stableFaceoffTouch)(1, e.x, e.y))
+        .onBegin((e) => runOnJS(stableFaceoffTouch)(1, e.absoluteX, e.absoluteY - board.boardMarginTop))
         .enabled(phase === 'faceoff'),
-    [stableFaceoffTouch, phase]
+    [stableFaceoffTouch, phase, board.boardMarginTop]
   )
   const p2TapGesture = useMemo(
     () =>
       Gesture.Tap()
-        .onBegin((e) => runOnJS(stableFaceoffTouch)(2, e.x, e.y))
+        .onBegin((e) => runOnJS(stableFaceoffTouch)(2, e.absoluteX, e.absoluteY - board.boardMarginTop))
         .enabled(phase === 'faceoff'),
-    [stableFaceoffTouch, phase]
+    [stableFaceoffTouch, phase, board.boardMarginTop]
+  )
+
+  // Coin flip's own "go" tap — spans the whole board (no zones, no player-attribution, unlike the
+  // faceoff pair above), and disables itself the instant it's used so this same tap can't
+  // re-trigger anything later in the round.
+  const coinFlipTapGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .onBegin(() => runOnJS(stableCoinFlipTap)())
+        .enabled(phase === 'coinFlip' && !coinFlipStarted),
+    [stableCoinFlipTap, phase, coinFlipStarted]
   )
 
   // ─── Derived display values ───────────────────────────────────────────────
@@ -413,14 +525,26 @@ export default function GameScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: bg }]}>
-      {/* Board + gesture layer, starting right at the safe area (marginTop: insets.top) — no
-          score bar or turn indicator above it: the puck's own color already says whose turn it
-          is, and the score lives on the board itself as pips at each goal (see Board.tsx). The
-          one-finger aim gesture only runs during idle/aiming (see gestureEnabled below). */}
-      <View style={[styles.boardArea, { marginTop: insets.top }]}>
+      {/* Hidden only here, not on /loadout or the home screen. Originally gated on the rink pocket
+          setting alone (it borrows this real estate — see boardMarginTop's own doc comment), but
+          the board's top/bottom edges sit flush against insets.top/insets.bottom either way (see
+          board.y/board.y+height), so the OS status bar was always overlapping the first couple
+          pixels of the goal line there — harmless while that line was thin and just decorative,
+          but it started visibly eating into the rink-off wall line's own edge once that line
+          needed to read as a solid boundary (see Board.tsx's goal-line color swap). Unconditional
+          now. expo-router remounts this component fresh per screen, so leaving is enough to
+          restore the bar elsewhere without an explicit cleanup call. */}
+      <StatusBar hidden />
+      {/* Board + gesture layer, starting right at the safe area unless the rink pocket setting is
+          on (marginTop: board.boardMarginTop, which equals insets.top there — see its own doc
+          comment on BoardLayout for why rink moves this up into the inset instead) — no score
+          bar or turn indicator above it: the puck's own color already says whose turn it is, and
+          the score lives on the board itself as pips at each goal (see Board.tsx). The one-finger
+          aim gesture only runs during idle/aiming (see gestureEnabled below). */}
+      <View style={[styles.boardArea, { marginTop: board.boardMarginTop }]}>
         <GestureDetector gesture={panGesture.enabled(gestureEnabled)}>
           <View style={styles.boardAreaTouchable}>
-            <Board board={board} puck={puck} aim={aim} phase={phase} currentPlayer={currentPlayer} lastScoredGoal={lastScoredGoal} scores={scores} scoreToWin={scoreToWin} faceoff={faceoff} showWalls={isDesktopWeb} previewLengthPx={shotPreviewLengthPx} />
+            <Board board={board} puck={puck} aim={aim} phase={phase} currentPlayer={currentPlayer} lastScoredGoal={lastScoredGoal} scores={scores} scoreToWin={scoreToWin} faceoff={faceoff} controlScheme={controlScheme[currentPlayer]} coinFlipStarted={coinFlipStarted} showWalls={isDesktopWeb} previewLengthPx={shotPreviewLengthPx} />
           </View>
         </GestureDetector>
 
@@ -442,6 +566,16 @@ export default function GameScreen() {
         </GestureDetector>
         <GestureDetector gesture={p2TapGesture}>
           <View style={styles.faceoffZoneTop} pointerEvents={phase === 'faceoff' ? 'auto' : 'none'} />
+        </GestureDetector>
+
+        {/* Coin flip's "go" tap zone — the whole board, not split into halves like the faceoff
+            pair above, since either player flipping it is the entire ceremony (see
+            coinFlipTapGesture's own comment). The invite itself (a pulsing ring) is Board.tsx's
+            own Skia canvas, not this zone — this is purely the hit target, transparent and
+            pointerEvents='none' once coinFlipStarted flips true, same "don't intercept anything
+            once its job is done" treatment as the faceoff zones. */}
+        <GestureDetector gesture={coinFlipTapGesture}>
+          <View style={StyleSheet.absoluteFill} pointerEvents={coinFlipAwaitingTap ? 'auto' : 'none'} />
         </GestureDetector>
 
         {/* Key hints (desktop web only) — see FACEOFF_KEY_HINTS above for why desktop needs a
@@ -524,18 +658,34 @@ export default function GameScreen() {
         </View>
       )}
 
-      {/* Back + settings — plain IconButton (bare icon, no filled background), matching
-          index.tsx/loadout.tsx exactly rather than the filled-chip FAB this used previously. Both
-          fade out together during an active drag (cornerButtonsStyle above) instead of just
-          disappearing; pointerEvents follows the same condition so a faded-out button can't still
-          be tapped underneath the puck gesture layer. */}
-      <Animated.View pointerEvents={phase !== 'aiming' ? 'auto' : 'none'} style={[styles.backButton, { top: 8 + insets.top, left: 8 + insets.left }, cornerButtonsStyle]}>
-        <IconButton icon='arrow-left' iconColor={fg} size={24} onPress={onBackPress} />
+      {/* Back + settings — vertically centered on the side edges at the dividing-wall centerline
+          (board.boardMarginTop + board.centerY in root-relative coordinates), rather than the top
+          corners used on every other screen. Unlike index.tsx/loadout.tsx, this screen is split
+          face-to-face with P2's half rotated 180°, so a top corner sits inside P2's near zone; the
+          wall centerline is the one strip of the board no puck can ever occupy, making it neutral
+          ground for both players. Deliberately centered on the board's own field (top: board.y,
+          height: board.height, both local to boardArea) rather than on root's full height the way
+          the very first version of this did — boardMarginTop/insets.bottom aren't generally equal
+          (see computeViewportSize/computeBoardLayout's own comments), so the screen's own vertical
+          midpoint and the board's own vertical midpoint are two different points; centering on
+          root would put these visibly off the wall on any device where those two insets differ.
+          Same single-constraint top+height anchor faceoffZoneTop/Bottom below already use, for the
+          same reason (see that comment) — mixing top+bottom here would still be exact today, but
+          top+height is what stays exact if this view is ever nested somewhere its own height isn't
+          implicitly root's. Filled circular chip (containerColor/iconColor swapped from the
+          board's own bg/fg) rather than a bare icon, so it reads as a fixture bolted to the wall
+          instead of chrome floating over the ice; flush against the safe-area edge (no extra inset
+          padding, default IconButton margin zeroed) to sit as close to the true screen edge as the
+          notch/home-indicator allows. Both fade out together during an active drag or swing
+          (cornerButtonsStyle above); pointerEvents follows the same condition so a faded-out
+          button can't still be tapped underneath the puck gesture layer. */}
+      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.backButton, { top: board.boardMarginTop + board.y, height: board.height, left: insets.left }, cornerButtonsStyle]}>
+        <IconButton icon='arrow-left' iconColor={bg} containerColor={fg} style={styles.chipButton} size={24} onPress={onBackPress} />
       </Animated.View>
 
-      {/* Settings — same top corner slot as every other screen's cog (index.tsx, loadout.tsx). */}
-      <Animated.View pointerEvents={phase !== 'aiming' ? 'auto' : 'none'} style={[styles.settingsButton, { top: 8 + insets.top, right: 8 + insets.right }, cornerButtonsStyle]}>
-        <IconButton icon='cog' iconColor={fg} size={24} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+      {/* Settings — mirrored on the opposite side edge, same centerline and chip treatment as the back button. */}
+      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.settingsButton, { top: board.boardMarginTop + board.y, height: board.height, right: insets.right }, cornerButtonsStyle]}>
+        <IconButton icon='cog' iconColor={bg} containerColor={fg} style={styles.chipButton} size={24} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
       </Animated.View>
 
       <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} />
@@ -544,10 +694,20 @@ export default function GameScreen() {
 }
 
 const styles = StyleSheet.create({
-  backButton: { position: 'absolute' },
+  // top/height come from the JSX (board.y/board.height, not a fixed value here) — see the render
+  // comment above for why this has to be the board's own field span, not root's full height.
+  backButton: { justifyContent: 'center', position: 'absolute' },
   boardArea: { flex: 1 },
   boardAreaTouchable: { flex: 1 },
-  faceoffZoneBottom: { bottom: 0, height: '50%', left: 0, position: 'absolute', right: 0 },
+  // Cancels IconButton's own built-in 6px margin (react-native-paper's default Surface spacing)
+  // so nothing but the safe-area inset stands between the chip and the true screen edge.
+  chipButton: { margin: 0 },
+  // Both anchored from `top` (not `bottom`+height for the lower one) so they resolve through the
+  // exact same single-constraint layout path — mixing `bottom: 0` with a percentage `height` on an
+  // absolutely-positioned view is a real, known Yoga/RN quirk (two simultaneous constraints to
+  // satisfy instead of one clean anchor) and was the only structural asymmetry found anywhere
+  // between the P1 (bottom) and P2 (top) tap-zone code paths after an otherwise-exhaustive review.
+  faceoffZoneBottom: { height: '50%', left: 0, position: 'absolute', right: 0, top: '50%' },
   faceoffZoneTop: { height: '50%', left: 0, position: 'absolute', right: 0, top: 0 },
   // lineHeight matching height is what actually centers the glyph vertically — RN Text doesn't
   // auto-center a single line within a taller box on its own, textAlign only handles horizontal.
@@ -573,5 +733,5 @@ const styles = StyleSheet.create({
   overlayScore: {},
   overlayTitle: { fontWeight: 'bold' },
   root: { flex: 1 },
-  settingsButton: { position: 'absolute' }
+  settingsButton: { justifyContent: 'center', position: 'absolute' }
 })

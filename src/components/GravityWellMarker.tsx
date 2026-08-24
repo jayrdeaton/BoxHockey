@@ -12,7 +12,14 @@ const GRAVITY_WELL_PARTICLE_COUNT = 14
 const GRAVITY_WELL_PARTICLE_INDICES = Array.from({ length: GRAVITY_WELL_PARTICLE_COUNT }, (_, index) => index)
 const GRAVITY_WELL_PARTICLE_MIN_DOT_RADIUS_PX = 0.75
 const GRAVITY_WELL_PARTICLE_MAX_DOT_RADIUS_PX = 3
-const GRAVITY_WELL_OUTLINE_WIDTH_PX = 1.5
+// The field's own fill — per explicit user feedback after playtesting, wells only affect the puck
+// within this exact radius, so a much bigger field (see buildGravityWells in utils/board.ts) needs
+// to actually READ as a zone rather than a thin outline around mostly-invisible fill: the
+// background circle below used to be drawn in `background` (== the board's own true black/white,
+// i.e. functionally invisible against it). Filling it with the well's own accent color instead —
+// at a low, deliberately subtle opacity, not a solid disc — makes a big field legible without it
+// visually dominating the board.
+const GRAVITY_WELL_FIELD_FILL_OPACITY = 0.16
 
 type GravityWellParticleProps = {
   index: number
@@ -41,22 +48,24 @@ type GravityWellMarkerProps = {
   // Drawn at exactly the well's influence radius — unlike Swirlio, strength and
   // reach are decoupled here (force falls to 0 at this radius regardless of
   // strength), so sizing the hole any other way would understate a weak-but-wide
-  // well's true hazard boundary.
+  // well's true hazard boundary. See GRAVITY_WELL_FIELD_FILL_OPACITY's own comment
+  // for why the field's own reach (not just its edge) needs to be visible now.
   holeRadius: number
   attracting: boolean
   progress: SharedValue<number>
   foreground: string
-  background: string
 }
 
-export function GravityWellMarker({ x, y, holeRadius, attracting, progress, foreground, background }: GravityWellMarkerProps) {
+// No stroked outline (removed per explicit feedback) — the boundary reads from the low-opacity
+// fill plus the particles themselves fading in/out as they approach it (see
+// gravityParticleOpacity in utils/gravityWellVisuals.ts), not a hard drawn edge.
+export function GravityWellMarker({ x, y, holeRadius, attracting, progress, foreground }: GravityWellMarkerProps) {
   return (
     <Group>
-      <Circle cx={x} cy={y} r={holeRadius} color={background} />
+      <Circle cx={x} cy={y} r={holeRadius} color={foreground} opacity={GRAVITY_WELL_FIELD_FILL_OPACITY} />
       {GRAVITY_WELL_PARTICLE_INDICES.map((index) => (
         <GravityWellParticle key={index} index={index} x={x} y={y} attracting={attracting} progress={progress} holeRadius={holeRadius} foreground={foreground} />
       ))}
-      <Circle cx={x} cy={y} r={holeRadius} style='stroke' strokeWidth={GRAVITY_WELL_OUTLINE_WIDTH_PX} color={foreground} />
     </Group>
   )
 }

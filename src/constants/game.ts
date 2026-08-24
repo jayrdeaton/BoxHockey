@@ -1,4 +1,4 @@
-import { FrictionLevel, PuckSizeLevel, ShotPreviewLength } from '@/types'
+import { ControlScheme, FrictionLevel, PuckSizeLevel, ShotPreviewLength } from '@/types'
 
 // Per-round puck deceleration tier (see types/index.ts's FrictionLevel and stepPhysics in
 // utils/physics.ts, where frictionFactor = FRICTION_LEVELS[level] ** dt). Closer to 1 means less
@@ -25,7 +25,21 @@ export const SHOT_PREVIEW_LENGTH_RATIOS: Record<ShotPreviewLength, number> = {
 export const WALL_RESTITUTION = 0.72
 export const MAX_SPEED = 22
 export const MAX_DRAG_PIXELS = 160
-export const MIN_SHOOT_DRAG = 12
+// Below this drag distance, useGameState's shoot() cancels the aim (AIM_CANCEL) instead of firing
+// a shot — the intended way to back out mid-aim and reset without losing your turn (see
+// AIM_CANCEL's own comment in useGameState.ts: it doesn't touch currentPlayer). Bumped from the
+// original 12 per user feedback ("really hard to release a shot so you can set up again") — 12px
+// was tight enough to be an unreliable target in practice, undersized even against Board.tsx's own
+// phantom-puck cancel-zone indicator (drawn at radius puckRadius, which comfortably exceeds 12px
+// at every puck size), so the visual affordance implied a bigger safe-return zone than the actual
+// threshold honored.
+export const MIN_SHOOT_DRAG = 28
+
+// Sign applied to a shot's raw drag vector before computeAimVector — see ControlScheme in
+// types/index.ts. 'pull' fires opposite the drag (slingshot), 'push' fires along it (swipe/flick).
+// The single place this is read is useGameState.ts's STRIKE case (and useAIOpponent.ts, which has
+// to cancel it back out so a CPU seat's own intended shot direction stays scheme-independent).
+export const CONTROL_SCHEME_SIGN: Record<ControlScheme, 1 | -1> = { pull: -1, push: 1 }
 
 // Per-round puck radius, as a fraction of board.width — see PuckSizeLevel in types/index.ts.
 // 'medium' is unchanged from the single fixed PUCK_RADIUS_RATIO constant this replaces, so a
@@ -66,18 +80,17 @@ export const STRIKE_DURATION_MS = 130
 
 export const GRAVITY_WELL_MIN_DIST = 4
 export const GRAVITY_WELL_ATTRACT_STRENGTH = 0.32
-export const GRAVITY_WELL_REPEL_STRENGTH = -0.32
-// gravityClassic's 4 corner wells only, paired with GravityWell.activeAtRest — MUCH stronger than
-// GRAVITY_WELL_REPEL_STRENGTH because these are the sole gate keeping a puck from permanently
-// dying in a corner, so a well that merely nudges (like the plain 'gravity' variant's -0.32) isn't
+// gravity's 4 corner wells only, paired with GravityWell.activeAtRest — these are the sole
+// gate keeping a puck from permanently dying in a corner, so a well that merely nudges isn't
 // enough. Empirically (see physics.test.ts's "corner repel never stalls" test), the quadratic
 // falloff means the puck can never be GUARANTEED to clear the well's full nominal radius no matter
 // how strong this is — acceleration approaches 0 as distance approaches radius regardless of
 // strength, so friction always wins that last stretch eventually. What strength actually buys is
 // how CLOSE to the boundary (and how far from the literal corner) it settles; -10 in that test's
 // synthetic 60px-radius well reliably cleared ~89% of the radius, well clear of the corner itself,
-// vs ~81% at -4. Scaled down for this well's much smaller real radius (~0.09 * board width) — needs
-// real playtesting/tuning, this is a first-pass value, not a verified-by-feel one.
+// vs ~81% at -4. Scaled for this well's much larger real radius (~0.17 * board width, deliberately
+// generous after user feedback — see buildGravityWells' 'gravity' case) — needs real
+// playtesting/tuning, this is a first-pass value, not a verified-by-feel one.
 export const GRAVITY_WELL_CORNER_REPEL_STRENGTH = -3
 
 // Tip-off (see useFaceoff.ts, utils/faceoff.ts). Countdown ticks at a fixed cadence, then a
@@ -97,11 +110,15 @@ export const FACEOFF_MARGIN_MAX_MS = 350
 // The winner's own raw reaction time (ms, their press minus goAt) at/above which knock power
 // bottoms out at FACEOFF_KNOCK_MIN_POWER — a near-instant press approaches FACEOFF_KNOCK_MAX_POWER.
 // Drives knock POWER only — independent of the opponent's timing, so a forfeit win doesn't get a
-// free max-power shot the winner's own reflexes didn't earn.
+// free max-power knock the winner's own reflexes didn't earn.
 export const FACEOFF_REACTION_MAX_MS = 500
 // Knock power as a fraction of MAX_SPEED — MIN barely nudges the puck past center, MAX can
 // plausibly reach/enter the loser's goal mouth (a lightning-fast reaction can score outright, same
-// as real hockey occasionally allows straight off a faceoff).
+// as real hockey occasionally allows straight off a faceoff). Real user feedback, explicit: the
+// puck must come off the draw with genuine velocity (this IS a real physical knock, not a
+// placement), and the winner must NEVER get a follow-up shot off of it, hit or miss — the loser
+// always takes the very next real turn (see FACEOFF_LAUNCH's own comment in useGameState.ts). The
+// knock itself is the winner's entire reward for the draw.
 export const FACEOFF_KNOCK_MIN_POWER = 0.15
 export const FACEOFF_KNOCK_MAX_POWER = 0.95
 // Random angle jitter applied to the knock, off the straight center-line bearing toward the
@@ -120,6 +137,13 @@ export const FACEOFF_ZONE_RADIUS_RATIO = 0.15
 // on purpose: the whole point is visualizing reaction SPEED, so a lazy animation would undercut
 // its own premise.
 export const FACEOFF_PRESS_RIPPLE_DURATION_MS = 280
+// Shaved off a player's own effective reaction time (in the head-to-head race resolution only —
+// see FACEOFF_TAP's genuine-race branch in useGameState.ts) when FaceoffState.readyGuess for that
+// player happened to match this draw's real zones — a pure-luck hunch made blind, at ready time,
+// with zero information to go on (see readyGuess's own doc comment in types/index.ts). Sized to be
+// a real, close-race-flipping edge without being so large it overwhelms genuine reaction skill —
+// most real margins are well under FACEOFF_MARGIN_MAX_MS.
+export const FACEOFF_GUESS_BONUS_MS = 60
 
 // Threshold (in CSS px) above which web is treated as "desktop" rather than phone-shaped — the
 // one context that fixes the board to BOARD_ASPECT_RATIO and draws the perimeter walls (see
@@ -143,6 +167,36 @@ export const COLORS = {
   wellAttract: '#8B5CF6',
   wellRepel: '#F59E0B'
 } as const
+
+// Coin-flip tip-off ceremony (see useGameState.ts's 'coinFlip' phase and Board.tsx's rendering) —
+// purely cosmetic, played once at the start of a 'coinFlip'-mode game over a winner/puck placement
+// that's already final the instant it starts (see TipoffMode's doc comment in types/index.ts).
+// Gated behind a tap (game.tsx's coinFlipStarted) rather than firing on its own — somebody has to
+// actually flip it — and until that tap, Board.tsx shows only a plain neutral ring at board center,
+// breathing with the same invite-pulse language 'faceoff' mode's own ready-check circles already
+// use (see Board.tsx's p1ReadyPulse/p2ReadyPulse), no separate text prompt of its own. That ring IS
+// already the coin's own eventual size/position, so the tap hands off straight into the sequence
+// below with no separate "grow into place" beat first:
+//   1. Spin — rapid rotation, squashing to a sliver and swapping face color each half-turn before
+//      landing exactly on the winner's face.
+//   2. Hold — a brief beat to register that landed face.
+//   3. Fade — that face color bleeds to black while a ring in the same color fades in, becoming
+//      the puck's own black-fill/colored-ring look.
+//   4. Depart — shrinks and slides from board center back down to the puck's actual resting spot,
+//      landing pixel-identical to where the real puck appears the instant game.tsx's own
+//      COIN_FLIP_TOTAL_MS timer (started on the same tap) flips phase to 'idle'.
+export const COIN_FLIP_SPIN_MS = 1100
+export const COIN_FLIP_HOLD_MS = 200
+export const COIN_FLIP_FADE_MS = 250
+export const COIN_FLIP_TRAVEL_MS = 400
+export const COIN_FLIP_TOTAL_MS = COIN_FLIP_SPIN_MS + COIN_FLIP_HOLD_MS + COIN_FLIP_FADE_MS + COIN_FLIP_TRAVEL_MS
+// Half-turns the coin completes before landing (plus one more if the result lands on player 2's
+// face — see Board.tsx) — high enough to read as a real spin, not a couple of lazy wobbles.
+export const COIN_FLIP_BASE_HALF_TURNS = 8
+// Floor on the coin's horizontal squash (see Board.tsx's coinFlipScaleX) — 0 would make the
+// edge-on instant a literal zero-width invisible line for a frame; a small floor keeps a thin
+// sliver visible throughout the spin instead.
+export const COIN_FLIP_MIN_SCALE_X = 0.08
 
 // Loadout player-panel area (see loadout.tsx): whenever a real device rotation changes
 // orientationMode or which physical side P1 lands on (see useP1OnRight), the panels fade out, the

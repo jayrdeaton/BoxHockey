@@ -4,8 +4,8 @@
     {
       "name": "box-hockey-web",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["expo", "start", "--web", "--port", "8102"],
-      "port": 8102
+      "runtimeArgs": ["expo", "start", "--web", "--port", "8103"],
+      "port": 8103
     },
     {
       "name": "box-hockey-metro",

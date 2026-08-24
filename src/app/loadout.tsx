@@ -1,23 +1,19 @@
 import { defaultColors, getThirdColor, useAutoPaperTheme, useThemeSettings } from '@rific/auto-paper'
 import { IconButton } from '@rific/feedback-press'
+import { MenuOption, PressAwayOverlay, ReadyButton, usePopoverHost } from '@tastic/hud'
+import { DualZoneLayout, useDeviceOrientation, useDualZoneLayout, useOrientationLock, useP1OnRight } from '@tastic/split-screen'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
-import Animated, { runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import Animated from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { IconDropdownOption } from '@/components/IconDropdown'
 import { LoadoutSharedControls } from '@/components/LoadoutSharedControls'
 import { PlayerSetupPanel } from '@/components/PlayerSetupPanel'
-import { ReadyButton } from '@/components/ReadyButton'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { LOADOUT_PANEL_SWAP_FADE_MS } from '@/constants/game'
-import { useDeviceOrientation } from '@/hooks/useDeviceOrientation'
 import { useGameSettings } from '@/hooks/useGameSettings'
-import { useOrientationLock } from '@/hooks/useOrientationLock'
-import { useP1OnRight } from '@/hooks/useP1OnRight'
-import { usePopoverHost } from '@/hooks/usePopoverHost'
-import { BoardVariant, FrictionLevel, Player, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
+import { BoardVariant, ControlScheme, FrictionLevel, Player, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
 import { AI_DIFFICULTY_LABELS, AIDifficulty } from '@/utils/aiOpponent'
 import { BOARD_VARIANT_LABELS } from '@/utils/board'
 import { humanPlayersFor, parseGameMode } from '@/utils/gameMode'
@@ -25,41 +21,49 @@ import { safeBack } from '@/utils/navigation'
 
 const BOARD_VARIANT_DESCRIPTIONS: Record<BoardVariant, string> = {
   classic: 'Off-center holes',
-  gauntlet: 'Narrow center gap',
-  gauntletPlus: 'Three alternating walls',
-  gravity: 'Pull & push zones',
-  gravityClassic: 'Classic walls + corner pushes',
-  rink: 'Rounded corners, net pockets'
+  gauntlet: 'Three alternating walls',
+  gravity: 'Classic walls + corner pushes'
 }
-const BOARD_VARIANT_OPTIONS: IconDropdownOption<BoardVariant>[] = (['classic', 'gauntlet', 'gauntletPlus', 'gravity', 'gravityClassic', 'rink'] as BoardVariant[]).map((value) => ({ value, label: BOARD_VARIANT_LABELS[value], description: BOARD_VARIANT_DESCRIPTIONS[value] }))
+const BOARD_VARIANT_OPTIONS: MenuOption<BoardVariant>[] = (['classic', 'gauntlet', 'gravity'] as BoardVariant[]).map((value) => ({ value, label: BOARD_VARIANT_LABELS[value], description: BOARD_VARIANT_DESCRIPTIONS[value] }))
 
-const FRICTION_OPTIONS: IconDropdownOption<FrictionLevel>[] = [
-  { value: 'low', label: 'Low', description: 'Puck glides farther', icon: 'speedometer' },
+// Independent of boardVariant, but rides along in the same popover as one of its rows — see
+// LoadoutSharedControls' own comment. A single option rather than an on/off pair: presence in a
+// one-item multi-select's value array already means "on," so there's nothing an "off" row would
+// add beyond what tapping the "on" row a second time (to un-toggle it) already does.
+const RINK_OPTION: MenuOption<'on'> = { value: 'on', label: 'Rink', description: 'Rounded corners + net pocket', icon: 'rounded-corner' }
+
+const FRICTION_OPTIONS: MenuOption<FrictionLevel>[] = [
+  { value: 'high', label: 'Slow', description: 'Puck stops quickly', icon: 'speedometer-slow' },
   { value: 'medium', label: 'Medium', description: 'Standard glide', icon: 'speedometer-medium' },
-  { value: 'high', label: 'High', description: 'Puck stops quickly', icon: 'speedometer-slow' }
+  { value: 'low', label: 'Fast', description: 'Puck glides farther', icon: 'speedometer' }
 ]
 
-const PUCK_SIZE_OPTIONS: IconDropdownOption<PuckSizeLevel>[] = [
+const PUCK_SIZE_OPTIONS: MenuOption<PuckSizeLevel>[] = [
   { value: 'small', label: 'Small', description: 'Tighter goal & gaps', icon: 'circle-small' },
   { value: 'medium', label: 'Medium', description: 'Standard size', icon: 'circle-medium' },
   { value: 'large', label: 'Large', description: 'Wider goal & gaps', icon: 'circle-outline' }
 ]
 
-const SCORE_TO_WIN_OPTIONS: IconDropdownOption<number>[] = [3, 5, 7, 10].map((value) => ({ value, label: String(value) }))
+const SCORE_TO_WIN_OPTIONS: MenuOption<number>[] = [3, 5, 7, 10].map((value) => ({ value, label: String(value) }))
 
-const SHOT_PREVIEW_LENGTH_OPTIONS: IconDropdownOption<ShotPreviewLength>[] = [
+const SHOT_PREVIEW_LENGTH_OPTIONS: MenuOption<ShotPreviewLength>[] = [
   { value: 'off', label: 'Off', description: 'No trajectory preview', icon: 'eye-off-outline' },
   { value: 'short', label: 'Short', description: 'Just the aim direction', icon: 'ray-start' },
   { value: 'medium', label: 'Medium', description: 'Occasionally reveals a bank', icon: 'ray-start-end' },
   { value: 'long', label: 'Long', description: 'Shows most bank shots', icon: 'ray-start-arrow' }
 ]
 
-const TIPOFF_MODE_OPTIONS: IconDropdownOption<TipoffMode>[] = [
-  { value: 'coinFlip', label: 'Coin Flip', description: 'Random pick starts, turns alternate', icon: 'hand-coin-outline' },
+const CONTROL_SCHEME_OPTIONS: MenuOption<ControlScheme>[] = [
+  { value: 'pull', label: 'Pull', description: 'Drag back, release to fire', icon: 'arrow-collapse' },
+  { value: 'push', label: 'Push', description: 'Swipe toward your shot', icon: 'gesture-swipe' }
+]
+
+const TIPOFF_MODE_OPTIONS: MenuOption<TipoffMode>[] = [
+  { value: 'coinFlip', label: 'Coin Flip', description: 'Random pick starts, loser gets the puck', icon: 'hand-coin-outline' },
   { value: 'faceoff', label: 'Face-Off', description: 'Race the tap on every score', icon: 'hockey-puck' }
 ]
 
-const AI_DIFFICULTY_OPTIONS: IconDropdownOption<AIDifficulty>[] = [
+const AI_DIFFICULTY_OPTIONS: MenuOption<AIDifficulty>[] = [
   { value: 'easy', label: AI_DIFFICULTY_LABELS.easy, icon: 'emoticon-happy-outline' },
   { value: 'medium', label: AI_DIFFICULTY_LABELS.medium, icon: 'emoticon-neutral-outline' },
   { value: 'hard', label: AI_DIFFICULTY_LABELS.hard, icon: 'emoticon-devil-outline' }
@@ -85,43 +89,10 @@ export default function LoadoutScreen() {
   const { p1OnRight, resolved: p1OnRightResolved } = useP1OnRight()
 
   // The panel area's own layout (which branch renders, which side each panel is on) lags one fade
-  // behind the live orientationMode/p1OnRight above — see panelOpacity below. Everything else on
-  // this screen (the back/settings buttons, shared controls, Ready button) reads the live values
-  // directly and never re-positions, so nothing about it needs masking.
-  const [panelLayout, setPanelLayout] = useState({ orientationMode, p1OnRight })
-  const panelOpacity = useSharedValue(1)
-  // Both directions live in this one reaction (panelOpacity's only writer) rather than a useEffect
-  // for the fade-out plus a second reaction for the fade-in. That split would let the fade-in start
-  // climbing back to 1 the instant setPanelLayout is *called*, racing ahead of the JS-thread commit
-  // that actually mounts the new branch/order — the exact bug this whole feature exists to avoid.
-  // Comparing live values against the already-committed panelLayout instead means the fade-in only
-  // fires once they've caught up, i.e. once the new layout is actually the one on screen.
-  //
-  // The 'unresolved' phase exists so a fresh navigation to this screen doesn't itself fade: p1OnRight
-  // starts as a guess (see useP1OnRight) and corrects itself moments later once its own initial
-  // orientation check resolves — that correction isn't a real rotation, so it snaps straight to the
-  // right layout instead of fading like an actual mid-loadout rotation would.
-  useAnimatedReaction(
-    () => {
-      if (!p1OnRightResolved) return 'unresolved'
-      return `${orientationMode}:${p1OnRight}` === `${panelLayout.orientationMode}:${panelLayout.p1OnRight}` ? 'match' : 'mismatch'
-    },
-    (phase, previousPhase) => {
-      if (previousPhase === null || phase === previousPhase) return
-      if (phase === 'match') {
-        if (previousPhase === 'mismatch') panelOpacity.value = withTiming(1, { duration: LOADOUT_PANEL_SWAP_FADE_MS })
-        return
-      }
-      if (previousPhase === 'unresolved') {
-        runOnJS(setPanelLayout)({ orientationMode, p1OnRight })
-        return
-      }
-      panelOpacity.value = withTiming(0, { duration: LOADOUT_PANEL_SWAP_FADE_MS }, (finished) => {
-        if (finished) runOnJS(setPanelLayout)({ orientationMode, p1OnRight })
-      })
-    }
-  )
-  const panelFadeStyle = useAnimatedStyle(() => ({ opacity: panelOpacity.value }))
+  // behind the live orientationMode/p1OnRight above — see useDualZoneLayout's own comment. Also
+  // drives the solo (vs-CPU) branch's own row below — that one doesn't rotate anything, but still
+  // reorders/fades across a portrait<->landscape change the same way.
+  const { panelLayout, panelFadeStyle } = useDualZoneLayout(orientationMode, p1OnRight, p1OnRightResolved, LOADOUT_PANEL_SWAP_FADE_MS)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const insets = useSafeAreaInsets()
@@ -174,28 +145,51 @@ export default function LoadoutScreen() {
   const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   const p2IsHuman = humanPlayers.includes(2)
-  const isPortrait = panelLayout.orientationMode === 'portrait'
+  const isPortrait = panelLayout.orientationMode === 'faceToFace'
+
+  // Where P2's own press-away zone lives on screen — matches panelLayout (the already-committed,
+  // currently-painted layout), not the live orientationMode/p1OnRight, since it needs to agree with
+  // whichever arrangement is actually on screen right now, mid-fade included. Portrait always
+  // renders P2's panel in the top half (see DualZoneLayout below); landscape puts it on whichever
+  // side panelLayout.p1OnRight says isn't P1's. Only meaningful in two-player mode — vsCpu's P2/CPU
+  // slot shares controlsHost instead (see p2Host below), so it never needs a zone of its own.
+  const p2ZoneStyle = gameMode === 'twoPlayer' ? (isPortrait ? styles.p2ZoneTop : panelLayout.p1OnRight ? styles.p2ZoneLeft : styles.p2ZoneRight) : null
 
   // Vs-CPU only has one human slot, so its Ready toggle renders standalone below both panels
-  // instead of embedded in P1's own panel.
+  // instead of embedded in this panel.
   const showReadyButton = gameMode === 'twoPlayer'
   // P1's own panel and the shared controls row always share one host — mutually exclusive
   // regardless of game mode, since both sit in the same near/bottom zone. Vs-CPU additionally
   // folds P2/CPU's panel into this same host: only one human is ever driving both slots there, so
   // having both YOU's and CPU's popovers open at once is just clutter. Two-player mode keeps P2 on
-  // its own independent host, since two real people editing at once is the whole point there.
+  // its own independent host, since two real people editing at once is the whole point there —
+  // lobby.tsx (rather than PlayerSetupPanel's own internal fallback) owns it explicitly so the
+  // press-away zones below can close it without a P1-side tap ever reaching into P2's own popover,
+  // or vice versa.
   const controlsHost = usePopoverHost()
-  const sharedHost = gameMode === 'vsCpu' ? controlsHost : undefined
+  const p2PanelHost = usePopoverHost()
+  const p2Host = gameMode === 'vsCpu' ? controlsHost : p2PanelHost
+  // Vs-CPU's own standalone Ready button (below, not per-panel — see showReadyButton) is centered
+  // under the whole row, not under either player's own trigger, so it doesn't share a center with
+  // an open popover the way a two-player panel's *embedded* Ready button does. A side player's
+  // popover is centered on that player's own (off-center) trigger instead, so it can't fully cover
+  // the wider gap between its edge and the standalone button's — leaving a sliver of the button's
+  // own border peeking out from beside/behind the popover. Faded out instead while any player's
+  // popover is open, rather than trying to reconcile the two different centers.
+  const anyPlayerPickerOpen = !!(controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-'))
 
   // Orientation is derived live from how the phone is held (see useDeviceOrientation) now, not a
   // per-round choice here — this row no longer takes orientationMode/orientationModeOptions/
   // onOrientationModeChange at all.
   const sharedControls = (
     <LoadoutSharedControls
-      host={sharedHost}
+      host={controlsHost}
       boardVariant={settings.boardVariant}
       boardVariantOptions={BOARD_VARIANT_OPTIONS}
       onBoardVariantChange={(value) => setSettings({ boardVariant: value })}
+      rink={settings.rink}
+      rinkOption={RINK_OPTION}
+      onRinkChange={(value) => setSettings({ rink: value })}
       friction={settings.friction}
       frictionOptions={FRICTION_OPTIONS}
       onFrictionChange={(value) => setSettings({ friction: value })}
@@ -216,50 +210,47 @@ export default function LoadoutScreen() {
       onAiDifficultyChange={gameMode === 'vsCpu' ? (value) => setSettings({ aiDifficulty: value }) : undefined}
       accentColor={themeColors.tertiary}
       mutedColor={fgMuted}
+      onAccentColor={themeColors.onTertiary}
       dark={dark}
     />
   )
 
-  // align mirrors panelLayout.p1OnRight (not the live value) so a panel's popover-anchor direction
-  // changes in step with its actual on-screen side, not ahead of the fade that masks the swap.
-  const p1Panel = <PlayerSetupPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} align={panelLayout.p1OnRight ? 'right' : undefined} />
-  const p2Panel = <PlayerSetupPanel idPrefix='p2' host={sharedHost} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} align={panelLayout.p1OnRight ? undefined : 'right'} />
+  const p1Panel = <PlayerSetupPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[1]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={(value) => setSettings({ controlScheme: { ...settings.controlScheme, 1: value } })} accentColor={themeColors.tertiary} mutedColor={fgMuted} />
+  const p2Panel = <PlayerSetupPanel idPrefix='p2' host={p2Host} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[2]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={(value) => setSettings({ controlScheme: { ...settings.controlScheme, 2: value } })} accentColor={themeColors.tertiary} mutedColor={fgMuted} />
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
+      {/* Press-away overlays for the loadout screen's own popovers (color pickers, control
+      dropdowns) — see PressAwayOverlay's own comment for the paint-order trick that keeps real
+      controls directly tappable. P1's covers the whole screen (their own panel plus every shared
+      setting reads as "theirs" — see LoadoutSharedControls), while P2's is scoped to just their
+      own half (p2ZoneStyle) and, being a later sibling, takes priority over P1's within that rect.
+
+      P2's overlay has to mount whenever *either* host has something open, not just p2Host — P1's
+      popover being open is exactly when P1's full-screen overlay is sitting underneath P2's zone
+      too, and if P2's own overlay were absent then (p2Host closed), a tap anywhere on P2's side
+      would fall straight through to P1's and close P1's dialog. Mounting it any time controlsHost
+      is open too — even though its own onPress (p2Host.close) is then a no-op — makes it "shield"
+      P2's zone from P1's overlay unconditionally, which is what actually keeps P2's side exempt
+      from P1's press-away regardless of whether P2 has anything open. */}
+      <PressAwayOverlay active={controlsHost.openId !== null} onPress={controlsHost.close} />
+      {p2ZoneStyle && <PressAwayOverlay active={controlsHost.openId !== null || p2Host.openId !== null} onPress={p2Host.close} style={p2ZoneStyle} />}
+
       <IconButton icon='arrow-left' iconColor={fg} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
       <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 
       {gameMode === 'twoPlayer' ? (
-        isPortrait ? (
-          // Player 1 is assumed to be the device's owner, so the near/bottom zone (unrotated)
-          // faces them; player 2 is the "far" player sitting across the table, so their zone is
-          // rotated 180° to face them from the opposite side of the device.
-          <View style={styles.dualZone}>
-            <Animated.View style={[styles.rotated180, panelFadeStyle]}>{p2Panel}</Animated.View>
-            {sharedControls}
-            <Animated.View style={panelFadeStyle}>{p1Panel}</Animated.View>
-          </View>
-        ) : (
-          // Landscape/side-by-side: both players sit upright next to each other, so the shared
-          // controls sit in their own row above, rather than squeezed into the narrow column
-          // between them.
-          <View style={styles.stackedZone}>
-            {sharedControls}
-            <Animated.View style={[styles.playersRow, panelFadeStyle]}>
-              {panelLayout.p1OnRight ? p2Panel : p1Panel}
-              {panelLayout.p1OnRight ? p1Panel : p2Panel}
-            </Animated.View>
-          </View>
-        )
+        // See @tastic/split-screen's DualZoneLayout for the portrait-vs-landscape switch and its
+        // own note on why P1's zone stays unrotated while P2's rotates 180° in portrait.
+        <DualZoneLayout panelLayout={panelLayout} panelFadeStyle={panelFadeStyle} p1={p1Panel} p2={p2Panel} shared={sharedControls} />
       ) : (
         <View style={styles.stackedZone}>
           {sharedControls}
-          <Animated.View style={[styles.playersRow, (controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-')) && styles.playersRowOpen, panelFadeStyle]}>
+          <Animated.View style={[styles.playersRow, anyPlayerPickerOpen && styles.playersRowOpen, panelFadeStyle]}>
             {!isPortrait && panelLayout.p1OnRight ? p2Panel : p1Panel}
             {!isPortrait && panelLayout.p1OnRight ? p1Panel : p2Panel}
           </Animated.View>
-          <ReadyButton color={p1Color} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} />
+          <ReadyButton color={p1Color} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} style={anyPlayerPickerOpen && styles.readyButtonHidden} />
         </View>
       )}
 
@@ -281,19 +272,46 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16
   },
-  dualZone: {
-    alignItems: 'center',
-    gap: 28
+  p2ZoneLeft: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    top: 0,
+    width: '50%'
   },
+  p2ZoneRight: {
+    bottom: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: '50%'
+  },
+  p2ZoneTop: {
+    height: '50%',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0
+  },
+  // Only used by vsCpu's stacked (non-rotated) layout below — two-player's own DualZoneLayout
+  // handles p1/p2 spacing itself. Matches PlayerSetupPanel's own pickerRow gap (12), not some
+  // wider "these are two separate panels" gap — vsCpu's human slot (color + control scheme) and
+  // CPU slot (color only) read as one evenly spaced row of triggers this way, rather than two
+  // independently-centered blocks whose different widths throw off screen-edge symmetry.
   playersRow: {
     flexDirection: 'row',
-    gap: 40
+    gap: 12
   },
   playersRowOpen: {
     zIndex: 100
   },
-  rotated180: {
-    transform: [{ rotate: '180deg' }]
+  // See anyPlayerPickerOpen above — opacity 0 (not display:'none') so the button keeps its layout
+  // space and doesn't shift the row above it when it disappears/reappears. pointerEvents:'none' too
+  // — otherwise the sliver an open popover doesn't cover would still be a live, just-invisible tap
+  // target underneath it.
+  readyButtonHidden: {
+    opacity: 0,
+    pointerEvents: 'none'
   },
   stackedZone: {
     alignItems: 'center',

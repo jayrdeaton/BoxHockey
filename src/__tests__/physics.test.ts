@@ -17,9 +17,11 @@ const board: BoardLayout = {
   centerY: 260,
   obstacles: [],
   gravityWells: [],
+  goalPosts: [],
   cornerRadius: 0,
   behindGoalDepth: 0,
-  faceoffOffsetYRatio: 0.42
+  faceoffOffsetYRatio: 0.42,
+  boardMarginTop: 0
 }
 
 const cx = board.x + board.width / 2 // 160
@@ -88,18 +90,24 @@ describe('stepPhysics — goal detection', () => {
   const safeX = (goalAbsLeft + goalAbsRight) / 2 // 160 — dead center
 
   it('scores P1 (top) once the puck has fully cleared the top goal line', () => {
-    // Trailing edge (y + r) just past board.y — the whole puck, not just the leading edge.
+    // Starts on the FIELD side (not yet past the line) and crosses fully within this one step —
+    // not merely placed already-past, which is now a materially different case (see stepPhysics'
+    // directional wasBehindTop/wasBehindBottom guard: a puck whose position was ALREADY fully
+    // past the line before this step doesn't score, precisely so a puck behind the goal (rink
+    // pocket setting on) can't drift into the goal's x-range from behind and score without a
+    // fresh crossing).
     // Top is P2's own crease (P1 always sits at the bottom), so a puck fully through it scores
     // for the attacker, P1.
-    const puck = { x: safeX, y: board.y - r - 1, vx: 0, vy: -5 }
+    const puck = { x: safeX, y: board.y + 5, vx: 0, vy: -50 }
     const result = stepPhysics(puck, board)
     expect(result.scored).toBe(1)
     expect(result.stopped).toBe(false)
   })
 
   it('scores P2 (bottom) once the puck has fully cleared the bottom goal line', () => {
+    // Same "crosses within this step" setup as the P1 test above.
     // Bottom is P1's own crease, so a puck fully through it scores for the attacker, P2.
-    const puck = { x: safeX, y: board.y + board.height + r + 1, vx: 0, vy: 5 }
+    const puck = { x: safeX, y: board.y + board.height - 5, vx: 0, vy: 50 }
     const result = stepPhysics(puck, board)
     expect(result.scored).toBe(2)
   })
@@ -114,14 +122,61 @@ describe('stepPhysics — goal detection', () => {
     expect(result.bounced).toBe(false)
   })
 
-  it('does NOT score when puck overlaps goal edge (partial entry)', () => {
-    // Puck right edge clips into goal but left edge is still outside
-    const clipX = goalAbsLeft + 2 // left edge of puck at 102, which is < goalAbsLeft
+  it("does NOT score on a partial entry (center inside, edge still outside), and does NOT bounce either — the flat wall's gap now uses the same center-only threshold as scoring and the posts", () => {
+    // Puck's own CENTER sits just inside the goal opening (120 < 122 < 200) even though its
+    // trailing edge (x - r = 104) still pokes outside it. Per explicit design, the flat wall no
+    // longer requires full-body clearance to open its gap — once centerInGoalX is true (the same
+    // threshold that governs scoring and gates the goalpost loop, see physics.ts's own comment),
+    // the wall gets out of the way entirely, even with no posts here (this fixture's goalPosts is
+    // empty) to catch the overhanging edge. This is what "the goal line is permeable" means.
+    const clipX = goalAbsLeft + 2
     const puck = { x: clipX, y: board.y + r - 1, vx: 0, vy: -5 }
     const result = stepPhysics(puck, board)
-    // puck.x - r = 84, goalAbsLeft = 120 → puck left edge is outside goal
+    expect(result.scored).toBeNull() // trailing edge hasn't cleared board.y yet
+    expect(result.bounced).toBe(false)
+  })
+
+  it("bounces off the flat wall when the puck's own CENTER is still outside the goal opening", () => {
+    // Mirrors the case above but the center itself sits just outside [goalAbsLeft, goalAbsRight]
+    // — centerInGoalX is false, so the flat wall's gap doesn't open at all. This is the real
+    // "missed the net" case now, decided purely by the center threshold rather than full-body
+    // clearance.
+    const missX = goalAbsLeft - 2
+    const puck = { x: missX, y: board.y + r - 1, vx: 0, vy: -5 }
+    const result = stepPhysics(puck, board)
     expect(result.scored).toBeNull()
     expect(result.bounced).toBe(true)
+  })
+
+  it('a puck already mid-crossing the goal line (leading edge past, trailing edge not) eventually completes the crossing instead of stalling short', () => {
+    // Real playtesting bug, found via an adversarial sweep after the goalpost/wall reordering fix
+    // above: once centerInGoalX is true, the flat wall is disabled for the ENTIRE corridor (by
+    // design — a clean shot shouldn't bounce off its own goal line), but nothing else acts on the
+    // puck there either. Ordinary friction decay could bring it below STOP_THRESHOLD before its
+    // trailing edge (y + r) ever cleared board.y — at which point it just sat there forever, not
+    // scored (body not fully through) and not bounced back out. Fixed by exempting a puck already
+    // mid-crossing from friction entirely (see stepPhysicsOnce's own comment) so it holds constant
+    // speed rather than decaying, guaranteeing it covers the remaining (bounded, sub-puck-diameter)
+    // gap in a bounded number of frames.
+    //
+    // Numbers chosen so this is a genuine regression guard, not a coincidence: starting 1px past
+    // the leading edge (y0 = board.y - 1), the remaining distance to full clearance is 17px. Under
+    // the OLD always-decaying friction, a puck's total lifetime travel distance is bounded by the
+    // geometric series speed / (1 - frictionFactor) — at this fixture's medium friction (0.986) and
+    // an initial speed of 0.2, that bound is ~14px, LESS than the 17px needed, so the old behavior
+    // would have stalled short every time regardless of iteration count.
+    const startY = board.y - 1
+    const puck = { x: cx, y: startY, vx: 0, vy: -0.2 }
+    let p = puck
+    let scored: 1 | 2 | null = null
+    let stopped = false
+    for (let i = 0; i < 500 && scored === null && !stopped; i++) {
+      const result = stepPhysics(p, board)
+      p = { x: result.x, y: result.y, vx: result.vx, vy: result.vy }
+      scored = result.scored
+      stopped = result.stopped
+    }
+    expect(scored).toBe(1)
   })
 })
 
@@ -245,7 +300,7 @@ describe('applyGravityWellForces — activeAtRest', () => {
 describe('gravity wells — corner repel never stalls', () => {
   it('a puck seeded at rest inside an activeAtRest repeller ends up substantially further out, not still wedged near its start', () => {
     // Mirrors the 'never softlocks' attractor test above, but for the opposite failure mode: a
-    // repeller that's supposed to actively evict a stopped puck (gravityClassic's corner wells)
+    // repeller that's supposed to actively evict a stopped puck (gravity's corner wells)
     // rather than just fail to hold it.
     //
     // NOT asserting the puck clears the well's full nominal radius — the quadratic falloff
