@@ -1,7 +1,7 @@
 import { MenuOption, PopoverHost, SectionedDropdown, usePopoverHost } from '@tastic/hud'
 import { StyleSheet, View } from 'react-native'
 
-import { BoardVariant, FrictionLevel, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
+import { BoardVariant, FrictionLevel, InterceptSpeed, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
 
 interface Props {
   // Shared popover host — see PlayerSetupPanel's identical `host` prop. loadout.tsx always passes
@@ -29,6 +29,9 @@ interface Props {
   puckSize: PuckSizeLevel
   puckSizeOptions: MenuOption<PuckSizeLevel>[]
   onPuckSizeChange: (value: PuckSizeLevel) => void
+  interceptSpeed: InterceptSpeed
+  interceptSpeedOptions: MenuOption<InterceptSpeed>[]
+  onInterceptSpeedChange: (value: InterceptSpeed) => void
   scoreToWin: number
   scoreToWinOptions: MenuOption<number>[]
   onScoreToWinChange: (value: number) => void
@@ -52,9 +55,9 @@ interface Props {
 // host (passed in by loadout.tsx in every game mode — see the `host` prop above) rather than owning
 // an independent one, so this row participates in P1's mutual-exclusivity and press-away wiring the
 // same way P1's own panel does.
-const OWN_IDS = ['boardVariant', 'puckPhysics', 'matchRules', 'shotPreviewLength', 'aiDifficulty']
+const OWN_IDS = ['boardVariant', 'puckPhysics', 'slapShot', 'matchRules', 'shotPreviewLength', 'aiDifficulty']
 
-export function LoadoutSharedControls({ host: sharedHost, boardVariant, boardVariantOptions, onBoardVariantChange, rink, rinkOption, onRinkChange, friction, frictionOptions, onFrictionChange, puckSize, puckSizeOptions, onPuckSizeChange, scoreToWin, scoreToWinOptions, onScoreToWinChange, shotPreviewLength, shotPreviewLengthOptions, onShotPreviewLengthChange, tipoffMode, tipoffModeOptions, onTipoffModeChange, aiDifficulty, aiDifficultyOptions, onAiDifficultyChange, accentColor, mutedColor, onAccentColor, dark }: Props) {
+export function LoadoutSharedControls({ host: sharedHost, boardVariant, boardVariantOptions, onBoardVariantChange, rink, rinkOption, onRinkChange, friction, frictionOptions, onFrictionChange, puckSize, puckSizeOptions, onPuckSizeChange, interceptSpeed, interceptSpeedOptions, onInterceptSpeedChange, scoreToWin, scoreToWinOptions, onScoreToWinChange, shotPreviewLength, shotPreviewLengthOptions, onShotPreviewLengthChange, tipoffMode, tipoffModeOptions, onTipoffModeChange, aiDifficulty, aiDifficultyOptions, onAiDifficultyChange, accentColor, mutedColor, onAccentColor, dark }: Props) {
   const ownHost = usePopoverHost()
   const host = sharedHost ?? ownHost
   // See PlayerSetupPanel's identical ownPopoverOpen comment — elevating this row for *any* open
@@ -84,8 +87,8 @@ export function LoadoutSharedControls({ host: sharedHost, boardVariant, boardVar
         dark={dark}
       />
 
-      {/* Friction and puck size both just govern how the puck itself behaves, so they share one
-      popover as two 'single' sections rather than two separate triggers — same mechanism as
+      {/* Friction and puck size both just govern how the puck itself physically behaves, so they
+      share one popover as two 'single' sections rather than separate triggers — same mechanism as
       board+rink above, just two full single-select lists instead of a single-select plus a
       one-item toggle. autoDismiss is off here (unlike board+rink): with two real lists to browse,
       picking a value in one shouldn't snap the whole popover shut before the other's even been
@@ -100,6 +103,22 @@ export function LoadoutSharedControls({ host: sharedHost, boardVariant, boardVar
           { kind: 'single', id: 'friction', options: frictionOptions, value: friction, onChange: onFrictionChange },
           { kind: 'single', id: 'puckSize', options: puckSizeOptions, value: puckSize, onChange: onPuckSizeChange }
         ]}
+        accentColor={accentColor}
+        mutedColor={mutedColor}
+        onAccentColor={onAccentColor}
+        dark={dark}
+      />
+
+      {/* Its own standalone trigger, not folded into puckPhysics above — this isn't a physics
+      tuning knob like friction/puck size, it's a distinct skill mechanic (mid-slide interception,
+      see InterceptSpeed in types/index.ts), and deserves a name that says so rather than being a
+      third unlabeled item buried in a "Puck physics" popover. */}
+      <SectionedDropdown
+        id='slapShot'
+        host={host}
+        icon='hockey-sticks'
+        accessibilityLabel='Slap shot'
+        sections={[{ kind: 'single', id: 'interceptSpeed', options: interceptSpeedOptions, value: interceptSpeed, onChange: onInterceptSpeedChange }]}
         accentColor={accentColor}
         mutedColor={mutedColor}
         onAccentColor={onAccentColor}

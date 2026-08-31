@@ -30,9 +30,14 @@ function SettingIcon({ source, color, containerColor }: SettingIconProps) {
 export interface SettingsDialogProps {
   visible: boolean
   onDismiss: () => void
+  // Live physical-hold rotation (see @tastic/split-screen's getViewRotation) — this dialog renders
+  // as a centered Portal modal, unaffected by whichever screen's own FakeLandscapeView wraps its
+  // trigger, so it has to rotate its own card content to read right-side-up for whichever way the
+  // phone is actually being held. Defaults to 0 (unrotated) for any caller that doesn't track it.
+  rotation?: number
 }
 
-export function SettingsDialog({ visible, onDismiss }: SettingsDialogProps) {
+export function SettingsDialog({ visible, onDismiss, rotation = 0 }: SettingsDialogProps) {
   const { dark, colors } = useAutoPaperTheme()
   const { settings, setSettings } = useGameSettings()
   const { settings: hapticSettings, set: setHapticSettings } = useHapticSettings()
@@ -68,7 +73,7 @@ export function SettingsDialog({ visible, onDismiss }: SettingsDialogProps) {
 
   return (
     <>
-      <Dialog visible={visible} onDismiss={onDismiss} style={styles.dialog}>
+      <Dialog visible={visible} onDismiss={onDismiss} style={[styles.dialog, rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }]}>
         <Dialog.Title>Settings</Dialog.Title>
         {/* react-native-paper's Dialog.ScrollArea has a fixed 24px marginBottom baked in (meant to
           reserve room for a Dialog.Actions row below it) — overridden to 0 since this dialog has

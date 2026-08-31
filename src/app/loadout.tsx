@@ -1,7 +1,7 @@
 import { defaultColors, getThirdColor, useAutoPaperTheme, useThemeSettings } from '@rific/auto-paper'
 import { IconButton } from '@rific/feedback-press'
 import { MenuOption, PressAwayOverlay, ReadyButton, usePopoverHost } from '@tastic/hud'
-import { DualZoneLayout, useDeviceOrientation, useDualZoneLayout, useOrientationLock, useP1OnRight } from '@tastic/split-screen'
+import { DualZoneLayout, FakeLandscapeView, getViewRotation, rotateInsets, useAccelerometerOrientation, useDualZoneLayout } from '@tastic/split-screen'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -13,7 +13,8 @@ import { PlayerSetupPanel } from '@/components/PlayerSetupPanel'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { LOADOUT_PANEL_SWAP_FADE_MS } from '@/constants/game'
 import { useGameSettings } from '@/hooks/useGameSettings'
-import { BoardVariant, ControlScheme, FrictionLevel, Player, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
+import { useProfiles } from '@/hooks/useProfiles'
+import { BoardVariant, ControlScheme, FrictionLevel, InterceptSpeed, Player, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
 import { AI_DIFFICULTY_LABELS, AIDifficulty } from '@/utils/aiOpponent'
 import { BOARD_VARIANT_LABELS } from '@/utils/board'
 import { humanPlayersFor, parseGameMode } from '@/utils/gameMode'
@@ -36,6 +37,12 @@ const FRICTION_OPTIONS: MenuOption<FrictionLevel>[] = [
   { value: 'high', label: 'Slow', description: 'Puck stops quickly', icon: 'speedometer-slow' },
   { value: 'medium', label: 'Medium', description: 'Standard glide', icon: 'speedometer-medium' },
   { value: 'low', label: 'Fast', description: 'Puck glides farther', icon: 'speedometer' }
+]
+
+const INTERCEPT_SPEED_OPTIONS: MenuOption<InterceptSpeed>[] = [
+  { value: 'low', label: 'Patient', description: 'Only once it’s nearly stopped', icon: 'timer-sand-full' },
+  { value: 'medium', label: 'Alert', description: 'Jump on a slow roll', icon: 'hand-back-right-outline' },
+  { value: 'high', label: 'Aggressive', description: 'Take it while it’s still gliding', icon: 'lightning-bolt' }
 ]
 
 const PUCK_SIZE_OPTIONS: MenuOption<PuckSizeLevel>[] = [
@@ -78,24 +85,32 @@ export default function LoadoutScreen() {
   const humanPlayers = useMemo(() => humanPlayersFor(gameMode), [gameMode])
 
   const { settings, setSettings, commitRoundSettings } = useGameSettings()
-  // orientationMode just follows the device's current physical shape (see useDeviceOrientation),
-  // CPU games included — how you're holding the phone right now decides the panel arrangement,
-  // not a stored per-round choice. This is what lets two players sit shoulder-to-shoulder and pick
-  // a color at the same time once the phone is turned sideways, instead of a portrait-narrow
-  // column — and for vs-CPU, it's simply whichever way the solo player is holding it. Lock
-  // Orientation (see SettingsDialog) is the opt-in for pinning it.
-  const orientationMode = useDeviceOrientation()
-  useOrientationLock(settings.lockOrientation, orientationMode)
-  const { p1OnRight, resolved: p1OnRightResolved } = useP1OnRight()
+  const { profiles, lastSelected, updateProfile, selectProfile } = useProfiles()
+  // orientationMode just follows the device's current physical tilt (see useAccelerometerOrientation),
+  // CPU games included — how you're holding the phone right now decides the panel arrangement, not
+  // a stored per-round choice. This is what lets two players sit shoulder-to-shoulder and pick a
+  // color at the same time once the phone is turned sideways, instead of a portrait-narrow column —
+  // and for vs-CPU, it's simply whichever way the solo player is holding it. Lock Orientation (see
+  // SettingsDialog) is the opt-in for pinning it. app.json is portrait-locked at the OS level now
+  // (no more real OS rotation to rely on — see @tastic/split-screen's FakeLandscapeView below,
+  // which fakes the rest entirely in JS from this hook's live accelerometer reading).
+  const { orientationMode, p1OnRight, upsideDown, resolved: p1OnRightResolved } = useAccelerometerOrientation(settings.lockOrientation)
 
   // The panel area's own layout (which branch renders, which side each panel is on) lags one fade
-  // behind the live orientationMode/p1OnRight above — see useDualZoneLayout's own comment. Also
-  // drives the solo (vs-CPU) branch's own row below — that one doesn't rotate anything, but still
-  // reorders/fades across a portrait<->landscape change the same way.
-  const { panelLayout, panelFadeStyle } = useDualZoneLayout(orientationMode, p1OnRight, p1OnRightResolved, LOADOUT_PANEL_SWAP_FADE_MS)
+  // behind the live orientationMode/p1OnRight/upsideDown above — see useDualZoneLayout's own
+  // comment. Also drives the solo (vs-CPU) branch's own row below — that one doesn't rotate
+  // anything, but still reorders/fades across a portrait<->landscape change the same way.
+  const { panelLayout, panelFadeStyle } = useDualZoneLayout(orientationMode, p1OnRight, p1OnRightResolved, upsideDown, LOADOUT_PANEL_SWAP_FADE_MS)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const insets = useSafeAreaInsets()
+  // react-native-safe-area-context always reports insets relative to the device's own fixed
+  // physical frame (the OS thinks the interface is still portrait-locked and never rotates, so it
+  // has no idea FakeLandscapeView below is rotating the content) — rotateInsets remaps them onto
+  // whichever edge they actually correspond to once visually rotated, using the same committed
+  // rotation FakeLandscapeView itself renders with, so `top`/`left`/`right` below always mean the
+  // screen's real, visual edges regardless of how the phone is being held.
+  const rotation = getViewRotation(panelLayout.orientationMode, panelLayout.p1OnRight, panelLayout.upsideDown)
+  const insets = rotateInsets(useSafeAreaInsets(), rotation)
   const { colors: themeColors, dark } = useAutoPaperTheme()
   const { set: setThemeColor } = useThemeSettings()
   const p1Color = themeColors.primary
@@ -104,6 +119,12 @@ export default function LoadoutScreen() {
   // Picking the other slot's exact current color swaps the two instead of no-op'ing — only
   // reachable at all when that slot's own picker allowed it (allowSwapTaken: vs-CPU only, where
   // the "other" color there is only ever the CPU's, not a second real person's choice).
+  //
+  // Deliberately does *not* sync back to a currently-selected profile's own saved color, unlike
+  // control scheme below — a profile's color is its "favorite," a default to pre-fill the seat with
+  // at selection time (see PlayerSetupPanel.tsx's handleProfileSelect); freely repainting your own
+  // paddle for one match shouldn't silently redefine what that profile is remembered as. Editing the
+  // saved color itself is Manage's own job now (see app/profiles.tsx's own ProfilesManager).
   const handleP1ColorChange = useCallback(
     (hex: string) => {
       const nextP2 = hex.toLowerCase() === p2Color.toLowerCase() ? p1Color : p2Color
@@ -117,6 +138,27 @@ export default function LoadoutScreen() {
       setThemeColor({ color: { primary: nextP1, secondary: hex, tertiary: getThirdColor(nextP1, hex) } })
     },
     [setThemeColor, p1Color, p2Color]
+  )
+
+  // Unlike color above, this one *does* keep syncing back to a currently-selected profile's own
+  // saved control scheme for as long as it stays selected: control scheme has no "freely override it
+  // for one match" use case the way a paddle's color does. No swap-on-conflict needed here (unlike
+  // LightCycles' identically-shaped keyScheme handler) — pull/push isn't a shared physical resource
+  // the way a keyboard's WASD/arrow clusters are, so both players can happily use the same scheme at
+  // once.
+  const handleP1ControlSchemeChange = useCallback(
+    (value: ControlScheme) => {
+      setSettings({ controlScheme: { ...settings.controlScheme, 1: value } })
+      if (lastSelected[1]) updateProfile(lastSelected[1], { controlScheme: value })
+    },
+    [setSettings, settings.controlScheme, lastSelected, updateProfile]
+  )
+  const handleP2ControlSchemeChange = useCallback(
+    (value: ControlScheme) => {
+      setSettings({ controlScheme: { ...settings.controlScheme, 2: value } })
+      if (lastSelected[2]) updateProfile(lastSelected[2], { controlScheme: value })
+    },
+    [setSettings, settings.controlScheme, lastSelected, updateProfile]
   )
 
   const [ready, setReady] = useState<Record<Player, boolean>>({ 1: false, 2: false })
@@ -193,6 +235,9 @@ export default function LoadoutScreen() {
       friction={settings.friction}
       frictionOptions={FRICTION_OPTIONS}
       onFrictionChange={(value) => setSettings({ friction: value })}
+      interceptSpeed={settings.interceptSpeed}
+      interceptSpeedOptions={INTERCEPT_SPEED_OPTIONS}
+      onInterceptSpeedChange={(value) => setSettings({ interceptSpeed: value })}
       puckSize={settings.puckSize}
       puckSizeOptions={PUCK_SIZE_OPTIONS}
       onPuckSizeChange={(value) => setSettings({ puckSize: value })}
@@ -215,46 +260,60 @@ export default function LoadoutScreen() {
     />
   )
 
-  const p1Panel = <PlayerSetupPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[1]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={(value) => setSettings({ controlScheme: { ...settings.controlScheme, 1: value } })} accentColor={themeColors.tertiary} mutedColor={fgMuted} />
-  const p2Panel = <PlayerSetupPanel idPrefix='p2' host={p2Host} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[2]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={(value) => setSettings({ controlScheme: { ...settings.controlScheme, 2: value } })} accentColor={themeColors.tertiary} mutedColor={fgMuted} />
+  // Always 'P1'/'P2', regardless of game mode — see ProfilePicker's own doc for why the trigger uses
+  // this instead of "Player" (Player stays as the menu's own row, just not the idle label — using
+  // the same word for both would make it impossible to tell "nothing selected yet" from "Player
+  // deliberately selected" at a glance).
+  const p1Panel = <PlayerSetupPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[1]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={handleP1ControlSchemeChange} accentColor={themeColors.tertiary} mutedColor={fgMuted} profiles={profiles} selectedProfileId={lastSelected[1]} takenProfileId={lastSelected[2]} guestLabel='P1' onProfileSelect={(profile) => selectProfile(1, profile?.id ?? null)} onManageProfiles={() => router.push('/profiles')} />
+  const p2Panel = <PlayerSetupPanel idPrefix='p2' host={p2Host} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[2]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={handleP2ControlSchemeChange} accentColor={themeColors.tertiary} mutedColor={fgMuted} profiles={p2IsHuman ? profiles : undefined} selectedProfileId={lastSelected[2]} takenProfileId={lastSelected[1]} guestLabel='P2' onProfileSelect={p2IsHuman ? (profile) => selectProfile(2, profile?.id ?? null) : undefined} />
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      {/* Press-away overlays for the loadout screen's own popovers (color pickers, control
-      dropdowns) — see PressAwayOverlay's own comment for the paint-order trick that keeps real
-      controls directly tappable. P1's covers the whole screen (their own panel plus every shared
-      setting reads as "theirs" — see LoadoutSharedControls), while P2's is scoped to just their
-      own half (p2ZoneStyle) and, being a later sibling, takes priority over P1's within that rect.
+      {/* Everything below reads correctly no matter which way the phone is actually being held —
+      see @tastic/split-screen's FakeLandscapeView for why this is needed at all now that the app is
+      portrait-locked at the OS level (no more real OS rotation to rely on). Driven by panelLayout
+      (the same committed, already-fade-masked state DualZoneLayout itself renders from), not the
+      live orientationMode/p1OnRight/upsideDown above, so the visual rotation change and the panel
+      swap/reorder always land in the same fade-covered moment instead of one snapping ahead of the
+      other. SettingsDialog is deliberately left outside this wrapper — it renders as a centered
+      modal overlay via Portal, unaffected by (and not needing) this transform. */}
+      <FakeLandscapeView orientationMode={panelLayout.orientationMode} p1OnRight={panelLayout.p1OnRight} upsideDown={panelLayout.upsideDown} style={styles.rotatable}>
+        {/* Press-away overlays for the loadout screen's own popovers (color pickers, control
+        dropdowns) — see PressAwayOverlay's own comment for the paint-order trick that keeps real
+        controls directly tappable. P1's covers the whole screen (their own panel plus every shared
+        setting reads as "theirs" — see LoadoutSharedControls), while P2's is scoped to just their
+        own half (p2ZoneStyle) and, being a later sibling, takes priority over P1's within that rect.
 
-      P2's overlay has to mount whenever *either* host has something open, not just p2Host — P1's
-      popover being open is exactly when P1's full-screen overlay is sitting underneath P2's zone
-      too, and if P2's own overlay were absent then (p2Host closed), a tap anywhere on P2's side
-      would fall straight through to P1's and close P1's dialog. Mounting it any time controlsHost
-      is open too — even though its own onPress (p2Host.close) is then a no-op — makes it "shield"
-      P2's zone from P1's overlay unconditionally, which is what actually keeps P2's side exempt
-      from P1's press-away regardless of whether P2 has anything open. */}
-      <PressAwayOverlay active={controlsHost.openId !== null} onPress={controlsHost.close} />
-      {p2ZoneStyle && <PressAwayOverlay active={controlsHost.openId !== null || p2Host.openId !== null} onPress={p2Host.close} style={p2ZoneStyle} />}
+        P2's overlay has to mount whenever *either* host has something open, not just p2Host — P1's
+        popover being open is exactly when P1's full-screen overlay is sitting underneath P2's zone
+        too, and if P2's own overlay were absent then (p2Host closed), a tap anywhere on P2's side
+        would fall straight through to P1's and close P1's dialog. Mounting it any time controlsHost
+        is open too — even though its own onPress (p2Host.close) is then a no-op — makes it "shield"
+        P2's zone from P1's overlay unconditionally, which is what actually keeps P2's side exempt
+        from P1's press-away regardless of whether P2 has anything open. */}
+        <PressAwayOverlay active={controlsHost.openId !== null} onPress={controlsHost.close} />
+        {p2ZoneStyle && <PressAwayOverlay active={controlsHost.openId !== null || p2Host.openId !== null} onPress={p2Host.close} style={p2ZoneStyle} />}
 
-      <IconButton icon='arrow-left' iconColor={fg} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
-      <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+        <IconButton icon='arrow-left' iconColor={fg} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
+        <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 
-      {gameMode === 'twoPlayer' ? (
-        // See @tastic/split-screen's DualZoneLayout for the portrait-vs-landscape switch and its
-        // own note on why P1's zone stays unrotated while P2's rotates 180° in portrait.
-        <DualZoneLayout panelLayout={panelLayout} panelFadeStyle={panelFadeStyle} p1={p1Panel} p2={p2Panel} shared={sharedControls} />
-      ) : (
-        <View style={styles.stackedZone}>
-          {sharedControls}
-          <Animated.View style={[styles.playersRow, anyPlayerPickerOpen && styles.playersRowOpen, panelFadeStyle]}>
-            {!isPortrait && panelLayout.p1OnRight ? p2Panel : p1Panel}
-            {!isPortrait && panelLayout.p1OnRight ? p1Panel : p2Panel}
-          </Animated.View>
-          <ReadyButton color={p1Color} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} style={anyPlayerPickerOpen && styles.readyButtonHidden} />
-        </View>
-      )}
+        {gameMode === 'twoPlayer' ? (
+          // See @tastic/split-screen's DualZoneLayout for the portrait-vs-landscape switch and its
+          // own note on why P1's zone stays unrotated while P2's rotates 180° in portrait.
+          <DualZoneLayout panelLayout={panelLayout} panelFadeStyle={panelFadeStyle} p1={p1Panel} p2={p2Panel} shared={sharedControls} />
+        ) : (
+          <View style={styles.stackedZone}>
+            {sharedControls}
+            <Animated.View style={[styles.playersRow, anyPlayerPickerOpen && styles.playersRowOpen, panelFadeStyle]}>
+              {!isPortrait && panelLayout.p1OnRight ? p2Panel : p1Panel}
+              {!isPortrait && panelLayout.p1OnRight ? p1Panel : p2Panel}
+            </Animated.View>
+            <ReadyButton color={p1Color} ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} style={anyPlayerPickerOpen && styles.readyButtonHidden} />
+          </View>
+        )}
+      </FakeLandscapeView>
 
-      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} />
+      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} rotation={rotation} />
     </View>
   )
 }
@@ -266,11 +325,7 @@ const styles = StyleSheet.create({
     top: 8
   },
   container: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 32,
-    justifyContent: 'center',
-    paddingHorizontal: 16
+    flex: 1
   },
   p2ZoneLeft: {
     bottom: 0,
@@ -312,6 +367,17 @@ const styles = StyleSheet.create({
   readyButtonHidden: {
     opacity: 0,
     pointerEvents: 'none'
+  },
+  // Owns the flex-centering layout `container` used to apply directly — now one level deeper, since
+  // everything visible sits inside FakeLandscapeView, which needs a real (not shrink-wrapped)
+  // full-bleed box to size its own absolutely-positioned children (PressAwayOverlay, back/settings
+  // buttons) against correctly.
+  rotatable: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 16
   },
   stackedZone: {
     alignItems: 'center',

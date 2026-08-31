@@ -1,7 +1,7 @@
-import { MAX_SPEED } from '@/constants/game'
+import { FRICTION_LEVELS, GOAL_LINE_STROKE_WIDTH, MAX_SPEED, WALL_POST_RADIUS_RATIO } from '@/constants/game'
 import { BoardVariant, PuckSizeLevel } from '@/types'
 import { computeBoardLayout, faceoffZoneCenters, faceoffZoneRadius } from '@/utils/board'
-import { circleVsRect, stepPhysics } from '@/utils/physics'
+import { circleVsRect, computeTrajectory, stepPhysics } from '@/utils/physics'
 
 // Integration coverage for computeBoardLayout + stepPhysics together, using the REAL layout
 // geometry — unlike physics.test.ts/aiOpponent.test.ts, which construct a synthetic BoardLayout
@@ -233,6 +233,65 @@ describe('goalposts still collide when an angled approach crosses the corridor b
   }
 })
 
+describe('rink: goalposts stop deflecting a puck once it is fully behind that goal\'s own line', () => {
+  // Real user report: "I'm hitting the posts on the back when I feel like I shouldn't be, behind
+  // the goal" — real hockey posts don't extend backward into the net, they only matter for a shot
+  // approaching the goal mouth from the playable side. Fixed by gating each post's collision on
+  // the SAME wasBehindTop/wasBehindBottom flags stepPhysics' own one-way door already uses (see
+  // physics.ts's post-loop comment) — a post whose own goal the puck is already fully behind is
+  // skipped entirely, while the OTHER goal's posts (and this same goal's posts on an ordinary
+  // front approach, or mid-crossing) are completely unaffected. Only reachable when rink is on —
+  // with rink off, a live puck can never legitimately be "behind" a line without having already
+  // scored the instant it happened (see wasBehindTop's own comment), so the gate is a structural
+  // no-op there, not something that needs its own rink=false test.
+  it('a puck deep in the pocket, poking at the top-left post from behind, passes through untouched', () => {
+    const board = computeBoardLayout(400, 900, insets, 'classic', 'medium', true)
+    const post = board.goalPosts.find((p) => p.player === 2 && p.x < board.centerX)!
+    const r = board.puckRadius
+    // Comfortably behind the top line (wasBehindTop has real margin) while still genuinely
+    // overlapping the post's own circle from the pocket side — without the fix this would clang
+    // off the post exactly like the front-approach tests above prove it should when NOT behind.
+    const overlap = post.radius * 0.5
+    const puck = { x: post.x, y: board.y - r - (post.radius - overlap), vx: 3, vy: 0 }
+    expect(puck.y + r).toBeLessThan(board.y) // sanity: genuinely wasBehindTop
+    expect(Math.hypot(puck.x - post.x, puck.y - post.y)).toBeLessThan(r + post.radius) // sanity: genuinely overlapping
+    const result = stepPhysics(puck, board, 1)
+    expect(result.bounced).toBe(false)
+    expect(result.vx).toBeCloseTo(3, 1) // velocity untouched — no deflection happened at all
+  })
+
+  it('the SAME post still deflects normally once the puck is back in front of the line', () => {
+    // Regression guard against over-widening the gate: approaching from the playable side (not
+    // behind) must keep working exactly like the existing "still collide" tests above. Just
+    // bounced === true (not also a vx/vy assertion): this puck's straight-down-the-post-axis
+    // approach makes the collision normal here nearly parallel to its own velocity, so a real hit
+    // can legitimately leave velocity almost unchanged — bounced is what actually proves the
+    // post's own circleVsCircle fired (as opposed to being skipped), which is the only thing this
+    // test needs to guard against.
+    const board = computeBoardLayout(400, 900, insets, 'classic', 'medium', true)
+    const post = board.goalPosts.find((p) => p.player === 2 && p.x < board.centerX)!
+    const r = board.puckRadius
+    const overlap = post.radius * 0.5
+    const puck = { x: post.x, y: board.y + r + (post.radius - overlap), vx: -3, vy: 0 }
+    expect(puck.y - r).toBeGreaterThan(board.y) // sanity: NOT behind — this is the field side
+    const result = stepPhysics(puck, board, 1)
+    expect(result.bounced).toBe(true)
+  })
+
+  it('symmetric case: a puck deep behind the BOTTOM line passes through the bottom-left post untouched', () => {
+    const board = computeBoardLayout(400, 900, insets, 'classic', 'medium', true)
+    const post = board.goalPosts.find((p) => p.player === 1 && p.x < board.centerX)!
+    const r = board.puckRadius
+    const overlap = post.radius * 0.5
+    const puck = { x: post.x, y: board.y + board.height + r + (post.radius - overlap), vx: -3, vy: 0 }
+    expect(puck.y - r).toBeGreaterThan(board.y + board.height) // sanity: genuinely wasBehindBottom
+    expect(Math.hypot(puck.x - post.x, puck.y - post.y)).toBeLessThan(r + post.radius) // sanity: overlapping
+    const result = stepPhysics(puck, board, 1)
+    expect(result.bounced).toBe(false)
+    expect(result.vx).toBeCloseTo(-3, 1)
+  })
+})
+
 describe('the flat wall never fires within a post\'s own reach (no "flat bounce standing in for the post")', () => {
   // A second, distinct bug from the one above, found via live playtesting right after that fix
   // landed ("the wall shouldn't even extend to under the post"): the goalpost-before-wall ordering
@@ -361,6 +420,35 @@ describe('rink: the true outer boundary is solid everywhere, including the goal 
       if (result.stopped) break
     }
     expect(everBounced).toBe(true)
+  })
+
+  it('does NOT flag goalDoorHit for a bounce off the TRUE far boundary — a different collision from the goal-mouth door, using real layout geometry', () => {
+    // A single isolated step against the far wall specifically (not a multi-step run toward it —
+    // a puck given enough time bouncing around the pocket will likely touch BOTH the far wall and
+    // the door before coming to rest, which wouldn't isolate which collision this test cares about).
+    const board = computeBoardLayout(400, 900, insets, 'classic', 'medium', true)
+    const outerTop = board.y - board.behindGoalDepth
+    const puck = { x: board.centerX, y: outerTop + board.puckRadius + 1, vx: 0, vy: -5 }
+    const result = stepPhysics(puck, board, 1)
+    expect(result.bounced).toBe(true)
+    expect(result.goalDoorHit).toBeNull()
+  })
+
+  it('flags goalDoorHit for a puck already behind the line bouncing off the door on its way back toward the front, using real layout geometry', () => {
+    const board = computeBoardLayout(400, 900, insets, 'classic', 'medium', true)
+    // Same starting position as the test above (already behind the line, within the goal's own
+    // x-range), but heading back TOWARD the front line (positive vy) instead of deeper into the
+    // pocket — this is what actually reaches the door.
+    let puck = { x: board.centerX, y: board.y - board.puckRadius - board.behindGoalDepth * 0.3, vx: 0, vy: 8 }
+    let sawGoalDoorHit: 'top' | 'bottom' | null = null
+    for (let i = 0; i < 200; i++) {
+      const result = stepPhysics(puck, board, 1)
+      puck = { x: result.x, y: result.y, vx: result.vx, vy: result.vy }
+      expect(result.scored).toBeNull() // the door's whole job is to prevent this from ever scoring
+      if (result.goalDoorHit) sawGoalDoorHit = result.goalDoorHit
+      if (result.stopped) break
+    }
+    expect(sawGoalDoorHit).toBe('top')
   })
 })
 
@@ -527,5 +615,162 @@ describe('rink borrows from the safe-area insets for its pocket depth', () => {
       if (result.scored !== null || result.stopped) break
     }
     expect(reachedPocket).toBe(true)
+  })
+})
+
+// Walls (the desktop-web perimeter box and the classic/gauntlet center-divider walls) always read
+// as thin as the goal line itself, in every mode including rink — per explicit correction, this
+// is NOT rink-conditional (an earlier version gated it to rink-off only). See computeBoardLayout's
+// wallThickness local.
+describe('walls are always as thin as the goal line', () => {
+  const sizes: PuckSizeLevel[] = ['small', 'medium', 'large']
+  const variants: BoardVariant[] = ['classic', 'gauntlet', 'gravity']
+
+  for (const variant of variants) {
+    for (const rink of [false, true]) {
+      it.each(sizes)(`${variant}: board.wallThickness equals GOAL_LINE_STROKE_WIDTH when rink=${rink}, puckSize=%s`, (size) => {
+        const board = computeBoardLayout(400, 900, insets, variant, size, rink)
+        expect(board.wallThickness).toBe(GOAL_LINE_STROKE_WIDTH)
+        // Confirm the SAME value actually sized the obstacles, not just the returned field.
+        for (const obs of board.obstacles) {
+          expect(Math.min(obs.width, obs.height)).toBeCloseTo(GOAL_LINE_STROKE_WIDTH, 5)
+        }
+      })
+    }
+  }
+})
+
+// Regression coverage for the same divider-hole visual clarity this session added: thinning the
+// walls (above) makes each hole's edges less visually anchored, so they get the same small round
+// "post" cap treatment buildGoalPosts already gives the goal mouth — see buildWallPosts in
+// utils/board.ts. These are purely decorative (the Obstacle rect's own corner already collides
+// correctly at this exact point), so there's no physics.ts coverage needed here, only geometry.
+// Built for every mode including rink — same "not rink-conditional" correction as wallThickness.
+describe('wall posts cap each divider/gauntlet gap edge, in every mode', () => {
+  for (const rink of [false, true]) {
+    it(`classic/gravity: 4 posts at the 2 holes' edges, on the wall's fixed centerline (rink=${rink})`, () => {
+      for (const variant of ['classic', 'gravity'] as BoardVariant[]) {
+        const board = computeBoardLayout(400, 900, insets, variant, 'medium', rink)
+        expect(board.wallPosts).toHaveLength(4)
+        for (const post of board.wallPosts) {
+          expect(post.y).toBeCloseTo(board.y + board.height / 2, 5)
+          expect(post.radius).toBeCloseTo(board.puckRadius * WALL_POST_RADIUS_RATIO, 5)
+        }
+      }
+    })
+
+    it(`gauntlet: 10 posts total across all 3 walls (4 + 2 + 4) (rink=${rink})`, () => {
+      const board = computeBoardLayout(400, 900, insets, 'gauntlet', 'medium', rink)
+      expect(board.wallPosts).toHaveLength(10)
+    })
+
+    it(`every wall post sits on an obstacle edge (x matches a gap edge, y on that same wall's centerline) (rink=${rink})`, () => {
+      // Ties the decorative post's geometry directly to the real collision rect it's capping. A
+      // post sits on the wall's vertical CENTERLINE (post.y === obs.y + obs.height/2), not a rect
+      // corner — unlike the goal line (a zero-thickness Line, so its posts land exactly on its
+      // endpoints), a divider wall is a real Rect with height, and the post (radius puckRadius *
+      // WALL_POST_RADIUS_RATIO) is deliberately taller than the thinned-down wall band it caps,
+      // the same way goalposts already read taller than the goal line's own stroke width.
+      for (const variant of ['classic', 'gauntlet', 'gravity'] as BoardVariant[]) {
+        const board = computeBoardLayout(400, 900, insets, variant, 'medium', rink)
+        for (const post of board.wallPosts) {
+          const matchesAGapEdge = board.obstacles.some((obs) => {
+            const onThisWallRow = Math.abs(post.y - (obs.y + obs.height / 2)) < 0.01
+            const atThisEdge = Math.abs(obs.x - post.x) < 0.01 || Math.abs(obs.x + obs.width - post.x) < 0.01
+            return onThisWallRow && atThisEdge
+          })
+          expect(matchesAGapEdge).toBe(true)
+        }
+      }
+    })
+  }
+})
+
+// A wall post is its own circle (radius puckRadius * WALL_POST_RADIUS_RATIO), so the "no wall gap
+// or gravity well overlaps a faceoff dot" guard above (which only proves clearance to the bare
+// rect corner) doesn't automatically cover clearance to a post-sized circle centered at that same
+// corner — checked separately here rather than folded into that guard, since a failure here means
+// revisiting holeOffset/WALL_POST_RADIUS_RATIO, not the divider-hole geometry that guard covers.
+describe('wall posts do not overlap a faceoff dot, in every mode', () => {
+  const variants: BoardVariant[] = ['classic', 'gauntlet', 'gravity']
+  const sizes: PuckSizeLevel[] = ['small', 'medium', 'large']
+
+  for (const variant of variants) {
+    for (const size of sizes) {
+      for (const rink of [false, true]) {
+        it(`${variant} at puckSize=${size} (rink=${rink})`, () => {
+          const board = computeBoardLayout(400, 900, insets, variant, size, rink)
+          const dotRadius = faceoffZoneRadius(board)
+          const dots = [...faceoffZoneCenters(board, 1), ...faceoffZoneCenters(board, 2)]
+
+          for (const dot of dots) {
+            for (const post of board.wallPosts) {
+              const dist = Math.hypot(post.x - dot.x, post.y - dot.y)
+              expect(dist).toBeGreaterThan(dotRadius + post.radius)
+            }
+          }
+        })
+      }
+    }
+  }
+})
+
+describe('computeTrajectory — post bounces stay close to what stepPhysics actually does', () => {
+  // Real bug, user-reported ("the angle preview is definitely not working, especially off of
+  // posts"): computeTrajectory used to move a puck by its FULL per-frame velocity in one jump each
+  // iteration (no sub-stepping), unlike stepPhysics itself, which splits a frame into several finer
+  // sub-steps specifically because a goalpost's collision radius is a genuinely thin target a fast
+  // puck can jump clean past between two sampled positions (see SUBSTEP_MAX_DISPLACEMENT_RATIO's own
+  // comment in physics.ts). At MAX_SPEED (22px/frame) against a goalpost's small radius, a single
+  // un-substepped frame could sail straight through a grazing hit the real, sub-stepped physics
+  // would have caught — or land deep enough inside it to produce a wildly different bounce angle —
+  // producing a genuinely non-physical preview: a manual repro of this exact scenario, run against
+  // the pre-fix implementation, produced a trajectory whose own y-coordinate went 11.9 -> 424.8 ->
+  // 8.6 -> -24.5 (repeatedly moving BACKWARD along a straight-down shot with zero vx), nothing like
+  // what the puck could actually do. computeTrajectory gained the same sub-stepping stepPhysics
+  // already has to close this gap.
+  const insets = { top: 0, bottom: 0, left: 0, right: 0 }
+
+  it('a fast, near-tangential graze off a goalpost bounces at close to the real contact point, not a wildly different one', () => {
+    const board = computeBoardLayout(400, 900, insets, 'classic', 'medium', false)
+    const post = board.goalPosts.find((p) => p.player === 2 && p.x < board.centerX)!
+    const r = board.puckRadius
+    const combined = r + post.radius
+
+    // A near-tangential graze (0.9x combined radius) at MAX_SPEED — the specific shape of shot the
+    // old single-step-per-frame code was most prone to sampling past entirely.
+    const lateralOffset = combined * 0.9
+    const startX = post.x + lateralOffset
+    const startY = post.y - 200
+
+    // Ground truth: sub-stepped stepPhysics driven from the exact same start, straight down at
+    // MAX_SPEED, using the round's actual medium friction (the same default computeTrajectory now
+    // uses — see its own friction param).
+    let p = { x: startX, y: startY, vx: 0, vy: MAX_SPEED }
+    let realBouncePos: { x: number; y: number } | null = null
+    for (let i = 0; i < 30 && !realBouncePos; i++) {
+      const result = stepPhysics(p, board, 1, FRICTION_LEVELS.medium)
+      if (result.bounced) realBouncePos = { x: result.x, y: result.y }
+      p = { x: result.x, y: result.y, vx: result.vx, vy: result.vy }
+    }
+    expect(realBouncePos).not.toBeNull()
+
+    // dragDy = maxDragPixels (full pull straight down) reproduces the same vy = MAX_SPEED, vx = 0
+    // starting velocity as the ground truth above.
+    const traj = computeTrajectory(startX, startY, 0, 160, board, 160, MAX_SPEED, 5, FRICTION_LEVELS.medium)
+    expect(traj.length).toBeGreaterThan(1) // a real bounce must have been recorded at all
+
+    const predictedBounce = traj[1]
+    const errorPx = Math.hypot(predictedBounce.x - realBouncePos!.x, predictedBounce.y - realBouncePos!.y)
+    // Well under puckRadius (23px on this fixture) — the pre-fix code missed this graze entirely
+    // (bounced: false the whole approach) or, in other offset/speed combinations, landed a bounce
+    // point tens of pixels off with an unrelated resulting angle.
+    expect(errorPx).toBeLessThan(r)
+
+    // Coherence guard against the exact failure mode quoted above: a straight-down approach (vx=0
+    // throughout, so x is fixed) must never predict the puck moving BACKWARD in y before the bounce.
+    for (let i = 1; i < traj.length; i++) {
+      expect(traj[i].y).toBeGreaterThanOrEqual(traj[i - 1].y - 1) // -1px slack for float rounding
+    }
   })
 })

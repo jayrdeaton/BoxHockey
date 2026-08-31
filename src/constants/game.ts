@@ -1,4 +1,4 @@
-import { ControlScheme, FrictionLevel, PuckSizeLevel, ShotPreviewLength } from '@/types'
+import { ControlScheme, FrictionLevel, InterceptSpeed, PuckSizeLevel, ShotPreviewLength } from '@/types'
 
 // Per-round puck deceleration tier (see types/index.ts's FrictionLevel and stepPhysics in
 // utils/physics.ts, where frictionFactor = FRICTION_LEVELS[level] ** dt). Closer to 1 means less
@@ -74,7 +74,33 @@ export const DIVIDER_HOLE_TO_PUCK_RADIUS: Record<PuckSizeLevel, number> = {
   large: 5
 }
 export const WALL_THICKNESS = 10
+// Goal line stroke width (Board.tsx's 4 goal-line <Line> segments). Also reused, when
+// GameSettings.rink is off, as the divider/perimeter wall thickness fed into computeBoardLayout
+// (see its wallThickness local) — guarantees "walls as thin as the goal line" stays a real
+// equality rather than two independently-tuned literals that could drift apart. NOT used for
+// Board.tsx's separate zone-line <Line> segments, which happen to share this same literal value
+// today by coincidence, not by relationship.
+export const GOAL_LINE_STROKE_WIDTH = 4
+// Radius (as a fraction of puckRadius) of the small round pegs capping a goal mouth's edges
+// (buildGoalPosts) and, when GameSettings.rink is off, a divider/gauntlet wall's hole edges
+// (buildWallPosts) — shared so both post styles read as the same kind of thing visually.
+export const WALL_POST_RADIUS_RATIO = 0.18
 export const STOP_THRESHOLD = 0.12
+// Per-round tier for the speed threshold useGameState.ts's AIM_START/STRIKE cases compare a live
+// puck speed against to decide whether the RECEIVING player can reach in and redirect a still-
+// coasting puck — see InterceptSpeed in types/index.ts. Deliberately separate from, and never
+// passed into, stepPhysics' own STOP_THRESHOLD (which still governs the puck's natural, no-one-
+// intervened stop unchanged). 'low' is exactly STOP_THRESHOLD — mathematically an empty intercept
+// window, since hypot(vx,vy) < STOP_THRESHOLD implies stepPhysics' own per-axis stopped check has
+// already fired on that same tick, so a round with no explicit choice behaves exactly as before.
+// 'medium'/'high' are first-pass values, not yet verified by feel — retune here if intercepting
+// feels too easy/hard to reach, or (see PHYSICS_STEP's own comment) if a hard-to-notice interval
+// distinguishing "eligible" from "not yet" turns out to matter for pacing.
+export const INTERCEPT_SPEED_THRESHOLDS: Record<InterceptSpeed, number> = {
+  low: STOP_THRESHOLD,
+  medium: 1.0,
+  high: 2.5
+}
 export const SCORE_TO_WIN = 5
 export const STRIKE_DURATION_MS = 130
 
@@ -153,6 +179,65 @@ export const FACEOFF_PRESS_RIPPLE_DURATION_MS = 280
 // a real, close-race-flipping edge without being so large it overwhelms genuine reaction skill —
 // most real margins are well under FACEOFF_MARGIN_MAX_MS.
 export const FACEOFF_GUESS_BONUS_MS = 60
+
+// Board.tsx's goal-door hit indicator — the invisible one-way door at the goal mouth (rink-on
+// only: lets the puck IN toward the pocket but not back OUT the same way once it's behind the
+// line — see stepPhysics' own "one-way door" comment) sits in the same visual gap the static
+// goal-line <Line>s deliberately leave open between the posts, so a puck bouncing off it needs a
+// flash right there to read as "that gap isn't actually open, that's what you just bounced off
+// of". Two independently-timed layers, both snapping straight to full on impact (no fade-in tween
+// — an impact reads as sudden): GOAL_DOOR_FLASH_COLOR_DECAY_MS is how fast the hot-white peak cools
+// to the goal's own color AND how fast the wide soft glow halo (Board.tsx's own "brighter" pass —
+// a translucent oversized line behind the crisp one, same halo technique as the puck's own idle
+// glow) burns off; GOAL_DOOR_FLASH_OPACITY_DECAY_MS is how slowly the crisp core line, now settled
+// into the goal's own color, lingers before fading to fully invisible — deliberately much longer,
+// per explicit user feedback ("fade a lot slower from primary or secondary to off after the
+// flash") — so the impact itself still reads instant while the afterglow lingers.
+export const GOAL_DOOR_FLASH_COLOR_DECAY_MS = 120
+export const GOAL_DOOR_FLASH_OPACITY_DECAY_MS = 1200
+export const GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO = 4
+export const GOAL_DOOR_FLASH_GLOW_PEAK_OPACITY = 0.55
+
+// Goal celebration "punch" — on top of the existing three expanding rings (which stay hardcoded
+// 850ms/160ms-stagger inline in Board.tsx, unchanged): a translucent full-board wash + a matching
+// goal-line/post flash and crease light-up (share GOAL_BOARD_FLASH_DECAY_MS), a staggered build-up
+// sweep through the scorer's own newly-lit crease wedges, and a puck fade/burst. All fire once per
+// goal off Board.tsx's existing useEffect(..., [lastScoredGoal]) and must fit inside game.tsx's
+// 1200ms 'scored' hold.
+export const GOAL_BOARD_FLASH_PEAK_OPACITY = 0.22
+export const GOAL_BOARD_FLASH_DECAY_MS = 350
+// Peak opacity of the scored-on goal's crease half-circle light-up (layered on top of its own
+// always-present 0.28 ambient tint — see p1CreaseFill/p2CreaseFill) — bright enough to read as
+// "lit up," short of a flat opaque disc that would hide the wedges/faceoff dots underneath it.
+export const GOAL_CREASE_FLASH_PEAK_OPACITY = 0.85
+
+// Wedge build-up sweep: each already-earned crease segment flashes in sequence, landing on the
+// just-earned one. GOAL_WEDGE_FLASH_STEP_MS is the per-step stagger; GOAL_WEDGE_SWEEP_BUDGET_MS
+// caps the total span of stagger alone so a long sweep (scoreToWin=10, worst case 9 steps)
+// compresses instead of scaling linearly — 9 steps at the 250ms budget is ~28ms/step, not 450ms.
+// The final (just-earned) segment blinks GOAL_WEDGE_FLASH_FINAL_BLINKS times (see
+// WedgeFlashOverlay's blinkCount) before settling on its resting solid color, rather than a single
+// decay like the earlier build-up steps — long enough (GOAL_WEDGE_FLASH_FINAL_MS) for each blink to
+// actually read. Total worst case: 9 * (250/9) + GOAL_WEDGE_FLASH_FINAL_MS ≈ 900ms, comfortably
+// inside 1200ms.
+export const GOAL_WEDGE_FLASH_STEP_MS = 50
+export const GOAL_WEDGE_SWEEP_BUDGET_MS = 250
+export const GOAL_WEDGE_FLASH_SEG_MS = 150
+export const GOAL_WEDGE_FLASH_FINAL_MS = 650
+export const GOAL_WEDGE_FLASH_FINAL_BLINKS = 3
+
+// Puck departure on a goal ("explode, or fade out, or something" per explicit request) — a short
+// grace delay (PUCK_SCORE_FADE_DELAY_MS) so the puck is still visible for the first beat of the
+// ring/flash burst before it disappears, not vanishing the instant the goal registers, then the
+// puck itself fades out (PUCK_SCORE_FADE_MS) while a small burst of shard particles (see
+// PuckShard in Board.tsx) flies outward from its resting position and fades over
+// PUCK_BURST_DURATION_MS. PUCK_BURST_MAX_DIST_RATIO is how far a shard travels, as a multiple of
+// puckRadius, before fully fading.
+export const PUCK_SCORE_FADE_DELAY_MS = 150
+export const PUCK_SCORE_FADE_MS = 300
+export const PUCK_BURST_DURATION_MS = 500
+export const PUCK_BURST_SHARD_COUNT = 8
+export const PUCK_BURST_MAX_DIST_RATIO = 4
 
 // Threshold (in CSS px) above which web is treated as "desktop" rather than phone-shaped — the
 // one context that fixes the board to BOARD_ASPECT_RATIO and draws the perimeter walls (see

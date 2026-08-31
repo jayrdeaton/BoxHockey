@@ -18,6 +18,7 @@ const board: BoardLayout = {
   obstacles: [],
   gravityWells: [],
   goalPosts: [],
+  wallPosts: [],
   cornerRadius: 0,
   behindGoalDepth: 0,
   faceoffOffsetYRatio: 0.42,
@@ -57,6 +58,7 @@ describe('stepPhysics — wall bounces', () => {
     expect(result.vy).toBeGreaterThan(0)
     expect(result.bounced).toBe(true)
     expect(result.scored).toBeNull()
+    expect(result.goalDoorHit).toBeNull() // behindGoalDepth is 0 on this fixture — no rink, so no door to hit
   })
 
   it('bounces off bottom wall outside goal and reverses vy', () => {
@@ -66,6 +68,7 @@ describe('stepPhysics — wall bounces', () => {
     expect(result.y).toBeLessThanOrEqual(board.y + board.height - r)
     expect(result.vy).toBeLessThan(0)
     expect(result.bounced).toBe(true)
+    expect(result.goalDoorHit).toBeNull()
   })
 
   it('applies wall restitution (speed is reduced after bounce)', () => {
@@ -352,6 +355,63 @@ describe('stepPhysics — rounded corners', () => {
     expect(result.bounced).toBe(true)
     expect(result.x).toBeGreaterThanOrEqual(board.x + r - 0.01)
     expect(result.y).toBeGreaterThanOrEqual(board.y + r - 0.01)
+  })
+})
+
+describe('stepPhysics — goal door hit detection (rink pocket)', () => {
+  // Reuses the same rink-like fixture as the rounded-corners block above (cornerRadius/
+  // behindGoalDepth both nonzero) rather than the real computeBoardLayout — see
+  // boardGeometry.test.ts for the integration-level version of this same behavior using real
+  // layout geometry. The door is the invisible one-way boundary right at the front goal line
+  // (board.y/board.y+height, within the goal's own x-range) that stops a puck already behind the
+  // net from passing back OUT through the same gap it would otherwise score through — see
+  // stepPhysics' own "one-way door" comment. This is deliberately NOT the same collision as the
+  // true far boundary deeper in the pocket (outerTop/outerBottom) — see the last test below.
+  const rinkBoard: BoardLayout = { ...board, cornerRadius: 40, behindGoalDepth: 60 }
+  const outerTop = rinkBoard.y - rinkBoard.behindGoalDepth
+
+  it("flags goalDoorHit: 'top' for a puck already behind the line bouncing off the door on its way back out", () => {
+    // cx (160) sits inside goalLeft..goalRight (110..190). y is 1 unit short of the door's own
+    // trigger (y + r >= board.y) so nothing fires at the start position; vy carries it across in
+    // this one step, same "already-adjacent, one big step" style as the wall-bounce tests above.
+    const puck = { x: cx, y: board.y - r - 1, vx: 0, vy: 5 }
+    const result = stepPhysics(puck, rinkBoard)
+    expect(result.bounced).toBe(true)
+    expect(result.goalDoorHit).toBe('top')
+  })
+
+  it("flags goalDoorHit: 'bottom' for a puck already behind the line bouncing off the door on its way back out", () => {
+    const puck = { x: cx, y: board.y + board.height + r + 1, vx: 0, vy: -5 }
+    const result = stepPhysics(puck, rinkBoard)
+    expect(result.bounced).toBe(true)
+    expect(result.goalDoorHit).toBe('bottom')
+  })
+
+  it('does NOT flag goalDoorHit — and does not even bounce — for the same approach outside the goal x-range', () => {
+    // Clear of both the top-corner quadrant (x < rinkBoard.x + cornerRadius) and the goal opening
+    // (goalLeft 110..goalRight 190). The door only guards the goal's own x-range — the wider pocket
+    // wraparound area has no such restriction (see stepPhysics' own comment), so this puck sails
+    // straight through toward the front line with nothing stopping it at all.
+    const outsideGoalX = rinkBoard.x + rinkBoard.cornerRadius + 30
+    const puck = { x: outsideGoalX, y: board.y - r - 1, vx: 0, vy: 5 }
+    const result = stepPhysics(puck, rinkBoard)
+    expect(result.bounced).toBe(false)
+    expect(result.goalDoorHit).toBeNull()
+  })
+
+  it('never flags goalDoorHit when rink is off, even for an outside-the-goal front-line bounce', () => {
+    const outsideGoalX = board.x + 30
+    const puck = { x: outsideGoalX, y: board.y + r + 1, vx: 0, vy: -5 }
+    const result = stepPhysics(puck, board)
+    expect(result.bounced).toBe(true)
+    expect(result.goalDoorHit).toBeNull()
+  })
+
+  it('does NOT flag goalDoorHit for a bounce off the TRUE far boundary deeper in the pocket — a different collision entirely', () => {
+    const puck = { x: cx, y: outerTop + r + 1, vx: 0, vy: -5 }
+    const result = stepPhysics(puck, rinkBoard)
+    expect(result.bounced).toBe(true)
+    expect(result.goalDoorHit).toBeNull()
   })
 })
 

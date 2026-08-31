@@ -16,6 +16,10 @@ export const DEFAULT_SETTINGS: GameSettings = {
   friction: 'medium',
   shotPreviewLength: 'medium',
   puckSize: 'medium',
+  // 'low' matches STOP_THRESHOLD exactly (see INTERCEPT_SPEED_THRESHOLDS in constants/game.ts) —
+  // mathematically an empty intercept window, so an existing stored settings blob (or a fresh
+  // install) behaves exactly as before by default.
+  interceptSpeed: 'low',
   // Both start on 'pull' — the original/only mechanic before this setting existed — so an existing
   // stored settings blob (or a fresh install) plays identically to before by default.
   controlScheme: { 1: 'pull', 2: 'pull' },
@@ -31,5 +35,5 @@ function isValidControlScheme(value: unknown): value is 'pull' | 'push' {
 export function isValidSettings(value: unknown): value is GameSettings {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<GameSettings>
-  return (v.gameMode === 'twoPlayer' || v.gameMode === 'vsCpu') && (v.boardVariant === 'classic' || v.boardVariant === 'gauntlet' || v.boardVariant === 'gravity') && typeof v.scoreToWin === 'number' && (v.aiDifficulty === 'easy' || v.aiDifficulty === 'medium' || v.aiDifficulty === 'hard') && typeof v.lockOrientation === 'boolean' && (v.tipoffMode === 'coinFlip' || v.tipoffMode === 'faceoff') && (v.friction === 'low' || v.friction === 'medium' || v.friction === 'high') && (v.shotPreviewLength === 'off' || v.shotPreviewLength === 'short' || v.shotPreviewLength === 'medium' || v.shotPreviewLength === 'long') && (v.puckSize === 'small' || v.puckSize === 'medium' || v.puckSize === 'large') && !!v.controlScheme && isValidControlScheme(v.controlScheme[1]) && isValidControlScheme(v.controlScheme[2]) && typeof v.rink === 'boolean'
+  return (v.gameMode === 'twoPlayer' || v.gameMode === 'vsCpu') && (v.boardVariant === 'classic' || v.boardVariant === 'gauntlet' || v.boardVariant === 'gravity') && typeof v.scoreToWin === 'number' && (v.aiDifficulty === 'easy' || v.aiDifficulty === 'medium' || v.aiDifficulty === 'hard') && typeof v.lockOrientation === 'boolean' && (v.tipoffMode === 'coinFlip' || v.tipoffMode === 'faceoff') && (v.friction === 'low' || v.friction === 'medium' || v.friction === 'high') && (v.shotPreviewLength === 'off' || v.shotPreviewLength === 'short' || v.shotPreviewLength === 'medium' || v.shotPreviewLength === 'long') && (v.puckSize === 'small' || v.puckSize === 'medium' || v.puckSize === 'large') && (v.interceptSpeed === 'low' || v.interceptSpeed === 'medium' || v.interceptSpeed === 'high') && !!v.controlScheme && isValidControlScheme(v.controlScheme[1]) && isValidControlScheme(v.controlScheme[2]) && typeof v.rink === 'boolean'
 }

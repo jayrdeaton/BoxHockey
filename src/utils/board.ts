@@ -1,8 +1,8 @@
 import { Platform } from 'react-native'
 import { EdgeInsets } from 'react-native-safe-area-context'
 
-import { BOARD_ASPECT_RATIO, DESKTOP_WEB_MIN_WIDTH, DIVIDER_HOLE_TO_PUCK_RADIUS, FACEOFF_ZONE_RADIUS_RATIO, GRAVITY_WELL_ATTRACT_STRENGTH, GRAVITY_WELL_CORNER_REPEL_STRENGTH, PUCK_SIZE_RATIOS, WALL_THICKNESS } from '@/constants/game'
-import { BoardLayout, BoardVariant, GoalPost, GravityWell, Obstacle, Player, PuckSizeLevel } from '@/types'
+import { BOARD_ASPECT_RATIO, DESKTOP_WEB_MIN_WIDTH, DIVIDER_HOLE_TO_PUCK_RADIUS, FACEOFF_ZONE_RADIUS_RATIO, GOAL_LINE_STROKE_WIDTH, GRAVITY_WELL_ATTRACT_STRENGTH, GRAVITY_WELL_CORNER_REPEL_STRENGTH, PUCK_SIZE_RATIOS, WALL_POST_RADIUS_RATIO, WALL_THICKNESS } from '@/constants/game'
+import { BoardLayout, BoardVariant, GoalPost, GravityWell, Obstacle, Player, PuckSizeLevel, WallPost } from '@/types'
 
 export const BOARD_VARIANT_LABELS: Record<BoardVariant, string> = {
   classic: 'Classic',
@@ -172,13 +172,62 @@ function buildGoalPosts(x: number, y: number, width: number, height: number, puc
   const goalWidth = puckRadius * DIVIDER_HOLE_TO_PUCK_RADIUS[puckSize]
   const goalAbsLeft = x + (width - goalWidth) / 2
   const goalAbsRight = goalAbsLeft + goalWidth
-  const radius = puckRadius * 0.18
+  const radius = puckRadius * WALL_POST_RADIUS_RATIO
   return [
     { x: goalAbsLeft, y: y, radius, player: 2 },
     { x: goalAbsRight, y: y, radius, player: 2 },
     { x: goalAbsLeft, y: y + height, radius, player: 1 },
     { x: goalAbsRight, y: y + height, radius, player: 1 }
   ]
+}
+
+// Wall posts: decorative round pegs capping each divider/gauntlet-wall gap's edges, built for
+// every variant and mode, including rink (see computeBoardLayout's wallPosts field). Purely
+// visual — the corresponding Obstacle rect's own corner already collides correctly at this exact point
+// (rect-vs-circle collision clamps to the rect's nearest point, which IS the gap-edge corner), so
+// this carries no `player` field and needs no physics.ts changes — see WallPost's own comment in
+// types/index.ts.
+//
+// Deliberately its own function, recomputing the same hole-edge x-coordinates buildObstacles
+// derives rather than sharing them — same "independent sibling function" precedent buildGoalPosts
+// already sets. Sits on each wall's fixed centerline (y + height * frac, e.g. y + height/2 for
+// classic) — the same centerline regardless of wt, matching the "wall's centerline is fixed even
+// as wt shrinks" property buildObstacles' own wallY formula already has, so a wall post never
+// visually shifts between rink on/off.
+function buildWallPosts(variant: BoardVariant, x: number, y: number, width: number, height: number, puckRadius: number, puckSize: PuckSizeLevel): WallPost[] {
+  const holeW = puckRadius * DIVIDER_HOLE_TO_PUCK_RADIUS[puckSize]
+  const radius = puckRadius * WALL_POST_RADIUS_RATIO
+  const centerX = x + width / 2
+  const holeOffset = width * 0.3 // matches buildObstacles' classic/gauntlet outerOffset
+
+  function postsForHole(holeCX: number, wallCenterY: number): WallPost[] {
+    return [
+      { x: holeCX - holeW / 2, y: wallCenterY, radius },
+      { x: holeCX + holeW / 2, y: wallCenterY, radius }
+    ]
+  }
+
+  switch (variant) {
+    case 'classic': {
+      const wallCenterY = y + height / 2
+      return [...postsForHole(centerX - holeOffset, wallCenterY), ...postsForHole(centerX + holeOffset, wallCenterY)]
+    }
+    case 'gauntlet': {
+      const topY = y + height * 0.25
+      const midY = y + height * 0.5
+      const botY = y + height * 0.75
+      return [
+        ...postsForHole(centerX - holeOffset, topY),
+        ...postsForHole(centerX + holeOffset, topY),
+        ...postsForHole(centerX, midY),
+        ...postsForHole(centerX - holeOffset, botY),
+        ...postsForHole(centerX + holeOffset, botY)
+      ]
+    }
+    case 'gravity':
+      // Same center divider as 'classic' — see buildObstacles' identical recursion.
+      return buildWallPosts('classic', x, y, width, height, puckRadius, puckSize)
+  }
 }
 
 // Mirrors game.tsx's own isDesktopWeb — needs the live screen width, so unlike most of this
@@ -311,21 +360,34 @@ export function computeBoardLayout(screenWidth: number, screenHeight: number, in
   const y = outerY + behindGoalDepth
   const fieldHeight = height - behindGoalDepth * 2 + topBorrow + bottomBorrow
 
+  // Always as thin as the goal line itself (GOAL_LINE_STROKE_WIDTH) — same constant Board.tsx's
+  // goal-line <Line> strokeWidth reads, so the two stay equal by construction, in every mode
+  // including rink (per explicit correction: this isn't rink-conditional, it applies everywhere).
+  // Feeds BOTH the returned wallThickness field below and buildObstacles' wt param from this
+  // single value — never let those two diverge (see boardGeometry.test.ts's "3 walls sit at
+  // y-fractions..." test, which reads board.wallThickness dynamically to derive wall-segment
+  // boundaries). WALL_THICKNESS itself still backs boardMargin and the behindGoalDepth clearance
+  // formula below — both physical/layout concerns unrelated to this rendered/collided thickness.
+  const wallThickness = GOAL_LINE_STROKE_WIDTH
+
   return {
     x,
     y,
     width,
     height: fieldHeight,
-    wallThickness: WALL_THICKNESS,
+    wallThickness,
     goalWidth,
     goalLeft,
     goalRight,
     puckRadius,
     centerX: x + width / 2,
     centerY: y + fieldHeight / 2,
-    obstacles: buildObstacles(variant, x, y, width, fieldHeight, WALL_THICKNESS, puckRadius, puckSize),
+    obstacles: buildObstacles(variant, x, y, width, fieldHeight, wallThickness, puckRadius, puckSize),
     gravityWells: buildGravityWells(variant, x, y, width, fieldHeight, puckRadius, puckSize),
     goalPosts: buildGoalPosts(x, y, width, fieldHeight, puckRadius, puckSize),
+    // Built for every variant/mode, including rink — see WallPost's own comment in types/index.ts
+    // and buildWallPosts above.
+    wallPosts: buildWallPosts(variant, x, y, width, fieldHeight, puckRadius, puckSize),
     cornerRadius,
     behindGoalDepth,
     faceoffOffsetYRatio,

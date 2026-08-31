@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "scheme": "boxhockey",
     "description": "A digital BoxHockey game",
-    "orientation": "default",
+    "orientation": "portrait",
     "platforms": [
       "ios",
       "android",
@@ -33,6 +33,11 @@
       "icon": {
         "dark": "./assets/images/dark-icon.png",
         "light": "./assets/images/light-icon.png"
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.infinitetoken.tastic"
+        ]
       }
     },
     "android": {

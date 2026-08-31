@@ -36,6 +36,7 @@ const board: BoardLayout = {
   obstacles: [],
   gravityWells: [],
   goalPosts: [],
+  wallPosts: [],
   cornerRadius: 0,
   behindGoalDepth: 0,
   faceoffOffsetYRatio: 0.42,
@@ -86,11 +87,14 @@ const DUMMY_STATE: GameState = {
   scores: [0, 0],
   puck: { x: 0, y: 0, vx: 0, vy: 0 },
   aim: null,
+  interceptAim: null,
   pendingShot: null,
   bounceCount: 0,
   lastScoredGoal: null,
   wellEnterCount: 0,
   lastWellPolarity: null,
+  goalDoorHitCount: 0,
+  lastGoalDoorSide: null,
   faceoff: null,
   faceoffRound: 0
 }
@@ -119,7 +123,7 @@ function runPhysicsToStop(reducer: Reducer, state: GameState, log: unknown[]): G
   let s = state
   let steps = 0
   while (s.phase === 'simulating' && steps < MAX_PHYSICS_STEPS) {
-    s = reducer(s, { type: 'PHYSICS_STEP', board, dt: 1 })
+    s = reducer(s, { type: 'PHYSICS_STEP', board, dt: 1, interceptTouch: null })
     steps++
   }
   log.push({ physicsSteps: steps, endedPhase: s.phase })
@@ -224,7 +228,7 @@ interface FuzzSummary {
 // 'stopped' branch in useGameState.ts) — only who gets the puck (and where) after a GOAL is
 // soccer-style in 'coinFlip' mode.
 function driveFuzzRun(tipoffMode: TipoffMode, totalShots: number, seed: number): FuzzSummary {
-  const reducer = makeReducer(SCORE_TO_WIN_NEVER, tipoffMode, FRICTION_LEVELS.medium, CONTROL_SCHEME)
+  const reducer = makeReducer(SCORE_TO_WIN_NEVER, tipoffMode, FRICTION_LEVELS.medium, CONTROL_SCHEME, 0)
   const rng = mulberry32(seed)
 
   let state = reducer(DUMMY_STATE, {
@@ -390,5 +394,44 @@ describe('turn alternation fuzz — reducer level (no React, no timers)', () => 
   it('faceoff mode: a second, differently-seeded run also holds (defense against a seed-specific fluke)', () => {
     const summary = driveFuzzRun('faceoff', 320, 999999)
     expect(summary.shots).toBeGreaterThanOrEqual(300)
+  })
+})
+
+// Regression coverage for a real bug caught in adversarial review: PHYSICS_STEP's 'stopped' branch
+// (a separate early return from the fallthrough that actually applies goalDoorHitCount/
+// lastGoalDoorSide — see useGameState.ts) used to drop a goal-door hit that happens on the very
+// same step the puck comes to rest. That's not a rare edge case — it's the single most natural way
+// to trigger the effect in real play: a puck drifting back toward the front of the goal from
+// behind, tapping the invisible door, and settling right there. The two puck states below are
+// hand-tuned (not simulated to this point) so a single PHYSICS_STEP call deterministically both
+// bounces off the door AND drops under STOP_THRESHOLD in that same call — see the inline math.
+describe('PHYSICS_STEP: goalDoorHitCount/lastGoalDoorSide survive a same-step stop', () => {
+  const rinkBoard: BoardLayout = { ...board, cornerRadius: 40, behindGoalDepth: 60 }
+  const r = rinkBoard.puckRadius
+  // vy_in = 0.16 (top: moving toward increasing y, i.e. toward the front line from behind it):
+  // after one dt=1 friction pass (FRICTION_LEVELS.medium = 0.986) the puck reaches the door at
+  // 0.16 * 0.986 ≈ 0.1578; after WALL_RESTITUTION (0.72) the bounced-off speed is ≈0.1136,
+  // comfortably under STOP_THRESHOLD (0.12) with vx already 0 — so stopped and goalDoorHit land in
+  // the very same PhysicsResult, well below the substep threshold (no risk of this being diluted
+  // across multiple stepPhysicsOnce calls).
+  const APPROACH_VY = 0.16
+
+  it('keeps goalDoorHitCount/lastGoalDoorSide when the puck stops on the SAME step it hits the top door', () => {
+    const reducer = makeReducer(SCORE_TO_WIN_NEVER, 'coinFlip', FRICTION_LEVELS.medium, CONTROL_SCHEME, 0)
+    // Just short of the front line, already behind it (wasBehindTop), drifting toward it.
+    const state: GameState = { ...DUMMY_STATE, phase: 'simulating', currentPlayer: 1, puck: { x: rinkBoard.centerX, y: rinkBoard.y - r - 0.05, vx: 0, vy: APPROACH_VY } }
+    const next = reducer(state, { type: 'PHYSICS_STEP', board: rinkBoard, dt: 1, interceptTouch: null })
+    expect(next.phase).toBe('idle') // confirms the 'stopped' branch, not the fallthrough, was taken
+    expect(next.goalDoorHitCount).toBe(1)
+    expect(next.lastGoalDoorSide).toBe('top')
+  })
+
+  it('same, for the bottom door', () => {
+    const reducer = makeReducer(SCORE_TO_WIN_NEVER, 'coinFlip', FRICTION_LEVELS.medium, CONTROL_SCHEME, 0)
+    const state: GameState = { ...DUMMY_STATE, phase: 'simulating', currentPlayer: 1, puck: { x: rinkBoard.centerX, y: rinkBoard.y + rinkBoard.height + r + 0.05, vx: 0, vy: -APPROACH_VY } }
+    const next = reducer(state, { type: 'PHYSICS_STEP', board: rinkBoard, dt: 1, interceptTouch: null })
+    expect(next.phase).toBe('idle')
+    expect(next.goalDoorHitCount).toBe(1)
+    expect(next.lastGoalDoorSide).toBe('bottom')
   })
 })

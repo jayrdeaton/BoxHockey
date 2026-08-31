@@ -6,7 +6,7 @@ import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, PuckState,
 import { centerPuck, faceoffZoneCenter } from '@/utils/board'
 import { computeAimVector, stepPhysics } from '@/utils/physics'
 
-type Action = { type: 'AIM_START'; x: number; y: number } | { type: 'AIM_UPDATE'; x: number; y: number } | { type: 'AIM_CANCEL' } | { type: 'STRIKE'; dx: number; dy: number } | { type: 'APPLY_STRIKE' } | { type: 'PHYSICS_STEP'; board: BoardLayout; dt: number } | { type: 'NEXT_ROUND'; board: BoardLayout; zoneIndex: 0 | 1; faceoffZones: [0 | 1, 0 | 1]; faceoffReadyGuess: [0 | 1, 0 | 1] } | { type: 'RESET'; board: BoardLayout; coinFlipWinner: Player; zoneIndex: 0 | 1; faceoffZones: [0 | 1, 0 | 1]; faceoffReadyGuess: [0 | 1, 0 | 1] } | { type: 'COIN_FLIP_DONE' } | { type: 'FACEOFF_COUNT'; count: 2 | 1 } | { type: 'FACEOFF_HOLD'; goAt: number } | { type: 'FACEOFF_LIVE' } | { type: 'FACEOFF_READY'; player: Player } | { type: 'FACEOFF_TAP'; player: Player; atMs: number; zoneIndex: 0 | 1 } | { type: 'FACEOFF_TIMEOUT'; player: Player } | { type: 'FACEOFF_LAUNCH'; vx: number; vy: number } | { type: 'FACEOFF_RESTART' }
+type Action = { type: 'AIM_START'; x: number; y: number } | { type: 'AIM_UPDATE'; x: number; y: number } | { type: 'AIM_CANCEL' } | { type: 'STRIKE'; dx: number; dy: number } | { type: 'APPLY_STRIKE' } | { type: 'PHYSICS_STEP'; board: BoardLayout; dt: number; interceptTouch: { x: number; y: number } | null } |{ type: 'NEXT_ROUND'; board: BoardLayout; zoneIndex: 0 | 1; faceoffZones: [0 | 1, 0 | 1]; faceoffReadyGuess: [0 | 1, 0 | 1] } | { type: 'RESET'; board: BoardLayout; coinFlipWinner: Player; zoneIndex: 0 | 1; faceoffZones: [0 | 1, 0 | 1]; faceoffReadyGuess: [0 | 1, 0 | 1] } | { type: 'COIN_FLIP_DONE' } | { type: 'FACEOFF_COUNT'; count: 2 | 1 } | { type: 'FACEOFF_HOLD'; goAt: number } | { type: 'FACEOFF_LIVE' } | { type: 'FACEOFF_READY'; player: Player } | { type: 'FACEOFF_TAP'; player: Player; atMs: number; zoneIndex: 0 | 1 } | { type: 'FACEOFF_TIMEOUT'; player: Player } | { type: 'FACEOFF_LAUNCH'; vx: number; vy: number } | { type: 'FACEOFF_RESTART' }
 
 function otherPlayer(p: Player): Player {
   return p === 1 ? 2 : 1
@@ -67,30 +67,61 @@ function makeInitialState(board: BoardLayout, tipoffMode: TipoffMode, coinFlipWi
     scores: [0, 0],
     puck: { ...puckPos, vx: 0, vy: 0 },
     aim: null,
+    interceptAim: null,
     pendingShot: null,
     bounceCount: 0,
     lastScoredGoal: null,
     wellEnterCount: 0,
     lastWellPolarity: null,
+    goalDoorHitCount: 0,
+    lastGoalDoorSide: null,
     faceoff: tipoffMode === 'faceoff' ? initialFaceoffState(faceoffZones, faceoffReadyGuess) : null,
     faceoffRound: 0
   }
 }
 
-export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction: number, controlScheme: Record<Player, ControlScheme>) {
+export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction: number, controlScheme: Record<Player, ControlScheme>, interceptThreshold: number) {
   return function reducer(state: GameState, action: Action): GameState {
     switch (action.type) {
       case 'AIM_START':
-        if (state.phase !== 'idle') return state
-        return { ...state, phase: 'aiming', aim: { startX: action.x, startY: action.y, currentX: action.x, currentY: action.y } }
+        if (state.phase === 'idle') {
+          return { ...state, phase: 'aiming', aim: { startX: action.x, startY: action.y, currentX: action.x, currentY: action.y } }
+        }
+        // Mid-slide intercept: the RECEIVING player (whoever doesn't currently hold currentPlayer
+        // — see STRIKE's own comment below for why the flip is deferred that far) can reach in and
+        // take the puck once it's slowed under interceptThreshold, without waiting for a full
+        // natural stop. `interceptAim` lives alongside `aim` rather than replacing it, and phase
+        // deliberately stays 'simulating' the whole time — flipping to 'aiming' here would disable
+        // useGameLoop's PHYSICS_STEP dispatch (gated on phase==='simulating') and freeze the
+        // original puck, defeating the entire point: real user feedback wanted a puck you can hit
+        // "even while it was sliding to a stop... a little more fluid than waiting for full stops."
+        if (state.phase === 'simulating' && state.interceptAim === null) {
+          const speed = Math.hypot(state.puck.vx, state.puck.vy)
+          if (speed < interceptThreshold) {
+            return { ...state, interceptAim: { startX: action.x, startY: action.y, currentX: action.x, currentY: action.y } }
+          }
+        }
+        return state
 
       case 'AIM_UPDATE':
-        if (state.phase !== 'aiming' || !state.aim) return state
-        return { ...state, aim: { ...state.aim, currentX: action.x, currentY: action.y } }
+        if (state.phase === 'aiming' && state.aim) {
+          return { ...state, aim: { ...state.aim, currentX: action.x, currentY: action.y } }
+        }
+        if (state.interceptAim) {
+          return { ...state, interceptAim: { ...state.interceptAim, currentX: action.x, currentY: action.y } }
+        }
+        return state
 
       case 'AIM_CANCEL':
-        if (state.phase !== 'aiming') return state
-        return { ...state, phase: 'idle', aim: null }
+        if (state.phase === 'aiming') {
+          return { ...state, phase: 'idle', aim: null }
+        }
+        // True no-op — the puck was never touched (phase/currentPlayer untouched), so it just
+        // keeps coasting exactly as if nobody had reached for it.
+        if (state.interceptAim) {
+          return { ...state, interceptAim: null }
+        }
+        return state
 
       // Release: velocity is computed now (from the raw drag, signed per the shooting player's own
       // ControlScheme — see CONTROL_SCHEME_SIGN) but not applied to the puck yet. `aim` is kept
@@ -100,15 +131,46 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
       // state.currentPlayer fresh off the reducer's own state rather than a closure that could go
       // stale between whose turn it was when the drag started and when it ended.
       case 'STRIKE': {
-        if (state.phase !== 'aiming') return state
-        const sign = CONTROL_SCHEME_SIGN[controlScheme[state.currentPlayer]]
-        const { vx, vy } = computeAimVector(sign * action.dx, sign * action.dy, MAX_DRAG_PIXELS, MAX_SPEED)
-        return { ...state, phase: 'striking', pendingShot: { vx, vy } }
+        if (state.phase === 'aiming') {
+          const sign = CONTROL_SCHEME_SIGN[controlScheme[state.currentPlayer]]
+          const { vx, vy } = computeAimVector(sign * action.dx, sign * action.dy, MAX_DRAG_PIXELS, MAX_SPEED)
+          return { ...state, phase: 'striking', pendingShot: { vx, vy } }
+        }
+        // Intercept release: currentPlayer flips to the interceptor HERE, not at AIM_START — so an
+        // abandoned/never-struck intercept attempt (cancelled, or the original puck scores or
+        // naturally stops first) never disturbs PHYSICS_STEP's own otherPlayer(state.currentPlayer)
+        // math above, which still assumes the SHOOTER is state.currentPlayer until a real strike
+        // lands. Signed by the interceptor's OWN ControlScheme (not the shooter's) — same reasoning
+        // as the normal case, just against otherPlayer(state.currentPlayer) instead of
+        // state.currentPlayer directly. `aim` is populated from `interceptAim` so the existing
+        // 'striking' paddle-swing visual (which reads `aim`, not `interceptAim`) works unmodified.
+        if (state.interceptAim) {
+          const interceptor = otherPlayer(state.currentPlayer)
+          const sign = CONTROL_SCHEME_SIGN[controlScheme[interceptor]]
+          const { vx, vy } = computeAimVector(sign * action.dx, sign * action.dy, MAX_DRAG_PIXELS, MAX_SPEED)
+          return { ...state, phase: 'striking', pendingShot: { vx, vy }, aim: { ...state.interceptAim }, interceptAim: null, currentPlayer: interceptor }
+        }
+        return state
       }
 
-      case 'APPLY_STRIKE':
+      case 'APPLY_STRIKE': {
         if (state.phase !== 'striking' || !state.pendingShot) return state
-        return { ...state, phase: 'simulating', aim: null, pendingShot: null, puck: { ...state.puck, vx: state.pendingShot.vx, vy: state.pendingShot.vy } }
+        // Adds the puck's own pre-strike velocity into the final shot, not just the swing itself —
+        // a real slap shot/one-timer redirect is faster when the puck is already moving your way,
+        // not purely a function of how hard you swung (user feedback: "adding its velocity to the
+        // hit... seems much more like an actual slap shot"). A strict no-op for every ORDINARY
+        // shot — puck.vx/vy is always exactly 0 entering 'striking' from a normal 'idle' turn — so
+        // this only ever changes anything for a mid-slide intercept, where the puck's real
+        // residual velocity survives the whole 'striking' windup untouched (physics is paused
+        // then, see useGameLoop's enabled condition, gated on phase==='simulating'). Clamped to
+        // MAX_SPEED so a full-power swing onto an already-fast puck can't quietly exceed the one
+        // speed ceiling the rest of the codebase assumes (substep budgeting, AI shot planning).
+        const combinedVx = state.puck.vx + state.pendingShot.vx
+        const combinedVy = state.puck.vy + state.pendingShot.vy
+        const combinedSpeed = Math.hypot(combinedVx, combinedVy)
+        const speedScale = combinedSpeed > MAX_SPEED ? MAX_SPEED / combinedSpeed : 1
+        return { ...state, phase: 'simulating', aim: null, pendingShot: null, puck: { ...state.puck, vx: combinedVx * speedScale, vy: combinedVy * speedScale } }
+      }
 
       case 'PHYSICS_STEP': {
         if (state.phase !== 'simulating') return state
@@ -122,13 +184,26 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
           // physics.ts's stepPhysics), so the celebration's physical side is the inverse of the
           // scoring player number.
           const lastScoredGoal = result.scored === 1 ? 'top' : 'bottom'
+          // Any in-progress intercept attempt is moot — the original shot found the net before
+          // anyone redirected it, so there's nothing left to strike.
           if (scores[result.scored - 1] >= scoreToWin) {
-            return { ...state, phase: 'gameOver', scores, puck, lastScoredGoal }
+            return { ...state, phase: 'gameOver', scores, puck, lastScoredGoal, interceptAim: null }
           }
-          return { ...state, phase: 'scored', scores, puck, lastScoredGoal, currentPlayer: otherPlayer(state.currentPlayer) }
+          return { ...state, phase: 'scored', scores, puck, lastScoredGoal, currentPlayer: otherPlayer(state.currentPlayer), interceptAim: null }
         }
 
-        if (result.stopped) {
+        // Suppressed while someone's actively mid-drag intercepting (state.interceptAim !== null)
+        // — otherwise falls through to the generic "still simulating" return below, same as any
+        // other still-moving frame. This is deliberate, not an oversight: the whole precondition
+        // for an intercept existing at all is that the puck was ALREADY slow, so on a real human
+        // drag timescale it very often decays the rest of the way to STOP_THRESHOLD while they're
+        // still deciding their shot. An earlier version force-zeroed velocity and flipped phase to
+        // 'aiming' the instant that happened ("seamlessly promoting" the drag) — but that's exactly
+        // the freeze real user feedback flagged: "the puck stops while aiming" defeats the entire
+        // point of a fluid mid-slide hit. Letting the puck simply keep resolving its own physics
+        // (settling to rest on its own terms is fine; forcing a phase/velocity snap under an active
+        // drag is not) until STRIKE or AIM_CANCEL actually resolves it is what keeps it fluid.
+        if (result.stopped && !state.interceptAim) {
           // Turn always passes to the other player on a miss, in EVERY tipoff mode, with NO
           // exceptions — this is a turn-based game (box hockey), not soccer, and the faceoff
           // winner never gets a follow-up shot off their own knock (see FACEOFF_LAUNCH below):
@@ -142,15 +217,41 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
           // the puck with whoever was shooting through every miss until they scored — real user
           // feedback was that this read as "turns don't alternate", since the same player could
           // hold the puck for many shots in a row.
-          return { ...state, phase: 'idle', currentPlayer: otherPlayer(state.currentPlayer), puck: { ...result, vx: 0, vy: 0 } }
+          return {
+            ...state,
+            phase: 'idle',
+            currentPlayer: otherPlayer(state.currentPlayer),
+            puck: { ...result, vx: 0, vy: 0 },
+            // A puck can come to rest on the very same step it strikes the goal-mouth door (a slow
+            // approach loses just enough speed on the bounce to drop under STOP_THRESHOLD
+            // immediately) — the single most natural way to trigger this in real play, a puck
+            // drifting back toward the front of the goal and settling right against the door.
+            // Without this, that step would hit the early return above and silently never flash.
+            // See physics.ts's own comment on goalDoorHit for what gates it.
+            goalDoorHitCount: result.goalDoorHit ? state.goalDoorHitCount + 1 : state.goalDoorHitCount,
+            lastGoalDoorSide: result.goalDoorHit ?? state.lastGoalDoorSide
+          }
         }
 
         return {
           ...state,
           puck: result,
+          // Folds the latest known finger position (action.interceptTouch — read fresh off a ref
+          // by useGameState's own rAF tick each frame, see below) into THIS SAME tick's update,
+          // rather than interceptAim being updated by its own separately-dispatched AIM_UPDATE
+          // action. Two independent update streams — one gesture-driven, one this rAF-driven
+          // physics loop — each triggering their own re-render at their own uncorrelated cadence
+          // is exactly what produced reported jitter (a beat pattern between two mismatched
+          // frequencies, not a one-off stall from either alone). Consolidating to one dispatch per
+          // animation frame (game.tsx's stableAimUpdate now just writes a ref instead of
+          // dispatching directly while intercepting) means the puck's own motion and the live drag
+          // position always land in the exact same render, in sync, every frame.
+          interceptAim: state.interceptAim && action.interceptTouch ? { ...state.interceptAim, currentX: action.interceptTouch.x, currentY: action.interceptTouch.y } : state.interceptAim,
           bounceCount: result.bounced ? state.bounceCount + 1 : state.bounceCount,
           wellEnterCount: result.enteredWell ? state.wellEnterCount + 1 : state.wellEnterCount,
-          lastWellPolarity: result.enteredWell ?? state.lastWellPolarity
+          lastWellPolarity: result.enteredWell ?? state.lastWellPolarity,
+          goalDoorHitCount: result.goalDoorHit ? state.goalDoorHitCount + 1 : state.goalDoorHitCount,
+          lastGoalDoorSide: result.goalDoorHit ?? state.lastGoalDoorSide
         }
       }
 
@@ -256,10 +357,16 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
           // Both players have now struck out this draw (exceedingly rare in real play) — pick
           // whichever disqualification landed second as the nominal winner for turn-flip
           // purposes, with reactionMs pinned to the ceiling so it always yields the weakest knock.
+          // marginMs is pinned to 0 (NOT FACEOFF_MARGIN_MAX_MS), deliberately the opposite of the
+          // single-forfeit branches below — a large margin means "no real defense, they clearly
+          // could've hit anything," which only makes sense when the winner actually landed a
+          // genuine press against a whiffing opponent. Here NEITHER player did, so there's no
+          // "confident, uncontested" shot to reward — 0 margin maxes out computeFaceoffKnock's
+          // jitter instead, so this coin-flip winner still can't be trusted with an accurate shot.
           if (disqualified[otherIdx]) {
             return {
               ...state,
-              faceoff: { ...fo, disqualified, pressFlash, stage: 'resolved', result: { winner: action.player, marginMs: FACEOFF_MARGIN_MAX_MS, reactionMs: FACEOFF_REACTION_MAX_MS, forfeit: true } }
+              faceoff: { ...fo, disqualified, pressFlash, stage: 'resolved', result: { winner: action.player, marginMs: 0, reactionMs: FACEOFF_REACTION_MAX_MS, forfeit: true } }
             }
           }
 
@@ -316,7 +423,14 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
         const winner: Player = fo.disqualified[otherPlayer(action.player) - 1] ? action.player : otherPlayer(action.player)
         const winnerTap = fo.tapAt[winner - 1]
         const reactionMs = winnerTap !== null ? winnerTap - goAt : FACEOFF_REACTION_MAX_MS
-        return { ...state, faceoff: { ...fo, stage: 'resolved', result: { winner, marginMs: FACEOFF_MARGIN_MAX_MS, reactionMs, forfeit: true } } }
+        // marginMs only gets the "confident blowout" MAX value (tightest jitter, see
+        // computeFaceoffKnock) when winnerTap is real — i.e. the winner actually landed a genuine
+        // correct-zone press and the OTHER player is who timed out/whiffed. If winnerTap is null,
+        // this "winner" never landed a real press either (both silent, or silent-vs-wrong-zone) —
+        // same double-failure case the FACEOFF_TAP branch above handles, so it gets the same 0
+        // margin (max jitter) rather than rewarding a coin-flip default with the most accurate shot.
+        const marginMs = winnerTap !== null ? FACEOFF_MARGIN_MAX_MS : 0
+        return { ...state, faceoff: { ...fo, stage: 'resolved', result: { winner, marginMs, reactionMs, forfeit: true } } }
       }
 
       // Launches the winner's real knock (see computeFaceoffKnock in utils/faceoff.ts) — genuine
@@ -352,9 +466,9 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
   }
 }
 
-export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode: TipoffMode, friction: number, controlScheme: Record<Player, ControlScheme>, paused: boolean) {
-  const reducerRef = useRef(makeReducer(scoreToWin, tipoffMode, friction, controlScheme))
-  reducerRef.current = makeReducer(scoreToWin, tipoffMode, friction, controlScheme)
+export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode: TipoffMode, friction: number, controlScheme: Record<Player, ControlScheme>, paused: boolean, interceptThreshold: number) {
+  const reducerRef = useRef(makeReducer(scoreToWin, tipoffMode, friction, controlScheme, interceptThreshold))
+  reducerRef.current = makeReducer(scoreToWin, tipoffMode, friction, controlScheme, interceptThreshold)
 
   const [state, dispatch] = useReducer(
     (s: GameState, a: Action) => reducerRef.current(s, a),
@@ -365,12 +479,29 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
   const boardRef = useRef(board)
   boardRef.current = board
 
+  // Latest known finger position during a mid-slide intercept drag (see GameState.interceptAim) —
+  // written directly by setInterceptTouch below on EVERY raw gesture update (a plain ref write,
+  // no dispatch, no re-render of its own), and read back out fresh by the rAF tick just below so
+  // it can ride along in the very same PHYSICS_STEP dispatch that advances the puck. This is what
+  // keeps the drag and the physics update on one shared per-frame cadence instead of two
+  // independent ones — see PHYSICS_STEP's own comment on why that matters. null whenever there's
+  // no active intercept drag (the reducer only ever applies it when state.interceptAim is set).
+  const interceptTouchRef = useRef<{ x: number; y: number } | null>(null)
+
   // Gated on `paused` (settings/quit-confirm dialog open — see game.tsx) same as `state.phase` —
   // stops the loop outright rather than letting it keep stepping behind a dialog the player can't
   // see. useGameLoop resets its own timestamp baseline whenever `enabled` goes back to true, so the
   // first post-pause frame falls back to dt=1 exactly like a genuine phase-change restart — no
   // time-jump from however long the dialog was open.
-  useGameLoop((dt) => dispatch({ type: 'PHYSICS_STEP', board: boardRef.current, dt }), { enabled: state.phase === 'simulating' && !paused, maxDt: 2.5 })
+  useGameLoop((dt) => dispatch({ type: 'PHYSICS_STEP', board: boardRef.current, dt, interceptTouch: interceptTouchRef.current }), { enabled: state.phase === 'simulating' && !paused, maxDt: 2.5 })
+
+  // See interceptTouchRef's own doc comment — called from game.tsx's stableAimUpdate INSTEAD of
+  // dispatching AIM_UPDATE while an intercept is in progress. A plain synchronous ref write is
+  // effectively free and triggers no render by itself, so this can be called at whatever raw rate
+  // the gesture handler delivers without any throttling needed.
+  const setInterceptTouch = useCallback((x: number, y: number) => {
+    interceptTouchRef.current = { x, y }
+  }, [])
 
   // No longer gated on touching near the puck (see the removed pinch-zoom/pan camera this
   // replaced) — a drag can start anywhere on the board, so a puck pinned against a wall always
@@ -456,5 +587,5 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
     dispatch({ type: 'FACEOFF_RESTART' })
   }, [])
 
-  return { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart }
+  return { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, setInterceptTouch }
 }

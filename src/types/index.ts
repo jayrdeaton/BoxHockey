@@ -17,6 +17,28 @@ export type GameMode = 'twoPlayer' | 'vsCpu'
 // the drag on release.
 export type ControlScheme = 'pull' | 'push'
 
+// A locally-saved player identity — name, color, and a short tag, entirely opt-in. Independent of
+// any seat's live round color (see PlayerSetupPanel.tsx's handleProfileSelect and loadout.tsx's own
+// color-change handlers, which deliberately don't sync back to the profile — a seat's live color is
+// a per-match override, not an edit to the saved "favorite"). Mirrors LightCycles' identically-
+// shaped Profile type (see @tastic/profile, the package both apps build this on), with controlScheme
+// standing in for LightCycles' keyScheme as this app's own per-profile control preference.
+export interface Profile {
+  id: string
+  name: string
+  color: string
+  // User-typed identity mark shown on the seat's own color button and in the profile switcher — one
+  // emoji, or up to MAX_TAG_LENGTH plain characters (see profilesValidation.ts's isValidTag). Can be
+  // empty (no tag yet), which just falls back to a generic icon wherever it's shown.
+  tag: string
+  // Synced back to the profile for as long as it stays selected (see loadout.tsx's
+  // handleP1ControlSchemeChange) — unlike color, a control-scheme preference has no "freely override
+  // it for one match" use case, so there's no favorite/override distinction worth drawing here.
+  controlScheme: ControlScheme
+  createdAt: number
+  updatedAt: number
+}
+
 // How possession is decided at the start of a game and (for 'faceoff' only) after every goal —
 // see useFaceoff.ts. 'coinFlip' is the lighter-weight option: the winner and puck placement (a
 // random one of that player's own rink faceoff dots — see faceoffZoneCenter in utils/board.ts)
@@ -51,6 +73,18 @@ export type FrictionLevel = 'low' | 'medium' | 'high'
 // gets a bigger goal and bigger gaps to match, not a fixed-size goal that just gets easier/harder.
 export type PuckSizeLevel = 'small' | 'medium' | 'large'
 
+// Per-round tier controlling how slow the puck must be before the RECEIVING player (whoever
+// doesn't currently hold GameState.currentPlayer) can reach in and redirect it with their own
+// shot, without waiting for a full natural stop — see INTERCEPT_SPEED_THRESHOLDS in
+// constants/game.ts (the numeric speed threshold each tier maps to) and useGameState.ts's
+// AIM_START/STRIKE cases, which compare a live Math.hypot(puck.vx, puck.vy) against it. The
+// puck keeps moving in real time for the whole intercept drag (see GameState.interceptAim) —
+// this is NOT the same thing as stepPhysics' own STOP_THRESHOLD, which is untouched and still
+// governs when the puck naturally comes to rest on its own if nobody intercepts it. 'low' matches
+// STOP_THRESHOLD exactly, which is mathematically an empty intercept window (see
+// INTERCEPT_SPEED_THRESHOLDS' own comment) — so existing rounds default to unchanged behavior.
+export type InterceptSpeed = 'low' | 'medium' | 'high'
+
 // How far the aim chevron trajectory preview is allowed to reach — see
 // SHOT_PREVIEW_LENGTH_RATIOS in constants/game.ts (the fraction of board.width each tier maps
 // to) and Board.tsx's chevron rendering, where it caps how many bounce waypoints (from
@@ -70,6 +104,7 @@ export interface GameSettings {
   friction: FrictionLevel
   shotPreviewLength: ShotPreviewLength
   puckSize: PuckSizeLevel
+  interceptSpeed: InterceptSpeed
   // Per-player — see ControlScheme's own doc comment above. Keyed by Player (1 | 2) the same
   // Record<Player, T> shape LightCycles' keyScheme setting uses, for the same reason: two people
   // share one device and may want a different input feel each.
@@ -109,8 +144,23 @@ export interface GoalPost {
   radius: number
   // Whose goal this post belongs to — p1Color/p2Color in Board.tsx use this to color the post the
   // same as that goal's own crease/line, rather than the neutral wall color every other obstacle
-  // gets. Not used for collision at all.
+  // gets. Also used by stepPhysics/computeTrajectory to identify which of wasBehindTop/
+  // wasBehindBottom gates this post's collision (player 2 == the top goal's posts, player 1 == the
+  // bottom goal's — see buildGoalPosts) — a puck already fully behind that post's own goal line
+  // shouldn't still clang off it from the pocket side (see that gate's own comment).
   player: Player
+}
+
+// A small round peg capping one edge of a divider/gauntlet-wall gap — purely decorative (see
+// buildWallPosts in utils/board.ts). The corresponding Obstacle rect's own corner already
+// collides correctly at this exact point (rect-vs-circle collision clamps to the rect's nearest
+// point, including its corners), so this carries no `player` field (unlike GoalPost) and is
+// rendered in the neutral wallColor, not a per-goal accent color. Built for every variant and
+// mode, including rink — see BoardLayout.wallPosts.
+export interface WallPost {
+  x: number
+  y: number
+  radius: number
 }
 
 export interface GravityWell {
@@ -144,6 +194,10 @@ export interface BoardLayout {
   // setting (see GameSettings.rink's own comment). See GoalPost's own comment for why these aren't
   // just more Obstacles.
   goalPosts: GoalPost[]
+  // Decorative pegs capping each divider/gauntlet-wall gap's edges — see WallPost's own comment.
+  // Always populated, in every mode including rink (wallThickness is goal-line-thin everywhere
+  // now — see computeBoardLayout).
+  wallPosts: WallPost[]
   // Both 0 unless GameSettings.rink is on — see computeBoardLayout in utils/board.ts.
   cornerRadius: number // rounded-corner radius at the 4 outer boundary corners
   behindGoalDepth: number // how far the true collision boundary extends past board.y/board.y+height behind each goal
@@ -250,11 +304,26 @@ export interface GameState {
   scores: [number, number]
   puck: PuckState
   aim: AimIndicator | null
+  // Mirrors `aim`'s exact shape, but tracks a mid-slide intercept attempt (see InterceptSpeed's own
+  // doc comment) instead of a normal turn's aim — kept as a SEPARATE field, not a repurposed `aim`,
+  // specifically so `phase` can stay 'simulating' (keeping useGameLoop's PHYSICS_STEP dispatch
+  // alive, so the original puck keeps coasting/bouncing for real) for the whole drag instead of
+  // flipping to 'aiming', which would freeze it. Only ever non-null while phase === 'simulating';
+  // STRIKE copies it into `aim` and clears it the instant the interceptor actually releases.
+  interceptAim: AimIndicator | null
   pendingShot: PendingShot | null
   bounceCount: number
   lastScoredGoal: 'top' | 'bottom' | null
   wellEnterCount: number
   lastWellPolarity: 'attract' | 'repel' | null
+  // Same "counter + kind" shape as wellEnterCount/lastWellPolarity above — bumped whenever
+  // stepPhysics reports the puck struck the invisible one-way door at the goal mouth (only
+  // reachable when GameSettings.rink is on), so Board.tsx can flash that goal's own color right in
+  // the visual gap between the posts. Never reset between rounds/games (same as bounceCount) —
+  // Board.tsx guards against a stale nonzero value on mount by diffing against a ref, not by
+  // expecting this to come back to 0.
+  goalDoorHitCount: number
+  lastGoalDoorSide: 'top' | 'bottom' | null
   faceoff: FaceoffState | null
   // Bumped every time a fresh tip-off draw begins (game start, post-goal restart, or an
   // AppState-triggered restart after the app was backgrounded mid-race — see useFaceoff.ts). A

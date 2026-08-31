@@ -146,15 +146,35 @@ export function randomAIThinkDelayMs(difficulty: AIDifficulty): number {
 // Tip-off reaction time (ms after the live window opens) — a separate, much tighter tuning table
 // from thinkMs above, since a faceoff tests raw reaction speed rather than shot planning. Easy is
 // slow and inconsistent; Hard is fast and tight, matching that tier's near-zero aimNoiseDeg/
-// powerNoise above.
+// powerNoise above. Grounded against real simple-reaction-time data (visual-stimulus reaction
+// averages ~200-250ms for an attentive adult; sub-150ms is elite/near the human floor) — the
+// original ranges bottomed out at 90ms for Hard, faster than any human can physically react, which
+// made even a genuinely quick real press feel unbeatable. Hard's window now straddles the human
+// average (still a sharp, attentive opponent, occasionally right at the floor of what's humanly
+// possible); Medium sits clearly slower than average (a decent but unremarkable reactor); Easy
+// slower still (a beginner who's not fully locked in).
 const FACEOFF_REACTION_MS: Record<AIDifficulty, [number, number]> = {
-  easy: [280, 550],
-  medium: [180, 380],
-  hard: [90, 220]
+  easy: [340, 620],
+  medium: [230, 430],
+  hard: [150, 280]
 }
 
 export function randomFaceoffReactionMs(difficulty: AIDifficulty): number {
   const [min, max] = FACEOFF_REACTION_MS[difficulty]
+  return min + Math.random() * (max - min)
+}
+
+// Reaction time before the CPU acts on a puck that's slowed into the interceptable band mid-slide
+// (see InterceptSpeed in types/index.ts) — a separate tuning table from thinkMs (normal shot
+// planning) and FACEOFF_REACTION_MS (tap-race reflexes), reusing the SAME ranges as the faceoff
+// table: both are "notice a state change and react" tasks, not shot-planning ones, so the same
+// grounding in real reaction-time data applies. Without this, the CPU would snipe an interceptable
+// puck the instant the threshold is crossed — code has no reaction lag, so a human would never
+// beat it to a fast puck at the higher InterceptSpeed tiers.
+const INTERCEPT_REACTION_MS: Record<AIDifficulty, [number, number]> = FACEOFF_REACTION_MS
+
+export function randomInterceptReactionMs(difficulty: AIDifficulty): number {
+  const [min, max] = INTERCEPT_REACTION_MS[difficulty]
   return min + Math.random() * (max - min)
 }
 

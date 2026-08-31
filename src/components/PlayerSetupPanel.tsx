@@ -1,10 +1,12 @@
 import { SeedColor } from '@rific/auto-paper'
 import { InlineColorPicker, MenuOption, PopoverHost, ReadyButton, SectionedDropdown, usePopoverHost } from '@tastic/hud'
+import { ProfilePicker } from '@tastic/profile'
+import { useCallback } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { Text } from 'react-native-paper'
 
 import { MONO_FONT } from '@/constants/fonts'
-import { ControlScheme } from '@/types'
+import { ControlScheme, Profile } from '@/types'
 
 export interface PlayerSetupPanelProps {
   // Namespaces this panel's popover id so two panels can safely share one host (see `host` below)
@@ -43,34 +45,78 @@ export interface PlayerSetupPanelProps {
   // `color` instead, so it needs neither.
   accentColor?: string
   mutedColor?: string
+  profiles?: Profile[]
+  selectedProfileId?: string | null
+  takenProfileId?: string | null
+  // What the name trigger shows before any profile's selected — this seat's own 'P1'/'P2' (see
+  // ProfilePicker's own doc for why it's never "Player", the menu's own row for that state).
+  // Required whenever profiles is provided, since the trigger always needs some idle text.
+  guestLabel?: string
+  onProfileSelect?: (profile: Profile | null) => void
+  // Navigates to the profile-management screen — only ever provided for P1 (see ProfilePicker's
+  // own doc for why: P2's rotated zone can't host a working text keyboard).
+  onManageProfiles?: () => void
 }
 
-// One panel per player slot in the loadout screen: a color picker (interactive for both human and
-// CPU slots, matching the title screen's own past behavior of letting the CPU's color be chosen
-// too) and a Ready toggle for human slots only. Owns its own popover host shared by its own color
-// picker unless a `host` is passed in to share with another panel or the shared controls instead.
-export function PlayerSetupPanel({ idPrefix, host, label, color, onColorChange, swatches, takenColor, allowSwapTaken, isHuman, controlScheme, controlSchemeOptions, onControlSchemeChange, ready, onToggleReady, dark, showReadyButton = true, accentColor, mutedColor }: PlayerSetupPanelProps) {
+// One panel per player slot in the loadout screen: a name label (tap to switch profiles or create
+// one, human slots only — falls back to the plain `label` text below when profiles isn't wired in),
+// a color picker (interactive for both human and CPU slots, matching the title screen's own past
+// behavior of letting the CPU's color be chosen too), and a Ready toggle for human slots only. Owns
+// its own popover host shared by its own color/profile picker unless a `host` is passed in to share
+// with another panel or the shared controls instead. Mirrors LightCycles' LobbyPlayerPanel.tsx for
+// its profile-switcher slot; unlike that component there's no per-panel CPU-difficulty picker to
+// swap in for the CPU slot (BoxHockey's aiDifficulty is a single shared-controls setting, not
+// per-seat), so the CPU slot (and any human slot not wired with profiles) just keeps this panel's
+// original plain-text `label`.
+export function PlayerSetupPanel({ idPrefix, host, label, color, onColorChange, swatches, takenColor, allowSwapTaken, isHuman, controlScheme, controlSchemeOptions, onControlSchemeChange, ready, onToggleReady, dark, showReadyButton = true, accentColor, mutedColor, profiles, selectedProfileId, takenProfileId, guestLabel, onProfileSelect, onManageProfiles }: PlayerSetupPanelProps) {
   const ownHost = usePopoverHost()
   const popover = host ?? ownHost
   // Checking *this panel's own* id, not just "is anything open on the host" — when `host` is
   // shared (vs-CPU), the other panel's or the shared controls' popovers also live on it, and
   // elevating this panel for those too would tie it with whichever of them actually has the open
   // popover, letting DOM order (wrongly) decide which one paints on top.
-  const ownPopoverOpen = popover.openId === `${idPrefix}-color` || popover.openId === `${idPrefix}-controlScheme`
+  const ownPopoverOpen = popover.openId?.startsWith(`${idPrefix}-`) ?? false
   const showControlScheme = isHuman && !!controlScheme && !!controlSchemeOptions && !!onControlSchemeChange && !!accentColor && !!mutedColor
+  const showProfilePicker = isHuman && profiles !== undefined && !!onProfileSelect
+  // The color button's own tag display (see InlineColorPicker) — read live from the selected
+  // profile rather than snapshotted at selection time, since there's no other editing surface for
+  // it on this screen at all (see app/profiles.tsx's ProfilesManager, the only place a tag is
+  // actually typed).
+  const selectedProfile = profiles?.find((p) => p.id === selectedProfileId) ?? null
+  // Pre-fills the seat's own color/control scheme from the selected profile, once, at selection
+  // time. This is what actually makes the seat's own pickers *feel* like "this profile's settings"
+  // — they stay fully editable afterward (see loadout.tsx's sync-back-while-selected control-scheme
+  // handler; see Profile's own doc comment in types/index.ts for why color specifically does not
+  // sync back), so this is just the initial snap, not a one-time-only copy.
+  const handleProfileSelect = useCallback(
+    (profile: Profile | null) => {
+      onProfileSelect?.(profile)
+      if (profile) {
+        onColorChange(profile.color)
+        onControlSchemeChange?.(profile.controlScheme)
+      }
+    },
+    [onProfileSelect, onColorChange, onControlSchemeChange]
+  )
 
   return (
     <View style={[styles.panel, ownPopoverOpen && styles.panelOpen]}>
-      {label && (
-        <Text variant='labelSmall' style={{ color, fontFamily: MONO_FONT }}>
-          {label}
-        </Text>
+      {showProfilePicker ? (
+        <ProfilePicker idPrefix={idPrefix} host={popover} profiles={profiles!} selectedId={selectedProfileId ?? null} takenId={takenProfileId} color={color} dark={dark} guestLabel={guestLabel ?? 'GUEST'} onSelect={handleProfileSelect} onManage={onManageProfiles} />
+      ) : (
+        label && (
+          <Text variant='labelSmall' style={{ color, fontFamily: MONO_FONT }}>
+            {label}
+          </Text>
+        )
       )}
 
       <View style={styles.pickerRow}>
-        {/* Human slots (which, in two-player mode, is both of them) get a face; vs-CPU's CPU slot
-        gets a robot — this is what actually distinguishes "you" from "the CPU" now, not text. */}
-        <InlineColorPicker id={`${idPrefix}-color`} host={popover} value={color} onChange={onColorChange} swatches={swatches} takenValue={takenColor} allowSwapTaken={allowSwapTaken} dark={dark} icon={isHuman ? 'face-man' : 'robot'} />
+        {/* Human slots (which, in two-player mode, is both of them) show the selected profile's own
+        tag when it has one, falling back to a face; vs-CPU's CPU slot always falls back to a robot
+        (no profile concept there at all) — this is what actually distinguishes "you" from "the CPU"
+        now, not a fixed icon. */}
+        <InlineColorPicker id={`${idPrefix}-color`} host={popover} value={color} onChange={onColorChange} swatches={swatches} takenValue={takenColor} allowSwapTaken={allowSwapTaken} dark={dark} tag={isHuman ? selectedProfile?.tag : undefined} icon={isHuman ? 'face-man' : 'robot'} />
 
         {/* Pull/push control-scheme picker — human slots only, same reasoning InlineColorPicker's
         face/robot icon swap above already encodes: a CPU has no finger on the glass to have a

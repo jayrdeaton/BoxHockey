@@ -1,8 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { CONTROL_SCHEME_SIGN, MAX_DRAG_PIXELS } from '@/constants/game'
-import { BoardLayout, ControlScheme, GameState, Player } from '@/types'
-import { AIDifficulty, planAIShot, randomAIThinkDelayMs } from '@/utils/aiOpponent'
+import { BoardLayout, ControlScheme, GameState, Player, PuckState } from '@/types'
+import { AIDifficulty, planAIShot, randomAIThinkDelayMs, randomInterceptReactionMs } from '@/utils/aiOpponent'
 
 interface AIControls {
   tryAimStart: (touchX: number, touchY: number) => boolean
@@ -16,11 +16,21 @@ interface AIControls {
 const WINDUP_STEP_MS = 90
 const RELEASE_PAUSE_MS = 180
 
+function otherPlayer(p: Player): Player {
+  return p === 1 ? 2 : 1
+}
+
 // Drives a CPU-controlled seat by dispatching through the same tryAimStart/aimUpdate/shoot path a
 // human drag uses — no reducer or physics changes needed, the AI just plays the existing gesture
 // contract on the puck's behalf once it's `aiPlayer`'s turn.
-export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Player | null, difficulty: AIDifficulty, friction: number, controlScheme: Record<Player, ControlScheme>, paused: boolean, controls: AIControls): void {
+export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Player | null, difficulty: AIDifficulty, friction: number, controlScheme: Record<Player, ControlScheme>, paused: boolean, interceptThreshold: number, controls: AIControls): void {
   const { tryAimStart, aimUpdate, shoot } = controls
+
+  // Mirrored every render (same discipline as this codebase's other rapidly-churning-state refs —
+  // e.g. game.tsx's faceoffRef) so the intercept effect below can read the FRESHEST puck position
+  // at each scheduled step, not a stale one captured back when eligibility first fired.
+  const puckRef = useRef(state.puck)
+  puckRef.current = state.puck
 
   // `paused` (settings/quit-confirm dialog open — see game.tsx) is only checked here, before
   // anything below has dispatched — safe to gate the whole chain on it at this single point
@@ -72,4 +82,55 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
     // launch) and stays stable through the CPU's own aiming/striking, so it's the correct trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.currentPlayer, state.puck, aiPlayer, difficulty, friction, controlScheme, board, tryAimStart, aimUpdate, shoot, paused])
+
+  // Mid-slide intercept — see InterceptSpeed in types/index.ts. A SEPARATE effect from the one
+  // above, not a second branch inside it: that effect's own deliberate omission of state.phase
+  // (see its comment) relies on state.puck only getting a fresh reference once per turn while
+  // 'idle' — but state.puck changes on every single PHYSICS_STEP frame throughout 'simulating', so
+  // depending on it directly here would tear down and reschedule this effect's timers every ~16ms,
+  // and the reaction delay below would never actually complete. Fix: depend on a derived PRIMITIVE
+  // boolean instead (isInterceptEligible), which only flips value on a real false→true/true→false
+  // edge, not every frame the puck happens to still be moving.
+  const speed = Math.hypot(state.puck.vx, state.puck.vy)
+  const hasInterceptAim = state.interceptAim !== null
+  // The `hasInterceptAim ||` term matters: without it, a gravity well transiently re-accelerating
+  // the puck back above interceptThreshold AFTER this CPU has already committed to an intercept
+  // would flip this boolean back to false and cancel the still-pending aimUpdate/shoot timers
+  // mid-swing — a real CPU shot silently vanishing mid-windup for no visible reason.
+  const isInterceptEligible = aiPlayer !== null && !paused && state.phase === 'simulating' && otherPlayer(state.currentPlayer) === aiPlayer && (hasInterceptAim || speed < interceptThreshold)
+
+  useEffect(() => {
+    if (!isInterceptEligible || aiPlayer === null) return
+
+    const timers: ReturnType<typeof setTimeout>[] = []
+    const after = (ms: number, fn: () => void) => {
+      timers.push(setTimeout(fn, ms))
+    }
+
+    after(randomInterceptReactionMs(difficulty), () => {
+      // Re-planned HERE, against the freshest puck available, rather than at the top of this
+      // effect — the puck keeps coasting for the whole reaction delay by design (that's the
+      // entire feature), so planning against whatever position triggered eligibility would already
+      // be stale by the time this fires. The subsequent ~360ms windup below can still drift a
+      // little further (accepted, documented limitation — see PLAN); shot.fx/fy/power is a
+      // direction/magnitude, not a target position, so the ACTUAL shot vector is unaffected either
+      // way, only the cosmetic paddle-pullback target below.
+      const freshPuck: PuckState = puckRef.current
+      const shot = planAIShot(freshPuck, board, aiPlayer, difficulty, friction)
+      const dragMag = shot.power * MAX_DRAG_PIXELS
+      const sign = CONTROL_SCHEME_SIGN[controlScheme[aiPlayer]]
+      const dragX = sign * shot.fx * dragMag
+      const dragY = sign * shot.fy * dragMag
+
+      if (!tryAimStart(freshPuck.x, freshPuck.y)) return
+      after(WINDUP_STEP_MS, () => aimUpdate(puckRef.current.x + dragX * 0.55, puckRef.current.y + dragY * 0.55))
+      after(WINDUP_STEP_MS * 2, () => aimUpdate(puckRef.current.x + dragX, puckRef.current.y + dragY))
+      after(WINDUP_STEP_MS * 2 + RELEASE_PAUSE_MS, () => shoot(dragX, dragY))
+    })
+
+    return () => {
+      timers.forEach(clearTimeout)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInterceptEligible, aiPlayer, difficulty, friction, controlScheme, board, tryAimStart, aimUpdate, shoot])
 }

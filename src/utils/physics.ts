@@ -9,6 +9,14 @@ export interface PhysicsResult extends PuckState {
   stopped: boolean
   bounced: boolean
   enteredWell: 'attract' | 'repel' | null
+  // Set only when this step's bounce was against the invisible one-way door at the goal mouth —
+  // see the "GameSettings.rink only: a one-way door" collision block below. That door is what
+  // stops a puck already behind the line from passing back OUT through the same gap it would
+  // otherwise score through; visually that gap (between the posts, where the static goal-line
+  // <Line>s deliberately stop) looks open, so this is the collision a player actually needs a cue
+  // for. null for every other bounce, including the puck striking the TRUE far boundary deeper in
+  // the pocket (a real collision, just not this one — nothing flashes there).
+  goalDoorHit: 'top' | 'bottom' | null
 }
 
 // Localized attractor/repeller: force falls off quadratically to exactly 0 at
@@ -169,6 +177,7 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
   // gap a retreating puck could sneak out through; see its own comment for the fix.
   const centerInGoalX = x > goalAbsLeft && x < goalAbsRight
   let bounced = false
+  let goalDoorHit: 'top' | 'bottom' | null = null
 
   // Hoisted up from right before the two return statements that use them, below — a clean,
   // already-fully-cleared score (see the early-return check right after this) needs them before the
@@ -185,8 +194,8 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
   // "fully cleared" (y + r < board.y), and a goalpost's own collision radius is puckRadius +
   // postRadius — strictly LARGER than puckRadius alone — so a puck can be both fully cleared and
   // still within a post's collision distance at the same time.
-  if (centerInGoalX && y + r < board.y && !wasBehindTop) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null }
-  if (centerInGoalX && y - r > board.y + board.height && !wasBehindBottom) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null }
+  if (centerInGoalX && y + r < board.y && !wasBehindTop) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
+  if (centerInGoalX && y - r > board.y + board.height && !wasBehindBottom) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
 
   // GameSettings.rink only (board.cornerRadius === 0 when it's off, so this is always null then): near
   // one of the 4 rounded outer corners, a single concave arc check replaces BOTH the flat
@@ -233,6 +242,12 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
     // runs before this loop ever gets a chance to touch a puck that's already cleanly through.
     let postHit = false
     for (const post of board.goalPosts) {
+      // A puck already fully behind THIS post's own goal line (see wasBehindTop/wasBehindBottom's
+      // own comment) is deep in the pocket, not approaching the goal mouth from the playable side
+      // — real hockey posts don't extend backward into the net, so they shouldn't still deflect a
+      // puck poking at them from behind. Gated per-post (not globally) since a puck can be behind
+      // ONE goal's line while still approaching the OTHER goal's posts normally.
+      if ((post.player === 2 && wasBehindTop) || (post.player === 1 && wasBehindBottom)) continue
       const col = sharedCircleVsCircle({ position: { x, y }, radius: r }, { position: { x: post.x, y: post.y }, radius: post.radius })
       if (col.hit) {
         x += col.normal.x * col.depth
@@ -334,18 +349,20 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
     y = board.y - r - DOOR_CLAMP_MARGIN
     vy = -Math.abs(vy) * WALL_RESTITUTION
     bounced = true
+    goalDoorHit = 'top'
   }
   if (board.behindGoalDepth > 0 && centerInGoalX && wasBehindBottom && y - r <= board.y + board.height) {
     y = board.y + board.height + r + DOOR_CLAMP_MARGIN
     vy = Math.abs(vy) * WALL_RESTITUTION
     bounced = true
+    goalDoorHit = 'bottom'
   }
 
   // Same check as the early return above, run again here: the one-way door just above can push a
   // puck that was behind the line back toward (or past) it, which the early check — evaluated
   // before the whole collision block ran — couldn't have seen yet.
-  if (centerInGoalX && y + r < board.y && !wasBehindTop) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null }
-  if (centerInGoalX && y - r > board.y + board.height && !wasBehindBottom) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null }
+  if (centerInGoalX && y + r < board.y && !wasBehindTop) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
+  if (centerInGoalX && y - r > board.y + board.height && !wasBehindBottom) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
 
   if (!corner) {
     if (x - r < board.x) {
@@ -374,7 +391,7 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
 
   const stopped = Math.abs(vx) < STOP_THRESHOLD && Math.abs(vy) < STOP_THRESHOLD
   const enteredWell = detectWellEntry(x0, y0, x, y, board.gravityWells)
-  return { x, y, vx, vy, scored: null, stopped, bounced, enteredWell }
+  return { x, y, vx, vy, scored: null, stopped, bounced, enteredWell, goalDoorHit }
 }
 
 // How far a single stepPhysicsOnce call is allowed to move the puck before sub-stepping kicks in
@@ -424,16 +441,18 @@ export function stepPhysics(puck: PuckState, board: BoardLayout, dt = 1, frictio
   let current = puck
   let anyBounced = false
   let lastEnteredWell: 'attract' | 'repel' | null = null
+  let lastGoalDoorHit: 'top' | 'bottom' | null = null
   for (let i = 0; i < substeps; i++) {
     const result = stepPhysicsOnce(current, board, subDt, friction)
     anyBounced = anyBounced || result.bounced
     lastEnteredWell = result.enteredWell ?? lastEnteredWell
+    lastGoalDoorHit = result.goalDoorHit ?? lastGoalDoorHit
     // A score or a stop is final — stop sub-stepping immediately rather than continuing to
     // integrate a puck that's already been removed from play (or come to rest) this frame.
-    if (result.scored !== null || result.stopped) return { ...result, bounced: anyBounced, enteredWell: lastEnteredWell }
+    if (result.scored !== null || result.stopped) return { ...result, bounced: anyBounced, enteredWell: lastEnteredWell, goalDoorHit: lastGoalDoorHit }
     current = { x: result.x, y: result.y, vx: result.vx, vy: result.vy }
   }
-  return { ...current, scored: null, stopped: false, bounced: anyBounced, enteredWell: lastEnteredWell }
+  return { ...current, scored: null, stopped: false, bounced: anyBounced, enteredWell: lastEnteredWell, goalDoorHit: lastGoalDoorHit }
 }
 
 export function computeAimVector(dragDx: number, dragDy: number, maxDragPixels: number, maxSpeed: number): { vx: number; vy: number; power: number } {
@@ -445,14 +464,19 @@ export function computeAimVector(dragDx: number, dragDy: number, maxDragPixels: 
 // Returns waypoints: start + each bounce contact + final position.
 // Straight segments between waypoints represent the actual path (friction is
 // light enough that curvature is negligible between bounces).
-export function computeTrajectory(startX: number, startY: number, dragDx: number, dragDy: number, board: BoardLayout, maxDragPixels: number, maxSpeed: number, maxBounces = 5): TrajectoryPoint[] {
+// `friction` defaults to FRICTION_LEVELS.medium (matching stepPhysics' own default) — previously
+// hardcoded to a fixed 0.993 regardless of the round's actual friction setting, which is CLOSER TO
+// but not equal to 'low' (0.992) and meaningfully higher (less decel) than 'medium' (0.986) or
+// 'high' (0.976). Over several frames that gap compounds into a real speed mismatch at the moment
+// of contact with anything downstream, which is part of what made a bounce prediction — a post's
+// small collision radius especially — land at a visibly different point/angle than the real shot.
+export function computeTrajectory(startX: number, startY: number, dragDx: number, dragDy: number, board: BoardLayout, maxDragPixels: number, maxSpeed: number, maxBounces = 5, friction: number = FRICTION_LEVELS.medium): TrajectoryPoint[] {
   const { vx: initVx, vy: initVy } = computeAimVector(dragDx, dragDy, maxDragPixels, maxSpeed)
   if (initVx === 0 && initVy === 0) return []
 
   const r = board.puckRadius
   const goalAbsLeft = board.x + board.goalLeft
   const goalAbsRight = board.x + board.goalRight
-  const TRAJ_FRICTION = 0.993
 
   const points: TrajectoryPoint[] = [{ x: startX, y: startY }]
   let x = startX
@@ -461,58 +485,142 @@ export function computeTrajectory(startX: number, startY: number, dragDx: number
   let vy = initVy
   let bounces = 0
 
-  for (let step = 0; step < 800; step++) {
+  let hitMaxBounces = false
+  for (let step = 0; step < 800 && !hitMaxBounces; step++) {
     // Mirrors stepPhysics' midCrossing friction exemption exactly — see its own comment.
     const centerInGoalX0 = x > goalAbsLeft && x < goalAbsRight
     const midCrossing = centerInGoalX0 && ((y - r < board.y && y + r >= board.y) || (y + r > board.y + board.height && y - r <= board.y + board.height))
     if (!midCrossing) {
-      vx *= TRAJ_FRICTION
-      vy *= TRAJ_FRICTION
+      vx *= friction
+      vy *= friction
     }
     const wellForce = applyGravityWellForces(x, y, vx, vy, board.gravityWells, 1)
     vx = wellForce.vx
     vy = wellForce.vy
     if (Math.sqrt(vx * vx + vy * vy) < 0.4) break
-    const yBefore = y
-    x += vx
-    y += vy
 
-    let bounced = false
-    // Mirrors stepPhysics' centerInGoalX exactly — see its own comment.
-    const centerInGoalX = x > goalAbsLeft && x < goalAbsRight
+    // Splits this frame's movement into finer substeps so a fast-moving puck can't tunnel straight
+    // past a small target — a goalpost above all, see stepPhysics' own SUBSTEP_MAX_DISPLACEMENT_
+    // RATIO comment — between two sampled positions. Mirrors stepPhysics' own outer substep
+    // wrapper: the substep COUNT is chosen once per frame off the frame's own speed, but each
+    // substep below moves by whatever vx/vy IS AT THAT MOMENT (substeps), so a bounce partway
+    // through a frame immediately shrinks/redirects every subsequent substep's own movement within
+    // that same frame instead of only affecting the NEXT frame — the same reason a real shot can
+    // reflect off a post at a materially different angle than this preview previously predicted,
+    // since the preview used to sample collisions only once per frame at the FULL per-frame
+    // displacement, easily clearing straight past a post's small collision radius in one jump.
+    const frameSpeed = Math.sqrt(vx * vx + vy * vy)
+    const safeMaxDisplacement = r * SUBSTEP_MAX_DISPLACEMENT_RATIO
+    const substeps = frameSpeed > safeMaxDisplacement ? Math.min(SUBSTEP_MAX_COUNT, Math.ceil(frameSpeed / safeMaxDisplacement)) : 1
 
-    // Mirrors stepPhysics' hoisted wasBehindTop/wasBehindBottom + early clean-score return exactly
-    // — see its own comment for why this has to run before the collision block, not after.
-    const wasBehindTop = yBefore + r < board.y
-    const wasBehindBottom = yBefore - r > board.y + board.height
-    if (centerInGoalX && ((y + r < board.y && !wasBehindTop) || (y - r > board.y + board.height && !wasBehindBottom))) {
-      points.push({ x, y })
-      return points
-    }
+    for (let sub = 0; sub < substeps; sub++) {
+      const yBefore = y
+      x += vx / substeps
+      y += vy / substeps
 
-    // Mirrors stepPhysics' rounded-corner handling exactly (see boardCornerQuadrant's own doc
-    // comment) — null/no-op whenever GameSettings.rink is off.
-    const corner = boardCornerQuadrant(x, y, board)
-    if (corner) {
-      const col = circleVsRoundedCorner(x, y, r, corner.arcCenterX, corner.arcCenterY, board.cornerRadius)
-      if (col.hit) {
-        x = col.x
-        y = col.y
-        // Mirrors stepPhysics' corner reflection exactly, sign included — see its own comment.
-        const dot = vx * col.nx + vy * col.ny
-        if (dot > 0) {
-          vx -= (1 + WALL_RESTITUTION) * dot * col.nx
-          vy -= (1 + WALL_RESTITUTION) * dot * col.ny
+      let bounced = false
+      // Mirrors stepPhysics' centerInGoalX exactly — see its own comment.
+      const centerInGoalX = x > goalAbsLeft && x < goalAbsRight
+
+      // Mirrors stepPhysics' hoisted wasBehindTop/wasBehindBottom + early clean-score return
+      // exactly — see its own comment for why this has to run before the collision block, not after.
+      const wasBehindTop = yBefore + r < board.y
+      const wasBehindBottom = yBefore - r > board.y + board.height
+      if (centerInGoalX && ((y + r < board.y && !wasBehindTop) || (y - r > board.y + board.height && !wasBehindBottom))) {
+        points.push({ x, y })
+        return points
+      }
+
+      // Mirrors stepPhysics' rounded-corner handling exactly (see boardCornerQuadrant's own doc
+      // comment) — null/no-op whenever GameSettings.rink is off.
+      const corner = boardCornerQuadrant(x, y, board)
+      if (corner) {
+        const col = circleVsRoundedCorner(x, y, r, corner.arcCenterX, corner.arcCenterY, board.cornerRadius)
+        if (col.hit) {
+          x = col.x
+          y = col.y
+          // Mirrors stepPhysics' corner reflection exactly, sign included — see its own comment.
+          const dot = vx * col.nx + vy * col.ny
+          if (dot > 0) {
+            vx -= (1 + WALL_RESTITUTION) * dot * col.nx
+            vy -= (1 + WALL_RESTITUTION) * dot * col.ny
+          }
+          bounced = true
         }
+      } else {
+        // Mirrors stepPhysics' goalpost-before-wall ordering exactly, and its NOT-gated-on-
+        // centerInGoalX fix — see its own comment for why the old x-only gate let a puck slip
+        // through a post it was still overlapping.
+        let postHit = false
+        for (const post of board.goalPosts) {
+          // Mirrors stepPhysics' post-behind-the-line gate exactly — see its own comment.
+          if ((post.player === 2 && wasBehindTop) || (post.player === 1 && wasBehindBottom)) continue
+          const col = circleVsCircle(x, y, r, post.x, post.y, post.radius)
+          if (col.hit) {
+            x += col.nx * col.depth
+            y += col.ny * col.depth
+            const dot = vx * col.nx + vy * col.ny
+            if (dot < 0) {
+              vx -= (1 + WALL_RESTITUTION) * dot * col.nx
+              vy -= (1 + WALL_RESTITUTION) * dot * col.ny
+            }
+            bounced = true
+            postHit = true
+          }
+        }
+
+        // Mirrors stepPhysics' outerTop/outerBottom fix exactly (including skipGoalGap and the
+        // centerInGoalX-gated gap, and the nearPostX widening — see its own comment for why the
+        // wall's own flat trigger needs to also step back from any post's real circular reach).
+        const skipGoalGap = board.behindGoalDepth > 0
+        const outerTop = board.y - board.behindGoalDepth
+        const outerBottom = board.y + board.height + board.behindGoalDepth
+        const nearPostX = !skipGoalGap && board.goalPosts.some((post) => Math.abs(x - post.x) < r + post.radius)
+        if (!postHit && y - r < outerTop && (skipGoalGap || (!centerInGoalX && !nearPostX))) {
+          y = outerTop + r
+          vy = Math.abs(vy) * WALL_RESTITUTION
+          bounced = true
+        }
+        if (!postHit && y + r > outerBottom && (skipGoalGap || (!centerInGoalX && !nearPostX))) {
+          y = outerBottom - r
+          vy = -Math.abs(vy) * WALL_RESTITUTION
+          bounced = true
+        }
+      }
+
+      // Mirrors stepPhysics' one-way goal-mouth door exactly, margin included — see its own comment
+      // (gated on centerInGoalX, not the narrower full-body inGoalX, to close the escape gap).
+      if (board.behindGoalDepth > 0 && centerInGoalX && wasBehindTop && y + r >= board.y) {
+        y = board.y - r - 1
+        vy = -Math.abs(vy) * WALL_RESTITUTION
         bounced = true
       }
-    } else {
-      // Mirrors stepPhysics' goalpost-before-wall ordering exactly, and its NOT-gated-on-
-      // centerInGoalX fix — see its own comment for why the old x-only gate let a puck slip
-      // through a post it was still overlapping.
-      let postHit = false
-      for (const post of board.goalPosts) {
-        const col = circleVsCircle(x, y, r, post.x, post.y, post.radius)
+      if (board.behindGoalDepth > 0 && centerInGoalX && wasBehindBottom && y - r <= board.y + board.height) {
+        y = board.y + board.height + r + 1
+        vy = Math.abs(vy) * WALL_RESTITUTION
+        bounced = true
+      }
+
+      // Same check as the early return above, run again here (mirrors stepPhysics exactly): the
+      // one-way door just above can push a puck that was behind the line back toward (or past) it,
+      // which the early check — evaluated before the collision block ran — couldn't have seen yet.
+      if (centerInGoalX && ((y + r < board.y && !wasBehindTop) || (y - r > board.y + board.height && !wasBehindBottom))) {
+        points.push({ x, y })
+        return points
+      }
+      if (!corner && x - r < board.x) {
+        x = board.x + r
+        vx = Math.abs(vx) * WALL_RESTITUTION
+        bounced = true
+      }
+      if (!corner && x + r > board.x + board.width) {
+        x = board.x + board.width - r
+        vx = -Math.abs(vx) * WALL_RESTITUTION
+        bounced = true
+      }
+
+      for (const obs of board.obstacles) {
+        const col = circleVsRect(x, y, r, obs.x, obs.y, obs.width, obs.height)
         if (col.hit) {
           x += col.nx * col.depth
           y += col.ny * col.depth
@@ -522,78 +630,17 @@ export function computeTrajectory(startX: number, startY: number, dragDx: number
             vy -= (1 + WALL_RESTITUTION) * dot * col.ny
           }
           bounced = true
-          postHit = true
         }
       }
 
-      // Mirrors stepPhysics' outerTop/outerBottom fix exactly (including skipGoalGap and the
-      // centerInGoalX-gated gap, and the nearPostX widening — see its own comment for why the
-      // wall's own flat trigger needs to also step back from any post's real circular reach).
-      const skipGoalGap = board.behindGoalDepth > 0
-      const outerTop = board.y - board.behindGoalDepth
-      const outerBottom = board.y + board.height + board.behindGoalDepth
-      const nearPostX = !skipGoalGap && board.goalPosts.some((post) => Math.abs(x - post.x) < r + post.radius)
-      if (!postHit && y - r < outerTop && (skipGoalGap || (!centerInGoalX && !nearPostX))) {
-        y = outerTop + r
-        vy = Math.abs(vy) * WALL_RESTITUTION
-        bounced = true
-      }
-      if (!postHit && y + r > outerBottom && (skipGoalGap || (!centerInGoalX && !nearPostX))) {
-        y = outerBottom - r
-        vy = -Math.abs(vy) * WALL_RESTITUTION
-        bounced = true
-      }
-    }
-
-    // Mirrors stepPhysics' one-way goal-mouth door exactly, margin included — see its own comment
-    // (gated on centerInGoalX, not the narrower full-body inGoalX, to close the escape gap).
-    if (board.behindGoalDepth > 0 && centerInGoalX && wasBehindTop && y + r >= board.y) {
-      y = board.y - r - 1
-      vy = -Math.abs(vy) * WALL_RESTITUTION
-      bounced = true
-    }
-    if (board.behindGoalDepth > 0 && centerInGoalX && wasBehindBottom && y - r <= board.y + board.height) {
-      y = board.y + board.height + r + 1
-      vy = Math.abs(vy) * WALL_RESTITUTION
-      bounced = true
-    }
-
-    // Same check as the early return above, run again here (mirrors stepPhysics exactly): the
-    // one-way door just above can push a puck that was behind the line back toward (or past) it,
-    // which the early check — evaluated before the collision block ran — couldn't have seen yet.
-    if (centerInGoalX && ((y + r < board.y && !wasBehindTop) || (y - r > board.y + board.height && !wasBehindBottom))) {
-      points.push({ x, y })
-      return points
-    }
-    if (!corner && x - r < board.x) {
-      x = board.x + r
-      vx = Math.abs(vx) * WALL_RESTITUTION
-      bounced = true
-    }
-    if (!corner && x + r > board.x + board.width) {
-      x = board.x + board.width - r
-      vx = -Math.abs(vx) * WALL_RESTITUTION
-      bounced = true
-    }
-
-    for (const obs of board.obstacles) {
-      const col = circleVsRect(x, y, r, obs.x, obs.y, obs.width, obs.height)
-      if (col.hit) {
-        x += col.nx * col.depth
-        y += col.ny * col.depth
-        const dot = vx * col.nx + vy * col.ny
-        if (dot < 0) {
-          vx -= (1 + WALL_RESTITUTION) * dot * col.nx
-          vy -= (1 + WALL_RESTITUTION) * dot * col.ny
+      if (bounced) {
+        points.push({ x, y })
+        bounces++
+        if (bounces >= maxBounces) {
+          hitMaxBounces = true
+          break
         }
-        bounced = true
       }
-    }
-
-    if (bounced) {
-      points.push({ x, y })
-      bounces++
-      if (bounces >= maxBounces) break
     }
   }
 

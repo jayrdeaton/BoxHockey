@@ -36,10 +36,12 @@ export function Feedback({ children }: Props) {
   useEffect(() => {
     AsyncStorage.getItem(SOUND_STORAGE_KEY)
       .then((stored) => {
-        setSoundSettings({ enabled: stored === null ? true : stored === 'true' })
+        // Default muted in dev/simulator builds (no stored preference yet) so Claude/local
+        // testing doesn't blast audio; production builds still default to sound on.
+        setSoundSettings({ enabled: stored === null ? !__DEV__ : stored === 'true' })
       })
       .catch(() => {
-        setSoundSettings({ enabled: true })
+        setSoundSettings({ enabled: !__DEV__ })
       })
   }, [])
 
