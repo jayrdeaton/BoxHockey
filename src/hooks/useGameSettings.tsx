@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { useEdgeGestureGuard } from '@tastic/edge-guard'
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react'
 
 import { GameSettings } from '@/types'
@@ -54,6 +55,12 @@ export function GameSettingsProvider({ children }: Props) {
       return next
     })
   }, [])
+
+  // Drives @tastic/edge-guard's native UserDefaults mirror on every change — including the
+  // initial-load effect above resolving a stored value — since AsyncStorage (this state's real
+  // store) and UserDefaults (what the guard's native swizzle reads) are otherwise two independent
+  // stores that only this keeps in sync.
+  useEdgeGestureGuard(settings.deferBottomEdgeGestures)
 
   // Held only in memory, never persisted — /game reads this once at mount (see game.tsx) to lock
   // in the round it's about to play, so a settings-dialog edit made mid-round can't retroactively

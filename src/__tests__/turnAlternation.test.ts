@@ -11,7 +11,7 @@
 // real user feedback, explicit, that the winner must NEVER get a follow-up shot off their own
 // knock — the loser always takes the very next real turn, hit or miss.
 
-import { CONTROL_SCHEME_SIGN, FRICTION_LEVELS, MIN_SHOOT_DRAG } from '@/constants/game'
+import { CONTROL_SCHEME_SIGN, FRICTION_LEVELS, MAX_FLICK_VELOCITY, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/constants/game'
 import { makeReducer } from '@/hooks/useGameState'
 import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, TipoffMode } from '@/types'
 import { computeFaceoffKnock } from '@/utils/faceoff'
@@ -101,10 +101,12 @@ const DUMMY_STATE: GameState = {
 
 type Reducer = (state: GameState, action: Parameters<ReturnType<typeof makeReducer>>[1]) => GameState
 
-// Drag vector (dx, dy) that, once STRIKE applies the shooting player's own ControlScheme sign,
-// yields a launch direction roughly toward `player`'s attacking goal — with random x jitter (so
-// shots sometimes score, sometimes miss wide) and random power (so rallies vary in length).
-function randomDragForPlayer(rng: Rng, player: Player, puckX: number, puckY: number): { dx: number; dy: number } {
+// Drag vector (dx, dy — cosmetic pixel-space target for the AIM_UPDATE dispatch below, no longer
+// power-bearing) and velocity vector (vx, vy — the actual power/direction STRIKE fires with, once
+// it applies the shooting player's own ControlScheme sign) sharing one direction toward `player`'s
+// attacking goal — with random x jitter (so shots sometimes score, sometimes miss wide) and random
+// power (so rallies vary in length).
+function randomDragForPlayer(rng: Rng, player: Player, puckX: number, puckY: number): { dx: number; dy: number; vx: number; vy: number } {
   const targetY = player === 1 ? board.y - 20 : board.y + board.height + 20
   const targetX = board.centerX + (rng() - 0.5) * board.width * 0.9
   const rawDx = targetX - puckX
@@ -112,11 +114,12 @@ function randomDragForPlayer(rng: Rng, player: Player, puckX: number, puckY: num
   const norm = Math.hypot(rawDx, rawDy) || 1
   const dirX = rawDx / norm
   const dirY = rawDy / norm
-  const mag = MIN_SHOOT_DRAG * 1.5 + rng() * 140
+  const dragMag = MIN_SHOOT_DRAG * 1.5 + rng() * 140
+  const velMag = MIN_FLICK_VELOCITY * 1.5 + rng() * (MAX_FLICK_VELOCITY - MIN_FLICK_VELOCITY * 1.5)
   const sign = CONTROL_SCHEME_SIGN[CONTROL_SCHEME[player]]
   // sign * (sign * dirX) === dirX, so this always yields a final velocity direction of
   // (dirX, dirY) regardless of which ControlScheme sign STRIKE applies.
-  return { dx: sign * dirX * mag, dy: sign * dirY * mag }
+  return { dx: sign * dirX * dragMag, dy: sign * dirY * dragMag, vx: sign * dirX * velMag, vy: sign * dirY * velMag }
 }
 
 function runPhysicsToStop(reducer: Reducer, state: GameState, log: unknown[]): GameState {
@@ -308,10 +311,7 @@ function driveFuzzRun(tipoffMode: TipoffMode, totalShots: number, seed: number):
       // takes the very next real turn off the winner's own knock, hit or miss — the winner never
       // gets a follow-up shot of their own.
       if (state.currentPlayer !== other(winner)) {
-        throw new Error(
-          `TURN ALTERNATION BUG: after the faceoff winner's own knock resolved (phase=${state.phase}), currentPlayer is ` +
-            `${state.currentPlayer} (expected the loser, ${other(winner)}). Action log:\n${JSON.stringify(recentLog, null, 2)}`
-        )
+        throw new Error(`TURN ALTERNATION BUG: after the faceoff winner's own knock resolved (phase=${state.phase}), currentPlayer is ` + `${state.currentPlayer} (expected the loser, ${other(winner)}). Action log:\n${JSON.stringify(recentLog, null, 2)}`)
       }
 
       if (state.phase === 'scored') {
@@ -328,11 +328,11 @@ function driveFuzzRun(tipoffMode: TipoffMode, totalShots: number, seed: number):
 
       state = reducer(state, { type: 'AIM_START', x: state.puck.x, y: state.puck.y })
       recentLog.push({ type: 'AIM_START', shooter })
-      const { dx, dy } = randomDragForPlayer(rng, shooter, state.puck.x, state.puck.y)
-      state = reducer(state, { type: 'AIM_UPDATE', x: state.puck.x + dx, y: state.puck.y + dy })
+      const { dx, dy, vx, vy } = randomDragForPlayer(rng, shooter, state.puck.x, state.puck.y)
+      state = reducer(state, { type: 'AIM_UPDATE', x: state.puck.x + dx, y: state.puck.y + dy, vx, vy })
       recentLog.push({ type: 'AIM_UPDATE' })
-      state = reducer(state, { type: 'STRIKE', dx, dy })
-      recentLog.push({ type: 'STRIKE', dx, dy, shooter })
+      state = reducer(state, { type: 'STRIKE', vx, vy })
+      recentLog.push({ type: 'STRIKE', vx, vy, shooter })
       state = reducer(state, { type: 'APPLY_STRIKE' })
       recentLog.push({ type: 'APPLY_STRIKE' })
 

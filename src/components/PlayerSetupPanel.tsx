@@ -83,20 +83,19 @@ export function PlayerSetupPanel({ idPrefix, host, label, color, onColorChange, 
   // it on this screen at all (see app/profiles.tsx's ProfilesManager, the only place a tag is
   // actually typed).
   const selectedProfile = profiles?.find((p) => p.id === selectedProfileId) ?? null
-  // Pre-fills the seat's own color/control scheme from the selected profile, once, at selection
-  // time. This is what actually makes the seat's own pickers *feel* like "this profile's settings"
-  // — they stay fully editable afterward (see loadout.tsx's sync-back-while-selected control-scheme
-  // handler; see Profile's own doc comment in types/index.ts for why color specifically does not
-  // sync back), so this is just the initial snap, not a one-time-only copy.
+  // Pre-fills the seat's own control scheme from the selected profile at selection time — stays
+  // fully editable afterward, and keeps syncing back for as long as the profile stays selected (see
+  // loadout.tsx's own sync-back handler). Color isn't pre-filled here: unlike control scheme, a
+  // seat's color while a profile's selected has to keep tracking that profile's own *current* saved
+  // color for as long as it stays selected (not just snap once at selection time), including across
+  // this screen's own mount — see loadout.tsx's own profile-color effect and Profile's own doc
+  // comment in types/index.ts, both of which own that entirely now.
   const handleProfileSelect = useCallback(
     (profile: Profile | null) => {
       onProfileSelect?.(profile)
-      if (profile) {
-        onColorChange(profile.color)
-        onControlSchemeChange?.(profile.controlScheme)
-      }
+      if (profile) onControlSchemeChange?.(profile.controlScheme)
     },
-    [onProfileSelect, onColorChange, onControlSchemeChange]
+    [onProfileSelect, onControlSchemeChange]
   )
 
   return (

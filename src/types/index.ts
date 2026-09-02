@@ -17,10 +17,11 @@ export type GameMode = 'twoPlayer' | 'vsCpu'
 // the drag on release.
 export type ControlScheme = 'pull' | 'push'
 
-// A locally-saved player identity — name, color, and a short tag, entirely opt-in. Independent of
-// any seat's live round color (see PlayerSetupPanel.tsx's handleProfileSelect and loadout.tsx's own
-// color-change handlers, which deliberately don't sync back to the profile — a seat's live color is
-// a per-match override, not an edit to the saved "favorite"). Mirrors LightCycles' identically-
+// A locally-saved player identity — name, color, and a short tag, entirely opt-in. A seat's own live
+// round color, while this profile's selected there, is derived FROM this (see loadout.tsx's own
+// profile-color effect) but never synced back TO it — a manual recolor or clash-swap made on that
+// seat is a transient, in-memory-only override for the rest of that screen session, not an edit to
+// the saved "favorite" (that's app/profiles.tsx's ProfilesManager's own job). Mirrors LightCycles' identically-
 // shaped Profile type (see @tastic/profile, the package both apps build this on), with controlScheme
 // standing in for LightCycles' keyScheme as this app's own per-profile control preference.
 export interface Profile {
@@ -123,6 +124,12 @@ export interface GameSettings {
   // posts and the line scores immediately, with no depth behind it to travel into. Off by default,
   // matching every other variant's original, pre-rink-work behavior.
   rink: boolean
+  // iOS-only. Off by default — deliberately opt-in rather than always-on, so it only kicks in for
+  // someone who's actually hit the problem and gone looking for a fix, instead of every player
+  // eating a "swipe twice to go home" surprise from day one. Mirrored into native UserDefaults (see
+  // useGameSettings.tsx) for @tastic/edge-guard's own config plugin swizzle of
+  // preferredScreenEdgesDeferringSystemGestures to read at runtime.
+  deferBottomEdgeGestures: boolean
 }
 
 export interface Obstacle {
@@ -231,6 +238,12 @@ export interface AimIndicator {
   startY: number
   currentX: number
   currentY: number
+  // Live release-velocity ESTIMATE (points/sec), smoothed (see AIM_VELOCITY_SMOOTHING_ALPHA in
+  // constants/game.ts) — display-only, drives Board.tsx's live stick/chevron preview. The actual
+  // shot fired on release reads the raw, unsmoothed velocity straight off the gesture event, never
+  // this field — see useGameState.ts's STRIKE case.
+  vx: number
+  vy: number
 }
 
 export interface PendingShot {

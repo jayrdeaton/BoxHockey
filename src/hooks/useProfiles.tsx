@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { isSharedProfileStoreAvailable, loadSharedProfiles, Profile as BaseProfile, saveSharedProfiles } from '@tastic/profile'
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react'
+import { AppState } from 'react-native'
 
 import { ControlScheme, Player, Profile } from '@/types'
 import { DEFAULT_LOCAL_PROFILES_STATE, isValidLocalProfilesState, LocalProfilesState, migrateLegacyProfilesState } from '@/utils/profilesValidation'
@@ -14,7 +15,7 @@ const SHARED_GROUP_ID = 'group.com.infinitetoken.tastic'
 // DEFAULT_SETTINGS) — what a profile that's never had one set locally on THIS app falls back to.
 // That's exactly the state of any profile created on another @tastic app (LightCycles has no
 // concept of controlScheme at all) the very first time it's selected here.
-const DEFAULT_CONTROL_SCHEME: ControlScheme = 'pull'
+const DEFAULT_CONTROL_SCHEME: ControlScheme = 'push'
 
 interface CreateProfileInput {
   name: string
@@ -100,6 +101,27 @@ export function ProfilesProvider({ children }: Props) {
     })()
     return () => {
       cancelled = true
+    }
+  }, [])
+
+  // The shared store doesn't push — @tastic/profile's sharedProfileStore.ts is a plain
+  // UserDefaults(suiteName:) read/write with no cross-process change notification. Re-reading on
+  // foreground is what catches "created/edited a profile in the other app, then switched back to
+  // this one" — otherwise sharedBase only ever reflects what this app itself last wrote, until the
+  // next cold start. controlScheme lives entirely in local.extensions (untouched here), so this
+  // only ever needs to replace the base roster.
+  useEffect(() => {
+    if (!isSharedProfileStoreAvailable) return
+    let cancelled = false
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return
+      loadSharedProfiles(SHARED_GROUP_ID).then((shared) => {
+        if (!cancelled) setSharedBase(shared)
+      })
+    })
+    return () => {
+      cancelled = true
+      sub.remove()
     }
   }, [])
 

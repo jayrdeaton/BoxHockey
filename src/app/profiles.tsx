@@ -11,7 +11,7 @@ import { safeBack } from '@/utils/navigation'
 // profile isn't necessarily *for* whichever seat opened this screen (the whole point of a dedicated
 // screen is P1 handing the phone to P2 to create theirs), and whoever it's for can always change
 // their own profile's color later regardless. Mirrors LightCycles' identical NEW_PROFILE default.
-const NEW_PROFILE_CONTROL_SCHEME: ControlScheme = 'pull'
+const NEW_PROFILE_CONTROL_SCHEME: ControlScheme = 'push'
 
 // A real routed screen — reachable only from P1's dropdown (see ProfilePicker's own doc for why P2
 // can't host this: its zone is 180°-rotated in face-to-face mode, and the OS keyboard doesn't rotate
@@ -27,14 +27,7 @@ export default function ProfilesScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <ProfilesManager
-        profiles={profiles}
-        defaultColor={defaultColors[0].value}
-        onCreate={(patch) => createProfile({ ...patch, controlScheme: NEW_PROFILE_CONTROL_SCHEME })}
-        onSave={(id, patch) => updateProfile(id, patch)}
-        onDelete={(id) => deleteProfile(id)}
-        headerLeft={<IconButton icon='arrow-left' iconColor={fg} size={24} onPress={safeBack} accessibilityLabel='Back' />}
-      />
+      <ProfilesManager profiles={profiles} defaultColor={defaultColors[0].value} onCreate={(patch) => createProfile({ ...patch, controlScheme: NEW_PROFILE_CONTROL_SCHEME })} onSave={(id, patch) => updateProfile(id, patch)} onDelete={(id) => deleteProfile(id)} headerLeft={<IconButton icon='arrow-left' iconColor={fg} size={24} onPress={safeBack} accessibilityLabel='Back' />} />
     </View>
   )
 }

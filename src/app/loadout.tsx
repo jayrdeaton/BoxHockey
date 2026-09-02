@@ -3,7 +3,7 @@ import { IconButton } from '@rific/feedback-press'
 import { MenuOption, PressAwayOverlay, ReadyButton, usePopoverHost } from '@tastic/hud'
 import { DualZoneLayout, FakeLandscapeView, getViewRotation, rotateInsets, useAccelerometerOrientation, useDualZoneLayout } from '@tastic/split-screen'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import Animated from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -11,13 +11,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LoadoutSharedControls } from '@/components/LoadoutSharedControls'
 import { PlayerSetupPanel } from '@/components/PlayerSetupPanel'
 import { SettingsDialog } from '@/components/SettingsDialog'
+import { loadCpuColor, loadGuestColors, saveCpuColor, saveGuestColors } from '@/components/Theme'
 import { LOADOUT_PANEL_SWAP_FADE_MS } from '@/constants/game'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useProfiles } from '@/hooks/useProfiles'
-import { BoardVariant, ControlScheme, FrictionLevel, InterceptSpeed, Player, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
+import { BoardVariant, ControlScheme, FrictionLevel, InterceptSpeed, Player, Profile, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
 import { AI_DIFFICULTY_LABELS, AIDifficulty } from '@/utils/aiOpponent'
 import { BOARD_VARIANT_LABELS } from '@/utils/board'
 import { humanPlayersFor, parseGameMode } from '@/utils/gameMode'
+import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
 import { safeBack } from '@/utils/navigation'
 
 const BOARD_VARIANT_DESCRIPTIONS: Record<BoardVariant, string> = {
@@ -76,6 +78,10 @@ const AI_DIFFICULTY_OPTIONS: MenuOption<AIDifficulty>[] = [
   { value: 'hard', label: AI_DIFFICULTY_LABELS.hard, icon: 'emoticon-devil-outline' }
 ]
 
+function pickRandom<T>(options: readonly { value: T }[]): T {
+  return options[Math.floor(Math.random() * options.length)].value
+}
+
 export default function LoadoutScreen() {
   // Read only from this screen's own route param, never from useGameSettings().settings.gameMode
   // — the settings hook's AsyncStorage read is async, and racing it here could momentarily show
@@ -83,6 +89,9 @@ export default function LoadoutScreen() {
   const params = useLocalSearchParams<{ mode: string }>()
   const gameMode = useMemo(() => parseGameMode(params.mode), [params.mode])
   const humanPlayers = useMemo(() => humanPlayersFor(gameMode), [gameMode])
+  // CPU (when present at all) is always player 2 — see humanPlayersFor's own comment. Read this
+  // early: the guest/CPU color plumbing below needs it before the panels themselves do.
+  const p2IsHuman = humanPlayers.includes(2)
 
   const { settings, setSettings, commitRoundSettings } = useGameSettings()
   const { profiles, lastSelected, updateProfile, selectProfile } = useProfiles()
@@ -116,28 +125,189 @@ export default function LoadoutScreen() {
   const p1Color = themeColors.primary
   const p2Color = themeColors.secondary
 
+  // A seat's live color comes from one of three independently-remembered places depending on what's
+  // currently in that seat — a selected profile's own saved color, a CPU opponent's own remembered
+  // color, or (human, no profile) a guest's own remembered color — never one shared slot the way
+  // this used to work, which let a profile's live color drift from its saved one and made a CPU's
+  // color fight a guest's over a single remembered value. Only guestColors/cpuColor are persisted
+  // here; a profile's own saved color is never written back to (see the profile-color effect below
+  // for why, and app/profiles.tsx's own ProfilesManager, the only place that's actually edited).
+  // Both start null until their one-time AsyncStorage read below resolves.
+  const [guestColors, setGuestColors] = useState<{ p1: string; p2: string } | null>(null)
+  const [cpuColor, setCpuColor] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([loadGuestColors(), loadCpuColor()]).then(([guest, cpu]) => {
+      if (cancelled) return
+      setGuestColors(guest)
+      setCpuColor(cpu)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const p1Profile = profiles.find((p) => p.id === lastSelected[1]) ?? null
+  const p2Profile = p2IsHuman ? (profiles.find((p) => p.id === lastSelected[2]) ?? null) : null
+
+  // Set true the instant a manual recolor/clash-swap lands on a seat that has a profile selected —
+  // cleared the instant that seat's own selection changes (see handleP1ProfileSelect/
+  // handleP2ProfileSelect below) or this screen regains focus (see the focus-reset effect below).
+  // Read by the profile-color effect below to tell "this seat's color should keep tracking its
+  // profile" apart from "this seat has a transient, in-memory-only override for the rest of this
+  // screen session" — a plain ref rather than state, since flipping it must never itself trigger a
+  // re-render/re-application (that would just immediately snap the override right back to the
+  // profile's saved color).
+  const overrideRef = useRef<Record<Player, boolean>>({ 1: false, 2: false })
+
+  // Kept in sync via their own trivial effects (never read during render, only written — a plain
+  // render-body assignment trips this project's react-hooks/refs lint rule) purely so the
+  // focus-reset effect below can read each seat's CURRENT resolved profile / persisted guest /
+  // persisted CPU color without listing profiles/guestColors/cpuColor themselves as its own
+  // dependencies — profiles is a brand new array from useProfiles() on every one of its own
+  // re-renders, and depending on any of these reactively there would re-fire that effect (see
+  // useFocusEffect's own re-run semantics: it re-invokes its callback immediately, while still
+  // focused, whenever the callback's identity changes) merely because one of them changed while
+  // this screen stays continuously focused — wrongly wiping an unrelated seat's still-valid
+  // transient override.
+  const p1ProfileRef = useRef(p1Profile)
+  const p2ProfileRef = useRef(p2Profile)
+  const guestColorsRef = useRef(guestColors)
+  const cpuColorRef = useRef(cpuColor)
+  useEffect(() => {
+    p1ProfileRef.current = p1Profile
+  }, [p1Profile])
+  useEffect(() => {
+    p2ProfileRef.current = p2Profile
+  }, [p2Profile])
+  useEffect(() => {
+    guestColorsRef.current = guestColors
+  }, [guestColors])
+  useEffect(() => {
+    cpuColorRef.current = cpuColor
+  }, [cpuColor])
+
+  // Keeps each seat's live theme color matching what it's actually supposed to be right now.
+  // Mount-time and reactive only (lastSelected changing from something *outside* this screen's own
+  // pickers — e.g. deleting the currently-selected profile from Manage — and the guest/CPU/profiles
+  // reads themselves resolving) — a fresh tap-select is instead applied immediately by
+  // handleP1ProfileSelect/handleP2ProfileSelect below, which both know the newly-picked profile
+  // directly and don't need to wait on lastSelected to round-trip back through here. Deliberately
+  // does NOT run on every render (profiles is a brand new array from useProfiles() on every one of
+  // its own re-renders, so it's read here, not depended on — profiles.length stands in as a coarse
+  // "profiles finished loading" signal instead) and does NOT reapply a profile's color over a
+  // transient override just because some unrelated dependency here changed (see overrideRef above).
+  useEffect(() => {
+    if (!guestColors || cpuColor === null) return
+    const nextP1 = p1Profile ? (overrideRef.current[1] ? p1Color : p1Profile.color) : guestColors.p1
+    const nextP2 = p2Profile ? (overrideRef.current[2] ? p2Color : p2Profile.color) : p2IsHuman ? guestColors.p2 : cpuColor
+    if (nextP1.toLowerCase() === p1Color.toLowerCase() && nextP2.toLowerCase() === p2Color.toLowerCase()) return
+    setThemeColor({ color: { primary: nextP1, secondary: nextP2, tertiary: getThirdColor(nextP1, nextP2) } })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastSelected[1], lastSelected[2], p2IsHuman, guestColors, cpuColor, profiles.length])
+
+  // /loadout pushes /game and /profiles on top of itself and returns to this same screen via
+  // router.back()/safeBack() — a pop that reveals this SAME, still-mounted instance rather than a
+  // fresh mount (see the `ready`-reset useFocusEffect below, which exists for the same reason). A
+  // transient per-seat override (see overrideRef above) must not survive that trip: on every genuine
+  // focus regain — initial mount, and returning here from /game or /profiles — clear both seats'
+  // overrides and snap each seat's live color back to its authoritative source (profile / guest /
+  // CPU), so a manual recolor/clash-swap made before leaving never lingers once you're back.
+  //
+  // Deliberately triggers on lastSelected[seat]/p2IsHuman only — the same "a real reason to reapply
+  // this seat's color" identity the reactive effect above keys its own reapplication on — and reads
+  // profiles/guestColors/cpuColor through the refs above instead of depending on them directly.
+  // useFocusEffect re-invokes this callback immediately, while still focused, whenever the
+  // callback's own identity changes (not just on an actual focus/blur transition) — so listing
+  // guestColors/cpuColor/profiles here directly would reapply on every one of their changes even
+  // with no real navigation event, wrongly wiping an unrelated seat's still-valid override.
+  useFocusEffect(
+    useCallback(() => {
+      overrideRef.current[1] = false
+      overrideRef.current[2] = false
+      const guest = guestColorsRef.current
+      const cpu = cpuColorRef.current
+      if (!guest || cpu === null) return
+      const p1Prof = p1ProfileRef.current
+      const p2Prof = p2ProfileRef.current
+      const nextP1 = p1Prof ? p1Prof.color : guest.p1
+      const nextP2 = p2Prof ? p2Prof.color : p2IsHuman ? guest.p2 : cpu
+      setThemeColor({ color: { primary: nextP1, secondary: nextP2, tertiary: getThirdColor(nextP1, nextP2) } })
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [lastSelected[1], lastSelected[2], p2IsHuman, setThemeColor])
+  )
+
+  // Routes a seat's own just-changed color to whichever slot actually owns it right now — flags it
+  // as a transient override instead when a profile's selected there (see overrideRef above), so the
+  // profile-color effect leaves it alone until this seat's selection itself changes.
+  const persistSeatColor = useCallback(
+    (seat: Player, hex: string) => {
+      if (seat === 1 ? p1Profile : p2Profile) {
+        overrideRef.current[seat] = true
+        return
+      }
+      if (seat === 2 && !p2IsHuman) {
+        setCpuColor(hex)
+        saveCpuColor(hex)
+        return
+      }
+      if (!guestColors) return
+      const next = seat === 1 ? { ...guestColors, p1: hex } : { ...guestColors, p2: hex }
+      setGuestColors(next)
+      saveGuestColors(next)
+    },
+    [p1Profile, p2Profile, p2IsHuman, guestColors]
+  )
+
   // Picking the other slot's exact current color swaps the two instead of no-op'ing — only
   // reachable at all when that slot's own picker allowed it (allowSwapTaken: vs-CPU only, where
-  // the "other" color there is only ever the CPU's, not a second real person's choice).
-  //
-  // Deliberately does *not* sync back to a currently-selected profile's own saved color, unlike
-  // control scheme below — a profile's color is its "favorite," a default to pre-fill the seat with
-  // at selection time (see PlayerSetupPanel.tsx's handleProfileSelect); freely repainting your own
-  // paddle for one match shouldn't silently redefine what that profile is remembered as. Editing the
-  // saved color itself is Manage's own job now (see app/profiles.tsx's own ProfilesManager).
+  // the "other" color there is only ever the CPU's, not a second real person's choice). Each side of
+  // a swap persists independently per its own seat rule above — a swap into a profile-selected seat
+  // is transient there even though the CPU/guest side it came from persists normally.
   const handleP1ColorChange = useCallback(
     (hex: string) => {
-      const nextP2 = hex.toLowerCase() === p2Color.toLowerCase() ? p1Color : p2Color
+      const swapped = hex.toLowerCase() === p2Color.toLowerCase()
+      const nextP2 = swapped ? p1Color : p2Color
       setThemeColor({ color: { primary: hex, secondary: nextP2, tertiary: getThirdColor(hex, nextP2) } })
+      persistSeatColor(1, hex)
+      if (swapped) persistSeatColor(2, nextP2)
     },
-    [setThemeColor, p1Color, p2Color]
+    [setThemeColor, p1Color, p2Color, persistSeatColor]
   )
   const handleP2ColorChange = useCallback(
     (hex: string) => {
-      const nextP1 = hex.toLowerCase() === p1Color.toLowerCase() ? p2Color : p1Color
+      const swapped = hex.toLowerCase() === p1Color.toLowerCase()
+      const nextP1 = swapped ? p2Color : p1Color
       setThemeColor({ color: { primary: nextP1, secondary: hex, tertiary: getThirdColor(nextP1, hex) } })
+      persistSeatColor(2, hex)
+      if (swapped) persistSeatColor(1, nextP1)
     },
-    [setThemeColor, p1Color, p2Color]
+    [setThemeColor, p1Color, p2Color, persistSeatColor]
+  )
+
+  // Applies a freshly-picked profile's own color immediately, rather than waiting for lastSelected
+  // to round-trip back through the profile-color effect above — that effect only reacts to
+  // lastSelected actually *changing*, so tapping the already-selected profile again (the other way
+  // this is supposed to snap back to its saved color — see overrideRef above) wouldn't otherwise
+  // register. Clears this seat's own override flag first so a swap/manual recolor made under the
+  // previous selection can't leak into the new one.
+  const handleP1ProfileSelect = useCallback(
+    (profile: Profile | null) => {
+      overrideRef.current[1] = false
+      selectProfile(1, profile?.id ?? null)
+      const hex = profile ? profile.color : guestColors?.p1
+      if (hex) setThemeColor({ color: { primary: hex, secondary: p2Color, tertiary: getThirdColor(hex, p2Color) } })
+    },
+    [selectProfile, guestColors, p2Color, setThemeColor]
+  )
+  const handleP2ProfileSelect = useCallback(
+    (profile: Profile | null) => {
+      overrideRef.current[2] = false
+      selectProfile(2, profile?.id ?? null)
+      const hex = profile ? profile.color : guestColors?.p2
+      if (hex) setThemeColor({ color: { primary: p1Color, secondary: hex, tertiary: getThirdColor(p1Color, hex) } })
+    },
+    [selectProfile, guestColors, p1Color, setThemeColor]
   )
 
   // Unlike color above, this one *does* keep syncing back to a currently-selected profile's own
@@ -160,6 +330,40 @@ export default function LoadoutScreen() {
     },
     [setSettings, settings.controlScheme, lastSelected, updateProfile]
   )
+
+  // Covers exactly the fields LoadoutSharedControls itself exposes — board shape, puck physics,
+  // match rules, and (vs-CPU only) AI difficulty, since that picker also lives in this shared row
+  // rather than a per-player panel the way LightCycles' cpuDifficulty does. Per-player stuff
+  // (colors, control scheme) and app-wide prefs (lock orientation) live outside this row and aren't
+  // "match settings" in the sense a player means when they ask to shuffle or reset the current
+  // round.
+  const handleRandomizeMatchSettings = useCallback(() => {
+    setSettings({
+      boardVariant: pickRandom(BOARD_VARIANT_OPTIONS),
+      rink: Math.random() < 0.5,
+      friction: pickRandom(FRICTION_OPTIONS),
+      puckSize: pickRandom(PUCK_SIZE_OPTIONS),
+      interceptSpeed: pickRandom(INTERCEPT_SPEED_OPTIONS),
+      scoreToWin: pickRandom(SCORE_TO_WIN_OPTIONS),
+      shotPreviewLength: pickRandom(SHOT_PREVIEW_LENGTH_OPTIONS),
+      tipoffMode: pickRandom(TIPOFF_MODE_OPTIONS),
+      ...(gameMode === 'vsCpu' ? { aiDifficulty: pickRandom(AI_DIFFICULTY_OPTIONS) } : {})
+    })
+  }, [setSettings, gameMode])
+
+  const handleResetMatchSettings = useCallback(() => {
+    setSettings({
+      boardVariant: DEFAULT_SETTINGS.boardVariant,
+      rink: DEFAULT_SETTINGS.rink,
+      friction: DEFAULT_SETTINGS.friction,
+      puckSize: DEFAULT_SETTINGS.puckSize,
+      interceptSpeed: DEFAULT_SETTINGS.interceptSpeed,
+      scoreToWin: DEFAULT_SETTINGS.scoreToWin,
+      shotPreviewLength: DEFAULT_SETTINGS.shotPreviewLength,
+      tipoffMode: DEFAULT_SETTINGS.tipoffMode,
+      ...(gameMode === 'vsCpu' ? { aiDifficulty: DEFAULT_SETTINGS.aiDifficulty } : {})
+    })
+  }, [setSettings, gameMode])
 
   const [ready, setReady] = useState<Record<Player, boolean>>({ 1: false, 2: false })
 
@@ -186,8 +390,15 @@ export default function LoadoutScreen() {
   const fg = dark ? '#FFFFFF' : '#000000'
   const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
-  const p2IsHuman = humanPlayers.includes(2)
   const isPortrait = panelLayout.orientationMode === 'faceToFace'
+  // Face-to-face two-player is the one arrangement where the top corners (where back/settings
+  // otherwise live) sit inside P2's own rotated zone (see DualZoneLayout: P2 always renders above
+  // the shared row in face-to-face) rather than neutral ground — a real reach problem. vsCpu never
+  // had that problem (only one human on screen ever reaching for anything) and stays on the plain
+  // corner placement every other screen in the app uses, in both orientations — this isn't about
+  // orientation in general, just the one specific reach problem two-player face-to-face has.
+  // Matches LightCycles' identical showMetaInSharedBand exactly.
+  const showMetaInSharedBand = gameMode === 'twoPlayer' && isPortrait
 
   // Where P2's own press-away zone lives on screen — matches panelLayout (the already-committed,
   // currently-painted layout), not the live orientationMode/p1OnRight, since it needs to agree with
@@ -223,7 +434,7 @@ export default function LoadoutScreen() {
   // Orientation is derived live from how the phone is held (see useDeviceOrientation) now, not a
   // per-round choice here — this row no longer takes orientationMode/orientationModeOptions/
   // onOrientationModeChange at all.
-  const sharedControls = (
+  const sharedControlsRow = (
     <LoadoutSharedControls
       host={controlsHost}
       boardVariant={settings.boardVariant}
@@ -253,6 +464,11 @@ export default function LoadoutScreen() {
       aiDifficulty={gameMode === 'vsCpu' ? settings.aiDifficulty : undefined}
       aiDifficultyOptions={gameMode === 'vsCpu' ? AI_DIFFICULTY_OPTIONS : undefined}
       onAiDifficultyChange={gameMode === 'vsCpu' ? (value) => setSettings({ aiDifficulty: value }) : undefined}
+      // Omitted (leaving LoadoutSharedControls' own actionsRow unrendered) whenever
+      // showMetaInSharedBand is about to fold randomize/reset into its own merged header row below
+      // instead — otherwise both would render at once.
+      onRandomize={showMetaInSharedBand ? undefined : handleRandomizeMatchSettings}
+      onReset={showMetaInSharedBand ? undefined : handleResetMatchSettings}
       accentColor={themeColors.tertiary}
       mutedColor={fgMuted}
       onAccentColor={themeColors.onTertiary}
@@ -260,12 +476,29 @@ export default function LoadoutScreen() {
     />
   )
 
+  // Only built/rendered for showMetaInSharedBand (see its own comment above) — everywhere else
+  // back/settings stay in their usual top corners and randomize/reset stay in LoadoutSharedControls'
+  // own row above the trigger gauges.
+  const sharedControls = showMetaInSharedBand ? (
+    <View style={styles.sharedColumn}>
+      <View style={styles.metaActionsRow}>
+        <IconButton icon='arrow-left' iconColor={fg} size={20} onPress={safeBack} />
+        <IconButton icon='dice-multiple' iconColor={fg} size={18} onPress={handleRandomizeMatchSettings} accessibilityLabel='Randomize match settings' />
+        <IconButton icon='restore' iconColor={fg} size={18} onPress={handleResetMatchSettings} accessibilityLabel='Reset match settings to defaults' />
+        <IconButton icon='cog' iconColor={fg} size={20} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+      </View>
+      {sharedControlsRow}
+    </View>
+  ) : (
+    sharedControlsRow
+  )
+
   // Always 'P1'/'P2', regardless of game mode — see ProfilePicker's own doc for why the trigger uses
   // this instead of "Player" (Player stays as the menu's own row, just not the idle label — using
   // the same word for both would make it impossible to tell "nothing selected yet" from "Player
   // deliberately selected" at a glance).
-  const p1Panel = <PlayerSetupPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[1]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={handleP1ControlSchemeChange} accentColor={themeColors.tertiary} mutedColor={fgMuted} profiles={profiles} selectedProfileId={lastSelected[1]} takenProfileId={lastSelected[2]} guestLabel='P1' onProfileSelect={(profile) => selectProfile(1, profile?.id ?? null)} onManageProfiles={() => router.push('/profiles')} />
-  const p2Panel = <PlayerSetupPanel idPrefix='p2' host={p2Host} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[2]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={handleP2ControlSchemeChange} accentColor={themeColors.tertiary} mutedColor={fgMuted} profiles={p2IsHuman ? profiles : undefined} selectedProfileId={lastSelected[2]} takenProfileId={lastSelected[1]} guestLabel='P2' onProfileSelect={p2IsHuman ? (profile) => selectProfile(2, profile?.id ?? null) : undefined} />
+  const p1Panel = <PlayerSetupPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[1]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={handleP1ControlSchemeChange} accentColor={themeColors.tertiary} mutedColor={fgMuted} profiles={profiles} selectedProfileId={lastSelected[1]} takenProfileId={lastSelected[2]} guestLabel='P1' onProfileSelect={handleP1ProfileSelect} onManageProfiles={() => router.push('/profiles')} />
+  const p2Panel = <PlayerSetupPanel idPrefix='p2' host={p2Host} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[2]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={handleP2ControlSchemeChange} accentColor={themeColors.tertiary} mutedColor={fgMuted} profiles={p2IsHuman ? profiles : undefined} selectedProfileId={lastSelected[2]} takenProfileId={lastSelected[1]} guestLabel='P2' onProfileSelect={p2IsHuman ? handleP2ProfileSelect : undefined} />
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
@@ -294,8 +527,12 @@ export default function LoadoutScreen() {
         <PressAwayOverlay active={controlsHost.openId !== null} onPress={controlsHost.close} />
         {p2ZoneStyle && <PressAwayOverlay active={controlsHost.openId !== null || p2Host.openId !== null} onPress={p2Host.close} style={p2ZoneStyle} />}
 
-        <IconButton icon='arrow-left' iconColor={fg} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
-        <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+        {!showMetaInSharedBand && (
+          <>
+            <IconButton icon='arrow-left' iconColor={fg} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
+            <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
+          </>
+        )}
 
         {gameMode === 'twoPlayer' ? (
           // See @tastic/split-screen's DualZoneLayout for the portrait-vs-landscape switch and its
@@ -326,6 +563,14 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1
+  },
+  // Deliberately its own gap, not styles.rotatable's outer 32 — that spacing is tuned for the room
+  // between whole screen sections (panels, shared row, ready button), while this is one section's
+  // own internal stack: back, randomize/reset, and settings all in one row.
+  metaActionsRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 16
   },
   p2ZoneLeft: {
     bottom: 0,
@@ -378,6 +623,12 @@ const styles = StyleSheet.create({
     gap: 32,
     justifyContent: 'center',
     paddingHorizontal: 16
+  },
+  // Only used for showMetaInSharedBand's wrapper (face-to-face two-player) — everywhere else
+  // `shared` is just LoadoutSharedControls directly, no wrapping column needed.
+  sharedColumn: {
+    alignItems: 'center',
+    gap: 8
   },
   stackedZone: {
     alignItems: 'center',

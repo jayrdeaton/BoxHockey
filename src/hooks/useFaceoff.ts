@@ -32,6 +32,7 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
   // effect's own closure was created, so it needs a way to read live tapAt rather than a stale
   // snapshot from when the countdown started.
   const stateRef = useRef(state)
+  // eslint-disable-next-line react-hooks/refs -- mirrored every render (see comment above) so the timeout-check timer below reads live tapAt
   stateRef.current = state
 
   // True only on the game's first draw, before both players have signaled ready (see
@@ -100,6 +101,12 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
     })
 
     return () => timers.forEach(clearTimeout)
+    // state.faceoff is deliberately omitted: it's a new object on every sub-action (each count
+    // tick, tap), and this effect is keyed on faceoffRound specifically so those sub-actions don't
+    // tear down and reschedule the whole chain mid-flight (see this effect's own comment above).
+    // The single state.faceoff read inside (line 87, for the CPU's correctZone) closes over the
+    // value from the render that started this draw; zones don't change again until the next draw.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.phase, state.faceoffRound, isReadyStage, aiPlayer, difficulty, faceoffCount, faceoffHold, faceoffLive, faceoffTap, faceoffTimeout, paused])
 
   // ─── Resolved → knock ──────────────────────────────────────────────────────────────────────

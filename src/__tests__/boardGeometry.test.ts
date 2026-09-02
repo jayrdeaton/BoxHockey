@@ -233,7 +233,7 @@ describe('goalposts still collide when an angled approach crosses the corridor b
   }
 })
 
-describe('rink: goalposts stop deflecting a puck once it is fully behind that goal\'s own line', () => {
+describe("rink: goalposts stop deflecting a puck once it is fully behind that goal's own line", () => {
   // Real user report: "I'm hitting the posts on the back when I feel like I shouldn't be, behind
   // the goal" — real hockey posts don't extend backward into the net, they only matter for a shot
   // approaching the goal mouth from the playable side. Fixed by gating each post's collision on

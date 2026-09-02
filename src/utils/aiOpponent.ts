@@ -1,4 +1,4 @@
-import { FRICTION_LEVELS, MAX_DRAG_PIXELS, MAX_SPEED, MIN_SHOOT_DRAG } from '@/constants/game'
+import { FRICTION_LEVELS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/constants/game'
 import { BoardLayout, Player, PuckState } from '@/types'
 import { stepPhysics } from '@/utils/physics'
 
@@ -32,9 +32,11 @@ const TUNING: Record<AIDifficulty, DifficultyTuning> = {
 }
 
 const SIM_MAX_STEPS = 500
-// Keep a margin above MIN_SHOOT_DRAG's cancel threshold so post-noise power never accidentally
-// produces a drag the reducer treats as "too short, cancel the shot".
-const MIN_POWER = (MIN_SHOOT_DRAG / MAX_DRAG_PIXELS) * 1.4
+// Keep a margin above the cancel threshold so post-noise power never accidentally produces a shot
+// the reducer treats as "too short/slow, cancel the shot" — now TWO independent gates (distance
+// AND velocity, see MIN_SHOOT_DRAG/MIN_FLICK_VELOCITY's own comments in constants/game.ts), so this
+// takes whichever ratio is more restrictive rather than assuming distance always dominates.
+const MIN_POWER = 1.4 * Math.max(MIN_SHOOT_DRAG / MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY / MAX_FLICK_VELOCITY)
 
 function otherPlayer(p: Player): Player {
   return p === 1 ? 2 : 1

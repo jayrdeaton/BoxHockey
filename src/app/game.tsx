@@ -115,6 +115,7 @@ export default function GameScreen() {
 
   const vibration = useVibration()
   const vibrationRef = useRef(vibration)
+  // eslint-disable-next-line react-hooks/refs -- mirrored every render so stable callbacks below can read it without needing it in their own deps
   vibrationRef.current = vibration
 
   // Gameplay SFX — mirrors the haptics below one-for-one (see useGameSound): each event fires its
@@ -132,6 +133,7 @@ export default function GameScreen() {
   const playGoal = useGameSound(require('../../assets/sounds/goal.wav'))
   const playWin = useGameSound(require('../../assets/sounds/win.wav'))
   const soundRef = useRef({ playSelect, playBounce, playWellAttract, playWellRepel, playFaceoffTick, playFaceoffGo, playFaceoffResolved, playGoal, playWin })
+  // eslint-disable-next-line react-hooks/refs -- see vibrationRef's own comment above
   soundRef.current = { playSelect, playBounce, playWellAttract, playWellRepel, playFaceoffTick, playFaceoffGo, playFaceoffResolved, playGoal, playWin }
 
   const onBackPress = useCallback(() => {
@@ -359,18 +361,18 @@ export default function GameScreen() {
   // keeps dispatching AIM_UPDATE directly as before — the puck is stationary and the physics loop
   // is off then, so there's nothing for it to compete with.
   const stableAimUpdate = useCallback(
-    (x: number, y: number) => {
+    (x: number, y: number, vx: number, vy: number) => {
       if (phase === 'simulating') {
-        setInterceptTouch(x, y)
+        setInterceptTouch(x, y, vx, vy)
         return
       }
-      aimUpdate(x, y)
+      aimUpdate(x, y, vx, vy)
     },
     [aimUpdate, setInterceptTouch, phase]
   )
   const stableShoot = useCallback(
-    (tx: number, ty: number) => {
-      shoot(tx, ty)
+    (tx: number, ty: number, vx: number, vy: number) => {
+      shoot(tx, ty, vx, vy)
     },
     [shoot]
   )
@@ -399,6 +401,7 @@ export default function GameScreen() {
   // fires — the moment a real tap is most likely to land — silently dropping it. Keeping these
   // callbacks stable across a draw is what keeps the gesture handler itself stable.
   const faceoffRef = useRef(faceoff)
+  // eslint-disable-next-line react-hooks/refs -- mirrored every render (see comment above) so stableFaceoffTouch/Ready read live faceoff state
   faceoffRef.current = faceoff
 
   // Ready-check (game's first draw only — see FaceoffState's doc comment): any touch/key on a
@@ -497,14 +500,15 @@ export default function GameScreen() {
     () =>
       Gesture.Pan()
         .maxPointers(1)
+        // eslint-disable-next-line react-hooks/refs -- stableAimStart reads a ref; this is a gesture event handler, never invoked during render
         .onStart((e) => {
           runOnJS(stableAimStart)(e.x, e.y)
         })
         .onChange((e) => {
-          runOnJS(stableAimUpdate)(e.x, e.y)
+          runOnJS(stableAimUpdate)(e.x, e.y, e.velocityX, e.velocityY)
         })
         .onEnd((e) => {
-          runOnJS(stableShoot)(e.translationX, e.translationY)
+          runOnJS(stableShoot)(e.translationX, e.translationY, e.velocityX, e.velocityY)
         })
         .onFinalize(() => {
           runOnJS(stableAimCancel)()
@@ -555,6 +559,7 @@ export default function GameScreen() {
   const p1TapGesture = useMemo(
     () =>
       Gesture.Tap()
+        // eslint-disable-next-line react-hooks/refs -- stableFaceoffTouch reads a ref; see panGesture's .onStart comment above
         .onBegin((e) => runOnJS(stableFaceoffTouch)(1, e.absoluteX, e.absoluteY - board.boardMarginTop))
         .enabled(phase === 'faceoff'),
     [stableFaceoffTouch, phase, board.boardMarginTop]
@@ -562,6 +567,7 @@ export default function GameScreen() {
   const p2TapGesture = useMemo(
     () =>
       Gesture.Tap()
+        // eslint-disable-next-line react-hooks/refs -- see p1TapGesture's own comment above
         .onBegin((e) => runOnJS(stableFaceoffTouch)(2, e.absoluteX, e.absoluteY - board.boardMarginTop))
         .enabled(phase === 'faceoff'),
     [stableFaceoffTouch, phase, board.boardMarginTop]
@@ -573,6 +579,7 @@ export default function GameScreen() {
   const coinFlipTapGesture = useMemo(
     () =>
       Gesture.Tap()
+        // eslint-disable-next-line react-hooks/refs -- stableCoinFlipTap reads a ref; see panGesture's .onStart comment above
         .onBegin(() => runOnJS(stableCoinFlipTap)())
         .enabled(phase === 'coinFlip' && !coinFlipStarted),
     [stableCoinFlipTap, phase, coinFlipStarted]

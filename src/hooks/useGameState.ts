@@ -1,15 +1,39 @@
 import { useGameLoop } from '@tastic/core'
 import { useCallback, useReducer, useRef } from 'react'
 
-import { CONTROL_SCHEME_SIGN, FACEOFF_GUESS_BONUS_MS, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, MAX_DRAG_PIXELS, MAX_SPEED, MIN_SHOOT_DRAG } from '@/constants/game'
+import { AIM_VELOCITY_SMOOTHING_ALPHA, CONTROL_SCHEME_SIGN, FACEOFF_GUESS_BONUS_MS, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/constants/game'
 import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, PuckState, TipoffMode } from '@/types'
 import { centerPuck, faceoffZoneCenter } from '@/utils/board'
 import { computeAimVector, stepPhysics } from '@/utils/physics'
 
-type Action = { type: 'AIM_START'; x: number; y: number } | { type: 'AIM_UPDATE'; x: number; y: number } | { type: 'AIM_CANCEL' } | { type: 'STRIKE'; dx: number; dy: number } | { type: 'APPLY_STRIKE' } | { type: 'PHYSICS_STEP'; board: BoardLayout; dt: number; interceptTouch: { x: number; y: number } | null } |{ type: 'NEXT_ROUND'; board: BoardLayout; zoneIndex: 0 | 1; faceoffZones: [0 | 1, 0 | 1]; faceoffReadyGuess: [0 | 1, 0 | 1] } | { type: 'RESET'; board: BoardLayout; coinFlipWinner: Player; zoneIndex: 0 | 1; faceoffZones: [0 | 1, 0 | 1]; faceoffReadyGuess: [0 | 1, 0 | 1] } | { type: 'COIN_FLIP_DONE' } | { type: 'FACEOFF_COUNT'; count: 2 | 1 } | { type: 'FACEOFF_HOLD'; goAt: number } | { type: 'FACEOFF_LIVE' } | { type: 'FACEOFF_READY'; player: Player } | { type: 'FACEOFF_TAP'; player: Player; atMs: number; zoneIndex: 0 | 1 } | { type: 'FACEOFF_TIMEOUT'; player: Player } | { type: 'FACEOFF_LAUNCH'; vx: number; vy: number } | { type: 'FACEOFF_RESTART' }
+type Action =
+  | { type: 'AIM_START'; x: number; y: number }
+  | { type: 'AIM_UPDATE'; x: number; y: number; vx: number; vy: number }
+  | { type: 'AIM_CANCEL' }
+  | { type: 'STRIKE'; vx: number; vy: number }
+  | { type: 'APPLY_STRIKE' }
+  | { type: 'PHYSICS_STEP'; board: BoardLayout; dt: number; interceptTouch: { x: number; y: number; vx: number; vy: number } | null }
+  | { type: 'NEXT_ROUND'; board: BoardLayout; zoneIndex: 0 | 1; faceoffZones: [0 | 1, 0 | 1]; faceoffReadyGuess: [0 | 1, 0 | 1] }
+  | { type: 'RESET'; board: BoardLayout; coinFlipWinner: Player; zoneIndex: 0 | 1; faceoffZones: [0 | 1, 0 | 1]; faceoffReadyGuess: [0 | 1, 0 | 1] }
+  | { type: 'COIN_FLIP_DONE' }
+  | { type: 'FACEOFF_COUNT'; count: 2 | 1 }
+  | { type: 'FACEOFF_HOLD'; goAt: number }
+  | { type: 'FACEOFF_LIVE' }
+  | { type: 'FACEOFF_READY'; player: Player }
+  | { type: 'FACEOFF_TAP'; player: Player; atMs: number; zoneIndex: 0 | 1 }
+  | { type: 'FACEOFF_TIMEOUT'; player: Player }
+  | { type: 'FACEOFF_LAUNCH'; vx: number; vy: number }
+  | { type: 'FACEOFF_RESTART' }
 
 function otherPlayer(p: Player): Player {
   return p === 1 ? 2 : 1
+}
+
+// One-pole EMA for the live (display-only) velocity shown on AimIndicator.vx/vy — see
+// AIM_VELOCITY_SMOOTHING_ALPHA's own comment in constants/game.ts. Never used for the actual shot,
+// which reads the raw velocity straight off the release gesture event instead (see STRIKE below).
+function smoothVelocity(prevVx: number, prevVy: number, rawVx: number, rawVy: number): { vx: number; vy: number } {
+  return { vx: prevVx + AIM_VELOCITY_SMOOTHING_ALPHA * (rawVx - prevVx), vy: prevVy + AIM_VELOCITY_SMOOTHING_ALPHA * (rawVy - prevVy) }
 }
 
 // Coin-flip randomness lives here, at the call sites below (RESET/NEXT_ROUND dispatch and the
@@ -85,7 +109,7 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
     switch (action.type) {
       case 'AIM_START':
         if (state.phase === 'idle') {
-          return { ...state, phase: 'aiming', aim: { startX: action.x, startY: action.y, currentX: action.x, currentY: action.y } }
+          return { ...state, phase: 'aiming', aim: { startX: action.x, startY: action.y, currentX: action.x, currentY: action.y, vx: 0, vy: 0 } }
         }
         // Mid-slide intercept: the RECEIVING player (whoever doesn't currently hold currentPlayer
         // — see STRIKE's own comment below for why the flip is deferred that far) can reach in and
@@ -98,17 +122,19 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
         if (state.phase === 'simulating' && state.interceptAim === null) {
           const speed = Math.hypot(state.puck.vx, state.puck.vy)
           if (speed < interceptThreshold) {
-            return { ...state, interceptAim: { startX: action.x, startY: action.y, currentX: action.x, currentY: action.y } }
+            return { ...state, interceptAim: { startX: action.x, startY: action.y, currentX: action.x, currentY: action.y, vx: 0, vy: 0 } }
           }
         }
         return state
 
       case 'AIM_UPDATE':
         if (state.phase === 'aiming' && state.aim) {
-          return { ...state, aim: { ...state.aim, currentX: action.x, currentY: action.y } }
+          const { vx, vy } = smoothVelocity(state.aim.vx, state.aim.vy, action.vx, action.vy)
+          return { ...state, aim: { ...state.aim, currentX: action.x, currentY: action.y, vx, vy } }
         }
         if (state.interceptAim) {
-          return { ...state, interceptAim: { ...state.interceptAim, currentX: action.x, currentY: action.y } }
+          const { vx, vy } = smoothVelocity(state.interceptAim.vx, state.interceptAim.vy, action.vx, action.vy)
+          return { ...state, interceptAim: { ...state.interceptAim, currentX: action.x, currentY: action.y, vx, vy } }
         }
         return state
 
@@ -133,7 +159,7 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
       case 'STRIKE': {
         if (state.phase === 'aiming') {
           const sign = CONTROL_SCHEME_SIGN[controlScheme[state.currentPlayer]]
-          const { vx, vy } = computeAimVector(sign * action.dx, sign * action.dy, MAX_DRAG_PIXELS, MAX_SPEED)
+          const { vx, vy } = computeAimVector(sign * action.vx, sign * action.vy, MAX_FLICK_VELOCITY, MAX_SPEED)
           return { ...state, phase: 'striking', pendingShot: { vx, vy } }
         }
         // Intercept release: currentPlayer flips to the interceptor HERE, not at AIM_START — so an
@@ -147,7 +173,7 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
         if (state.interceptAim) {
           const interceptor = otherPlayer(state.currentPlayer)
           const sign = CONTROL_SCHEME_SIGN[controlScheme[interceptor]]
-          const { vx, vy } = computeAimVector(sign * action.dx, sign * action.dy, MAX_DRAG_PIXELS, MAX_SPEED)
+          const { vx, vy } = computeAimVector(sign * action.vx, sign * action.vy, MAX_FLICK_VELOCITY, MAX_SPEED)
           return { ...state, phase: 'striking', pendingShot: { vx, vy }, aim: { ...state.interceptAim }, interceptAim: null, currentPlayer: interceptor }
         }
         return state
@@ -246,7 +272,15 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
           // animation frame (game.tsx's stableAimUpdate now just writes a ref instead of
           // dispatching directly while intercepting) means the puck's own motion and the live drag
           // position always land in the exact same render, in sync, every frame.
-          interceptAim: state.interceptAim && action.interceptTouch ? { ...state.interceptAim, currentX: action.interceptTouch.x, currentY: action.interceptTouch.y } : state.interceptAim,
+          interceptAim:
+            state.interceptAim && action.interceptTouch
+              ? {
+                  ...state.interceptAim,
+                  currentX: action.interceptTouch.x,
+                  currentY: action.interceptTouch.y,
+                  ...smoothVelocity(state.interceptAim.vx, state.interceptAim.vy, action.interceptTouch.vx, action.interceptTouch.vy)
+                }
+              : state.interceptAim,
           bounceCount: result.bounced ? state.bounceCount + 1 : state.bounceCount,
           wellEnterCount: result.enteredWell ? state.wellEnterCount + 1 : state.wellEnterCount,
           lastWellPolarity: result.enteredWell ?? state.lastWellPolarity,
@@ -467,16 +501,22 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
 }
 
 export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode: TipoffMode, friction: number, controlScheme: Record<Player, ControlScheme>, paused: boolean, interceptThreshold: number) {
+  // Mirrored every render so the stable useReducer wrapper below always dispatches through the
+  // latest settings-derived reducer, without needing to recreate useReducer itself (which would
+  // reset `state` back to its initializer whenever any of these settings changed).
   const reducerRef = useRef(makeReducer(scoreToWin, tipoffMode, friction, controlScheme, interceptThreshold))
+  // eslint-disable-next-line react-hooks/refs -- see comment above
   reducerRef.current = makeReducer(scoreToWin, tipoffMode, friction, controlScheme, interceptThreshold)
 
   const [state, dispatch] = useReducer(
+    // eslint-disable-next-line react-hooks/refs -- see reducerRef's own comment above; only ever invoked from dispatch, never during render
     (s: GameState, a: Action) => reducerRef.current(s, a),
     { board, scoreToWin, tipoffMode },
     (init) => makeInitialState(init.board, init.tipoffMode, randomPlayer(), randomZoneIndex(), randomFaceoffZones(), randomReadyGuess())
   )
 
   const boardRef = useRef(board)
+  // eslint-disable-next-line react-hooks/refs -- mirrored every render so the physics rAF loop below always reads the current board layout
   boardRef.current = board
 
   // Latest known finger position during a mid-slide intercept drag (see GameState.interceptAim) —
@@ -486,7 +526,7 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
   // keeps the drag and the physics update on one shared per-frame cadence instead of two
   // independent ones — see PHYSICS_STEP's own comment on why that matters. null whenever there's
   // no active intercept drag (the reducer only ever applies it when state.interceptAim is set).
-  const interceptTouchRef = useRef<{ x: number; y: number } | null>(null)
+  const interceptTouchRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null)
 
   // Gated on `paused` (settings/quit-confirm dialog open — see game.tsx) same as `state.phase` —
   // stops the loop outright rather than letting it keep stepping behind a dialog the player can't
@@ -499,8 +539,8 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
   // dispatching AIM_UPDATE while an intercept is in progress. A plain synchronous ref write is
   // effectively free and triggers no render by itself, so this can be called at whatever raw rate
   // the gesture handler delivers without any throttling needed.
-  const setInterceptTouch = useCallback((x: number, y: number) => {
-    interceptTouchRef.current = { x, y }
+  const setInterceptTouch = useCallback((x: number, y: number, vx: number, vy: number) => {
+    interceptTouchRef.current = { x, y, vx, vy }
   }, [])
 
   // No longer gated on touching near the puck (see the removed pinch-zoom/pan camera this
@@ -514,24 +554,28 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
     return true
   }, [])
 
-  const aimUpdate = useCallback((x: number, y: number) => {
-    dispatch({ type: 'AIM_UPDATE', x, y })
+  const aimUpdate = useCallback((x: number, y: number, vx: number, vy: number) => {
+    dispatch({ type: 'AIM_UPDATE', x, y, vx, vy })
   }, [])
 
   const aimCancel = useCallback(() => {
     dispatch({ type: 'AIM_CANCEL' })
   }, [])
 
-  // dx/dy is the raw drag (finger position minus puck/start position), passed through unsigned —
-  // the STRIKE case above is what actually applies the shooting player's own ControlScheme sign,
-  // so this only has to gate the drag-too-short cancel.
-  const shoot = useCallback((dx: number, dy: number) => {
+  // dx/dy is the raw drag (release position minus start position), passed through unsigned — the
+  // STRIKE case above is what actually applies the shooting player's own ControlScheme sign to
+  // vx/vy, so this only has to gate the dual cancel check: a real shot needs BOTH a large enough
+  // net displacement (protects the "snap back near start to abort" cancel affordance) AND a fast
+  // enough release velocity (protects against "dragged out far, released gently" producing a limp
+  // accidental shot) — see MIN_SHOOT_DRAG/MIN_FLICK_VELOCITY's own comments in constants/game.ts.
+  const shoot = useCallback((dx: number, dy: number, vx: number, vy: number) => {
     const dist = Math.sqrt(dx * dx + dy * dy)
-    if (dist < MIN_SHOOT_DRAG) {
+    const speed = Math.sqrt(vx * vx + vy * vy)
+    if (dist < MIN_SHOOT_DRAG || speed < MIN_FLICK_VELOCITY) {
       dispatch({ type: 'AIM_CANCEL' })
       return
     }
-    dispatch({ type: 'STRIKE', dx, dy })
+    dispatch({ type: 'STRIKE', vx, vy })
   }, [])
 
   const applyStrike = useCallback(() => {

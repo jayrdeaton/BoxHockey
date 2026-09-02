@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working in this repository.
 
 # BoxHockey
 
-A digital BoxHockey game (Expo/React Native, Skia-rendered). Part of the `@rific`/`@tastic`/InfiniteToken app ecosystem — depends on `@rific/auto-paper`, `@rific/feedback-press`, `@rific/focus-chain`, `@rific/splash-gate`, `@rific/toaster`, `@rific/updater`, `@tastic/core`, `@tastic/hud`, `@tastic/input`, `@tastic/physics`, `@tastic/profile`, `@tastic/split-screen`.
+A digital BoxHockey game (Expo/React Native, Skia-rendered). Part of the `@rific`/`@tastic`/InfiniteToken app ecosystem — depends on `@rific/auto-paper`, `@rific/feedback-press`, `@rific/focus-chain`, `@rific/splash-gate`, `@rific/toaster`, `@rific/updater`, `@tastic/animations` (the `./gravity` subpath only, for the gravity-well particle-swirl visual — see `src/components/GravityWellMarker.tsx`), `@tastic/core`, `@tastic/hud`, `@tastic/input`, `@tastic/physics`, `@tastic/profile`, `@tastic/split-screen`. The gravity well's *force* math (`applyGravityWells`, bounded quadratic falloff) stays in `@tastic/physics` — only the cosmetic particle-swirl rendering moved to `@tastic/animations`; the two packages compose at this app's own call sites, neither depends on the other.
 
 **Expo has changed.** Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code — don't rely on general Expo knowledge, this app is on SDK 57 specifically.
 

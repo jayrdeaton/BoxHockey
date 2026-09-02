@@ -1,13 +1,13 @@
 import { useEffect, useRef } from 'react'
 
-import { CONTROL_SCHEME_SIGN, MAX_DRAG_PIXELS } from '@/constants/game'
+import { CONTROL_SCHEME_SIGN, MAX_FLICK_VELOCITY, MAX_STICK_PULLBACK_PIXELS } from '@/constants/game'
 import { BoardLayout, ControlScheme, GameState, Player, PuckState } from '@/types'
 import { AIDifficulty, planAIShot, randomAIThinkDelayMs, randomInterceptReactionMs } from '@/utils/aiOpponent'
 
 interface AIControls {
   tryAimStart: (touchX: number, touchY: number) => boolean
-  aimUpdate: (x: number, y: number) => void
-  shoot: (dx: number, dy: number) => void
+  aimUpdate: (x: number, y: number, vx: number, vy: number) => void
+  shoot: (dx: number, dy: number, vx: number, vy: number) => void
 }
 
 // Timing for the AI's own "pull back and release" — mirrors the human gesture (drag away from the
@@ -30,6 +30,7 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
   // e.g. game.tsx's faceoffRef) so the intercept effect below can read the FRESHEST puck position
   // at each scheduled step, not a stale one captured back when eligibility first fired.
   const puckRef = useRef(state.puck)
+  // eslint-disable-next-line react-hooks/refs -- mirrored every render (see comment above) so the intercept effect below reads the freshest puck
   puckRef.current = state.puck
 
   // `paused` (settings/quit-confirm dialog open — see game.tsx) is only checked here, before
@@ -42,10 +43,17 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
 
     const puck = state.puck
     const shot = planAIShot(puck, board, aiPlayer, difficulty, friction)
-    const dragMag = shot.power * MAX_DRAG_PIXELS
-    // useGameState's STRIKE case multiplies whatever drag is dispatched by this seat's own
-    // ControlScheme sign (see CONTROL_SCHEME_SIGN) before it becomes a velocity — multiplying by
-    // that same sign here is what cancels it back out, so the CPU's shot always lands along its
+    // Two separate magnitudes from the same shot.power now that drag distance and shot power are
+    // no longer the same quantity: dragMag is purely visual (how far the CPU's paddle animates
+    // toward, capped at MAX_STICK_PULLBACK_PIXELS — same cap Board.tsx's own stick uses); velMag is
+    // the actual shot magnitude fed into shoot(), capped at MAX_FLICK_VELOCITY. Using dragMag's old
+    // pixel-space cap for the shot itself would send the paddle's windup target thousands of pixels
+    // off-board while leaving the real shot correctly scaled, or vice versa — they must stay split.
+    const dragMag = shot.power * MAX_STICK_PULLBACK_PIXELS
+    const velMag = shot.power * MAX_FLICK_VELOCITY
+    // useGameState's STRIKE case multiplies whatever velocity is dispatched by this seat's own
+    // ControlScheme sign (see CONTROL_SCHEME_SIGN) before it becomes a launch vector — multiplying
+    // by that same sign here is what cancels it back out, so the CPU's shot always lands along its
     // real intended direction (shot.fx, shot.fy) no matter which scheme this seat is set to. A
     // 'push' CPU ends up dragging TOWARD its own target (mirroring a human swiping there by hand);
     // a 'pull' one drags away from it, same as the original hardcoded `-shot.fx` did.
@@ -54,6 +62,11 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
     const dragY = sign * shot.fy * dragMag
     const targetX = puck.x + dragX
     const targetY = puck.y + dragY
+    // Constant for the whole windup, not ramped — the CPU has no per-frame gesture noise to smooth
+    // out the way a human's live velocity reading does, so its own stick/chevron preview can just
+    // read its true intended power from the first windup frame on.
+    const velX = sign * shot.fx * velMag
+    const velY = sign * shot.fy * velMag
 
     // Every scheduled step, including ones chained from inside an earlier step's callback, lands
     // in this same array — so the cleanup below reliably cancels the rest of an in-flight sequence
@@ -65,9 +78,9 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
 
     after(randomAIThinkDelayMs(difficulty), () => {
       if (!tryAimStart(puck.x, puck.y)) return
-      after(WINDUP_STEP_MS, () => aimUpdate(puck.x + dragX * 0.55, puck.y + dragY * 0.55))
-      after(WINDUP_STEP_MS * 2, () => aimUpdate(targetX, targetY))
-      after(WINDUP_STEP_MS * 2 + RELEASE_PAUSE_MS, () => shoot(dragX, dragY))
+      after(WINDUP_STEP_MS, () => aimUpdate(puck.x + dragX * 0.55, puck.y + dragY * 0.55, velX, velY))
+      after(WINDUP_STEP_MS * 2, () => aimUpdate(targetX, targetY, velX, velY))
+      after(WINDUP_STEP_MS * 2 + RELEASE_PAUSE_MS, () => shoot(dragX, dragY, velX, velY))
     })
 
     return () => {
@@ -117,20 +130,22 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
       // way, only the cosmetic paddle-pullback target below.
       const freshPuck: PuckState = puckRef.current
       const shot = planAIShot(freshPuck, board, aiPlayer, difficulty, friction)
-      const dragMag = shot.power * MAX_DRAG_PIXELS
+      const dragMag = shot.power * MAX_STICK_PULLBACK_PIXELS
+      const velMag = shot.power * MAX_FLICK_VELOCITY
       const sign = CONTROL_SCHEME_SIGN[controlScheme[aiPlayer]]
       const dragX = sign * shot.fx * dragMag
       const dragY = sign * shot.fy * dragMag
+      const velX = sign * shot.fx * velMag
+      const velY = sign * shot.fy * velMag
 
       if (!tryAimStart(freshPuck.x, freshPuck.y)) return
-      after(WINDUP_STEP_MS, () => aimUpdate(puckRef.current.x + dragX * 0.55, puckRef.current.y + dragY * 0.55))
-      after(WINDUP_STEP_MS * 2, () => aimUpdate(puckRef.current.x + dragX, puckRef.current.y + dragY))
-      after(WINDUP_STEP_MS * 2 + RELEASE_PAUSE_MS, () => shoot(dragX, dragY))
+      after(WINDUP_STEP_MS, () => aimUpdate(puckRef.current.x + dragX * 0.55, puckRef.current.y + dragY * 0.55, velX, velY))
+      after(WINDUP_STEP_MS * 2, () => aimUpdate(puckRef.current.x + dragX, puckRef.current.y + dragY, velX, velY))
+      after(WINDUP_STEP_MS * 2 + RELEASE_PAUSE_MS, () => shoot(dragX, dragY, velX, velY))
     })
 
     return () => {
       timers.forEach(clearTimeout)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isInterceptEligible, aiPlayer, difficulty, friction, controlScheme, board, tryAimStart, aimUpdate, shoot])
 }

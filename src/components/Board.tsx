@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { cancelAnimation, Easing, interpolateColor, SharedValue, useDerivedValue, useFrameCallback, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated'
 
-import { COIN_FLIP_BASE_HALF_TURNS, COIN_FLIP_FADE_MS, COIN_FLIP_HOLD_MS, COIN_FLIP_MIN_SCALE_X, COIN_FLIP_SPIN_MS, COIN_FLIP_TRAVEL_MS, COLORS, CONTROL_SCHEME_SIGN, FACEOFF_COUNTDOWN_STEP_MS, FACEOFF_PRESS_RIPPLE_DURATION_MS, GOAL_BOARD_FLASH_DECAY_MS, GOAL_BOARD_FLASH_PEAK_OPACITY, GOAL_CREASE_FLASH_PEAK_OPACITY, GOAL_DOOR_FLASH_COLOR_DECAY_MS, GOAL_DOOR_FLASH_GLOW_PEAK_OPACITY, GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO, GOAL_DOOR_FLASH_OPACITY_DECAY_MS, GOAL_LINE_STROKE_WIDTH, GOAL_WEDGE_FLASH_FINAL_BLINKS, GOAL_WEDGE_FLASH_FINAL_MS, GOAL_WEDGE_FLASH_SEG_MS, GOAL_WEDGE_FLASH_STEP_MS, GOAL_WEDGE_SWEEP_BUDGET_MS, MAX_DRAG_PIXELS, MAX_SPEED, MIN_SHOOT_DRAG, PUCK_BURST_DURATION_MS, PUCK_BURST_MAX_DIST_RATIO, PUCK_BURST_SHARD_COUNT, PUCK_SCORE_FADE_DELAY_MS, PUCK_SCORE_FADE_MS, STRIKE_DURATION_MS } from '@/constants/game'
+import { COIN_FLIP_BASE_HALF_TURNS, COIN_FLIP_FADE_MS, COIN_FLIP_HOLD_MS, COIN_FLIP_MIN_SCALE_X, COIN_FLIP_SPIN_MS, COIN_FLIP_TRAVEL_MS, COLORS, CONTROL_SCHEME_SIGN, FACEOFF_COUNTDOWN_STEP_MS, FACEOFF_PRESS_RIPPLE_DURATION_MS, GOAL_BOARD_FLASH_DECAY_MS, GOAL_BOARD_FLASH_PEAK_OPACITY, GOAL_CREASE_FLASH_PEAK_OPACITY, GOAL_DOOR_FLASH_COLOR_DECAY_MS, GOAL_DOOR_FLASH_GLOW_PEAK_OPACITY, GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO, GOAL_DOOR_FLASH_OPACITY_DECAY_MS, GOAL_LINE_STROKE_WIDTH, GOAL_WEDGE_FLASH_FINAL_BLINKS, GOAL_WEDGE_FLASH_FINAL_MS, GOAL_WEDGE_FLASH_SEG_MS, GOAL_WEDGE_FLASH_STEP_MS, GOAL_WEDGE_SWEEP_BUDGET_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, PUCK_BURST_DURATION_MS, PUCK_BURST_MAX_DIST_RATIO, PUCK_BURST_SHARD_COUNT, PUCK_SCORE_FADE_DELAY_MS, PUCK_SCORE_FADE_MS, STRIKE_DURATION_MS } from '@/constants/game'
 import { AimIndicator, BoardLayout, ControlScheme, FaceoffState, GamePhase, Player, PuckState, ShotPreviewLength } from '@/types'
 import { faceoffZoneCenter, faceoffZoneRadius } from '@/utils/board'
 import { computeGoalWedges } from '@/utils/goalWedges'
@@ -29,6 +29,10 @@ const CHEVRON_SWEEP_MIN_RATE_FACTOR = 0.18
 // boundary with a short fade, still fully transparent through most of the cancel zone and fully
 // opaque once genuinely past it.
 const CANCEL_ZONE_FADE_PX = 16
+// Velocity-space counterpart to CANCEL_ZONE_FADE_PX above (points/sec) — the same cross-fade
+// treatment around MIN_FLICK_VELOCITY now that the cancel zone is a dual gate (distance AND
+// velocity, see cancelZoneFadeOpacity below). First-pass value.
+const CANCEL_ZONE_VELOCITY_FADE_UNITS = 80
 // Flip to true locally to see the rink pocket setting's true collision curve (corners +
 // behind-goal pocket) while tuning cornerRadius/behindGoalDepth in computeBoardLayout — off by
 // default, since normal play deliberately draws nothing back there (see rinkPerimeterPath's own
@@ -326,6 +330,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // computeBoardLayout's behindGoalDepth comment) — the same physical question, just answered for
   // canvas bounds instead of collision depth.
   const topBleed = board.behindGoalDepth === 0 ? puckRadius * 2.5 : 0
+  const topBleedStyle = { top: -topBleed }
 
   const { colors: themeColors, dark } = useAutoPaperTheme()
 
@@ -654,22 +659,46 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // bounce (maxBounces=1 in the computeTrajectory call below, not more) — see that call's own
   // comment for why a second predicted bend isn't trustworthy enough to draw with the same
   // confidence as the first.
-  // Raw finger delta (current touch position minus where the drag started), signed by the active
-  // player's own ControlScheme (shootSign above) to get the actual shot direction: 'pull' points
-  // opposite the drag (like a slingshot or pool cue), 'push' points along it (like a flick). This
-  // is also computeAimVector/computeTrajectory's expected sign convention (they don't re-negate),
-  // so reuse chevDx/chevDy as-is without flipping again.
+  // Raw finger position delta (current touch minus where the drag started) — used only for the
+  // DISTANCE half of the dual cancel-zone gate below (see MIN_SHOOT_DRAG's own comment in
+  // constants/game.ts for why distance still matters once power/direction are velocity-based).
   const rawAimDx = aim ? aim.currentX - aim.startX : 0
   const rawAimDy = aim ? aim.currentY - aim.startY : 0
-  const chevDx = shootSign * rawAimDx
-  const chevDy = shootSign * rawAimDy
-  const chevDragDist = Math.sqrt(chevDx * chevDx + chevDy * chevDy)
-  // Same boundary game.tsx's own inCancelZone haptic watches (MIN_SHOOT_DRAG — releasing short of
-  // it cancels the shot via useGameState's shoot). Gates the chevron trail below, and now also the
-  // stick and front arrow further down: none of the three aiming indicators should show while a
-  // release would just cancel, since none of them represent a real committed shot yet.
-  const pastCancelZone = isAimingSized && !!aim && chevDragDist >= MIN_SHOOT_DRAG
-  const { power: chevPower } = computeAimVector(chevDx, chevDy, MAX_DRAG_PIXELS, MAX_SPEED)
+  const rawAimDist = Math.sqrt(rawAimDx * rawAimDx + rawAimDy * rawAimDy)
+  // Live release-velocity ESTIMATE (points/sec, smoothed — see AimIndicator.vx/vy's own comment),
+  // signed by the active player's own ControlScheme (shootSign above) to get the actual shot
+  // direction: 'pull' points opposite the drag (like a slingshot or pool cue), 'push' points along
+  // it (like a flick). This is also computeAimVector/computeTrajectory's expected sign convention
+  // (they don't re-negate), so reuse liveVx/liveVy as-is without flipping again. This is the ONE
+  // shared source of truth for shot direction across the stick, front arrow, and chevron trail
+  // below — all three track the same live velocity, so the preview never disagrees with what
+  // would actually fire if released right now.
+  const liveVx = aim ? shootSign * aim.vx : 0
+  const liveVy = aim ? shootSign * aim.vy : 0
+  const liveSpeed = Math.hypot(liveVx, liveVy)
+  // Unit direction of the live shot vector — falls back to (0,0) at/near zero speed rather than
+  // dividing by zero; harmless, since every visual that uses it is also scaled by livePowerT/
+  // pastCancelZone below, both 0 in that same near-zero-speed regime.
+  const liveDirX = liveSpeed > 0.0001 ? liveVx / liveSpeed : 0
+  const liveDirY = liveSpeed > 0.0001 ? liveVy / liveSpeed : 0
+  // Same dual gate useGameState's shoot() uses to decide cancel vs. strike (MIN_SHOOT_DRAG AND
+  // MIN_FLICK_VELOCITY — see their own comments in constants/game.ts). Gates the chevron trail
+  // below, and now also the stick and front arrow further down: none of the three aiming
+  // indicators should show while a release right now would just cancel, since none of them
+  // represent a real committed shot yet.
+  const pastCancelZone = isAimingSized && !!aim && rawAimDist >= MIN_SHOOT_DRAG && liveSpeed >= MIN_FLICK_VELOCITY
+  // 0 right at the cancel-zone boundary, 1 at MAX_FLICK_VELOCITY — drives the stick's own length
+  // (paddleFace below) and the front arrow's sharpness the same way a drag-distance ratio used to,
+  // now velocity-based so the preview honestly reflects what a release right now would produce
+  // (a slow, sustained drag shows little to no wind-up until the player actually starts flicking).
+  const livePowerT = Math.min(1, Math.max(0, (liveSpeed - MIN_FLICK_VELOCITY) / (MAX_FLICK_VELOCITY - MIN_FLICK_VELOCITY)))
+  // Opacity for the stick and front arrow (NOT the chevron trail — pastCancelZone above still
+  // hard-gates that unchanged): cross-fades smoothly across BOTH cancel gates around their own
+  // thresholds, rather than a hard pop at either boundary.
+  const distanceFade = Math.min(1, Math.max(0, (rawAimDist - (MIN_SHOOT_DRAG - CANCEL_ZONE_FADE_PX)) / CANCEL_ZONE_FADE_PX))
+  const velocityFade = Math.min(1, Math.max(0, (liveSpeed - (MIN_FLICK_VELOCITY - CANCEL_ZONE_VELOCITY_FADE_UNITS)) / CANCEL_ZONE_VELOCITY_FADE_UNITS))
+  const cancelZoneFadeOpacity = Math.min(distanceFade, velocityFade)
+  const { power: chevPower } = computeAimVector(liveVx, liveVy, MAX_FLICK_VELOCITY, MAX_SPEED)
 
   // The real bounce-aware trail only shows at 'medium'/'long' — see shotPreviewLength's own doc
   // comment on BoardProps for the full tier breakdown ('off' none, 'short' stick+arrow, 'medium'/
@@ -689,7 +718,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
     // first, closely-matching segment and letting the trail simply run out past that bounce is the
     // honest choice: real distance/power still reads clearly from how far it reaches, it just never
     // asserts a bend it can't back up.
-    const waypoints = computeTrajectory(puck.x, puck.y, chevDx, chevDy, board, MAX_DRAG_PIXELS, MAX_SPEED, 1, friction)
+    const waypoints = computeTrajectory(puck.x, puck.y, liveVx, liveVy, board, MAX_FLICK_VELOCITY, MAX_SPEED, 1, friction)
     const chevronWidth = puckRadius * 0.14
     const chevronDepth = puckRadius * 0.11
     const spacing = puckRadius * 0.55
@@ -723,7 +752,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
       placements.push(path)
     }
     return placements
-  }, [showTrajectoryTrail, puck.x, puck.y, puckRadius, chevDx, chevDy, board, previewLengthPx, chevPower, friction])
+  }, [showTrajectoryTrail, puck.x, puck.y, puckRadius, liveVx, liveVy, board, previewLengthPx, chevPower, friction])
 
   // Highlight sweep — travels through the chevrons at a rate tied to live power, without
   // restarting/jumping every time power changes mid-drag (a fixed-duration withRepeat/withTiming
@@ -980,39 +1009,22 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // can now start anywhere on the board (see useGameState's tryAimStart), so drawing it at the
   // literal finger position could put it far from the puck entirely. Offset from the puck instead,
   // it always reads as "pulled back from the puck, about to swing forward" regardless of where the
-  // finger landed or which ControlScheme is active. Clamped to MAX_DRAG_PIXELS (the same distance
-  // that already maxes out shot power in useGameState's shoot) so a drag spanning the whole screen
-  // doesn't visually fling the paddle far past where pulling back any further stopped mattering.
-  const rawDragX = aim ? aim.currentX - aim.startX : 0
-  const rawDragY = aim ? aim.currentY - aim.startY : 0
-  const rawDragDist = Math.sqrt(rawDragX * rawDragX + rawDragY * rawDragY)
-  const dragClampScale = rawDragDist > MAX_DRAG_PIXELS ? MAX_DRAG_PIXELS / rawDragDist : 1
-  // Pulled-back distance, clamped to MAX_DRAG_PIXELS — the SAME distance the stick (behind the
-  // puck) and the front arrow (ahead of it, see its own section further down) each mirror onto
-  // their own side. pullArmT (0..1 pull progress past the cancel-zone boundary) drives BOTH ends'
-  // own shape off this one underlying "how hard" signal, read two different ways: the stick gets
-  // visibly LONGER as it grows (paddleFace below), the front arrow gets visibly SHARPER.
-  const pullDist = rawDragDist * dragClampScale
-  const pullArmT = Math.min(1, Math.max(0, (pullDist - MIN_SHOOT_DRAG) / (MAX_DRAG_PIXELS - MIN_SHOOT_DRAG)))
+  // finger landed or which ControlScheme is active. livePowerT (computed above, from live release
+  // velocity) drives how far out that offset reaches, capped at MAX_STICK_PULLBACK_PIXELS — purely
+  // visual now, decoupled from shot power (see that constant's own comment in constants/game.ts).
+  const stickOffset = livePowerT * MAX_STICK_PULLBACK_PIXELS
 
-  const paddleFace = puckRadius * (1.8 + 1.0 * pullArmT) // 1.8 (short, at the cancel-zone boundary) -> 2.8 (long, at max pull)
+  const paddleFace = puckRadius * (1.8 + 1.0 * livePowerT) // 1.8 (short, at the cancel-zone boundary) -> 2.8 (long, at max pull)
   const paddleThickness = puckRadius * 0.45
 
-  // Opacity for the stick and front arrow (NOT the chevron trail — pastCancelZone above still
-  // hard-gates that unchanged): a plain function of the live drag distance, so it cross-fades
-  // smoothly in step with the finger crossing MIN_SHOOT_DRAG in either direction, rather than a
-  // one-shot triggered animation that could fall out of sync with a finger jittering right at the
-  // boundary. Fully transparent through most of the cancel zone, ramping up over the last
-  // CANCEL_ZONE_FADE_PX before the boundary, fully opaque once genuinely past it.
-  const cancelZoneFadeOpacity = Math.min(1, Math.max(0, (rawDragDist - (MIN_SHOOT_DRAG - CANCEL_ZONE_FADE_PX)) / CANCEL_ZONE_FADE_PX))
-  // -shootSign, not a hardcoded +: useGameState's STRIKE case fires the puck along shootSign*drag
-  // (see the chevron section above), so the paddle always belongs on the OPPOSITE side — the side
-  // it swings away FROM, not toward. For 'pull' (shootSign -1) that's the same side as the finger
-  // (a slingshot pull); for 'push' (shootSign +1) that's the side BEHIND the finger, so swinging
-  // toward the finger's current position pushes the puck forward along the swipe. Getting this
-  // backwards puts the paddle on the puck's departure side instead of its pulled-back approach side.
-  const stickX = puck.x - shootSign * rawDragX * dragClampScale
-  const stickY = puck.y - shootSign * rawDragY * dragClampScale
+  // liveDirX/Y already carries shootSign (see the shared block above) and points along the true
+  // shot direction, so the paddle sits on the OPPOSITE side — the side it swings away FROM, not
+  // toward. For 'pull' (shootSign -1) that's the same side as the finger (a slingshot pull); for
+  // 'push' (shootSign +1) that's the side BEHIND the finger, so swinging toward the finger's
+  // current position pushes the puck forward along the swipe. Getting this backwards puts the
+  // paddle on the puck's departure side instead of its pulled-back approach side.
+  const stickX = puck.x - liveDirX * stickOffset
+  const stickY = puck.y - liveDirY * stickOffset
   // Facing direction (paddle → puck) stays fixed for the whole swing below — neither stickX/Y nor
   // puck.x/y change again once 'striking' begins (the gesture already ended, and the puck itself
   // doesn't move until APPLY_STRIKE), so recomputing this every render is cheap and stable, unlike
@@ -1053,43 +1065,42 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
 
   // ─── Front power arrow ─────────────────────────────────────────────────────
   // A single triangle mirroring the stick's own pulled-back offset onto the OPPOSITE side of the
-  // puck — same clamped distance (pullDist, computed alongside the stick above) as stickX/Y, but
-  // added instead of subtracted, so it sits out ahead of the puck along the direction it's about to
-  // travel and grows/shrinks in lockstep with how far the stick itself is pulled back.
+  // puck — same stickOffset (computed alongside the stick above) as stickX/Y, but added instead of
+  // subtracted, so it sits out ahead of the puck along the direction it's about to travel and
+  // grows/shrinks in lockstep with the stick's own live power.
   // Only shown at shotPreviewLength === 'short' — see its own doc comment on BoardProps for the
   // full tier breakdown. 'off' shows neither this nor the trail (nor the stick — a deliberate blind
   // "just feel it" mode); 'medium'/'long' show the real bounce-aware trail instead, which is
   // strictly more informative once it's actually long enough to reach anything.
-  const frontArrowDist = pullDist
 
   // Existence gate — whether to mount/compute the path at all. Separate from cancelZoneFadeOpacity
   // below (which handles the actual cancel-zone fade as an opacity, not a mount/unmount): this only
-  // needs to skip a null `aim`, the exact rawDragDist===0 instant right at touch-down (AIM_START
-  // sets currentX/Y equal to startX/Y, which would otherwise divide-by-zero building the direction
-  // unit vector below), and any tier other than 'short' (see above).
-  const showFrontArrow = isAimingSized && !!aim && rawDragDist > 0.001 && shotPreviewLength === 'short'
+  // needs to skip a null `aim`, the near-zero-speed instant right at touch-down (liveDirX/Y default
+  // to 0 there, which would otherwise draw a degenerate zero-direction arrow), and any tier other
+  // than 'short' (see above).
+  const showFrontArrow = isAimingSized && !!aim && liveSpeed > 0.001 && shotPreviewLength === 'short'
 
   // The arrow always FACES the true shot direction (no rotation) — what changes with pull is its
   // own sharpness, not its orientation. Right at the cancel-zone boundary it's wide with real body
   // already (not a hairline sliver) — a blunt, near-flat wedge you can actually see the shape of.
-  // As the pull grows from MIN_SHOOT_DRAG toward MAX_DRAG_PIXELS it narrows and lengthens into a
-  // proper sharp arrowhead — "sharpening to a point" as a shape change, not a spin. Uses the SAME
-  // pullArmT the stick's own paddleFace grows with above, so both ends of the pull read as one
-  // paired "how hard" cue: the stick lengthens behind the puck while the arrow sharpens ahead of it.
-  const frontArrowWidth = puckRadius * (0.6 - 0.38 * pullArmT) // 0.6 (blunt) -> 0.22 (sharp)
-  const frontArrowDepth = puckRadius * (0.22 + 0.28 * pullArmT) // 0.22 (flat, but real height) -> 0.5 (long point)
+  // As live speed grows from MIN_FLICK_VELOCITY toward MAX_FLICK_VELOCITY it narrows and lengthens
+  // into a proper sharp arrowhead — "sharpening to a point" as a shape change, not a spin. Uses the
+  // SAME livePowerT the stick's own paddleFace grows with above, so both ends of the pull read as
+  // one paired "how hard" cue: the stick lengthens behind the puck while the arrow sharpens ahead.
+  const frontArrowWidth = puckRadius * (0.6 - 0.38 * livePowerT) // 0.6 (blunt) -> 0.22 (sharp)
+  const frontArrowDepth = puckRadius * (0.22 + 0.28 * livePowerT) // 0.22 (flat, but real height) -> 0.5 (long point)
 
   const frontArrowPath = useMemo(() => {
     if (!showFrontArrow) return null
-    const ux = (shootSign * rawDragX) / rawDragDist
-    const uy = (shootSign * rawDragY) / rawDragDist
+    const ux = liveDirX
+    const uy = liveDirY
     // Clamped to the wall instead of drawing straight through it — with no trajectory bend to lean
     // on (that's exactly what 'off' is missing), stopping the tip right at the board edge is what
     // lets this still double as a bank-shot planning aid: where it lands on the wall is where the
     // puck's center will actually make contact. `- puckRadius` matches stepPhysics' own contact
     // point (x = board.x + r, etc.) — the puck's CENTER stops one radius short of the true edge.
     const wallDist = Math.max(0, rayDistanceToBoardEdge(puck.x, puck.y, ux, uy, x, x + width, y, y + height) - puckRadius)
-    const placementDist = Math.min(frontArrowDist, wallDist)
+    const placementDist = Math.min(stickOffset, wallDist)
     const tipX = puck.x + ux * placementDist
     const tipY = puck.y + uy * placementDist
     const backX = tipX - ux * frontArrowDepth
@@ -1102,10 +1113,10 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
     path.lineTo(backX - px * frontArrowWidth, backY - py * frontArrowWidth)
     path.close()
     return path
-  }, [showFrontArrow, puck.x, puck.y, puckRadius, x, y, width, height, shootSign, rawDragX, rawDragY, rawDragDist, frontArrowDist, frontArrowWidth, frontArrowDepth])
+  }, [showFrontArrow, puck.x, puck.y, puckRadius, x, y, width, height, liveDirX, liveDirY, stickOffset, frontArrowWidth, frontArrowDepth])
 
   return (
-    <View style={[styles.container, { position: 'absolute', top: -topBleed, left: 0, right: 0, bottom: 0 }]}>
+    <View style={[styles.container, topBleedStyle]}>
       <Canvas style={StyleSheet.absoluteFill}>
         {/* Shifts everything below back down by topBleed so it lands exactly where it always has
             on screen — the View/Canvas above are topBleed pixels taller (bled upward past the
@@ -1113,82 +1124,82 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             now topBleed higher up than board.y=0 used to assume. This Group is the one place that
             compensates; nothing below it needs to know the canvas got taller. */}
         <Group transform={[{ translateY: topBleed }]}>
-        {/* Goal crease background tint — see the useMemo above */}
-        <Group opacity={0.28}>
-          <Path path={p1CreaseFill} color={p1Color} />
-          <Path path={p2CreaseFill} color={p2Color} />
-        </Group>
+          {/* Goal crease background tint — see the useMemo above */}
+          <Group opacity={0.28}>
+            <Path path={p1CreaseFill} color={p1Color} />
+            <Path path={p2CreaseFill} color={p2Color} />
+          </Group>
 
-        {/* Score arcs — see the useMemo above */}
-        {p1Wedges.map((path, i) => (
-          <Path key={`p1-wedge-${i}`} path={path} style='stroke' strokeWidth={2.5} strokeCap='round' color={i < scores[0] ? p1Color : lineColor} />
-        ))}
-        {p2Wedges.map((path, i) => (
-          <Path key={`p2-wedge-${i}`} path={path} style='stroke' strokeWidth={2.5} strokeCap='round' color={i < scores[1] ? p2Color : lineColor} />
-        ))}
+          {/* Score arcs — see the useMemo above */}
+          {p1Wedges.map((path, i) => (
+            <Path key={`p1-wedge-${i}`} path={path} style='stroke' strokeWidth={2.5} strokeCap='round' color={i < scores[0] ? p1Color : lineColor} />
+          ))}
+          {p2Wedges.map((path, i) => (
+            <Path key={`p2-wedge-${i}`} path={path} style='stroke' strokeWidth={2.5} strokeCap='round' color={i < scores[1] ? p2Color : lineColor} />
+          ))}
 
-        {/* Rink faceoff circles — see the comment above. The ring + center dot are permanent
+          {/* Rink faceoff circles — see the comment above. The ring + center dot are permanent
             chrome, present in every state exactly alike (idle, pulsing, live) — only a background
             fill behind them changes: none when idle, a dim pulsing wash while counting down/
             holding, or a muted "container" tint (faceoffLiveTintOpacity — a toned-down wash of
             the player's own color, not a full-saturation fill) the instant this is the live
             target. Keeping the ring/dot constant is what makes the background read as a state
             change rather than a different decoration replacing it. */}
-        {faceoffCenters.map((c, i) => {
-          const isChosen = faceoff !== null && faceoff.zones[c.player - 1] === c.zoneIndex
-          const live = faceoffLive && isChosen
-          const pulsing = faceoff !== null && (faceoff.stage === 'countdown' || faceoff.stage === 'hold')
-          // Ready-check (game's first draw only — see FaceoffState's doc comment): that player's
-          // ring gently pulses (see p1ReadyRingOpacity/p2ReadyRingOpacity above) to invite the tap
-          // while still unready, then brightens to a static full opacity the moment they signal
-          // ready — the plainest possible "you're set, waiting on the other player" cue.
-          const isReady = faceoff !== null && faceoff.stage === 'ready' && faceoff.ready[c.player - 1]
-          // Which of this player's two zones their press ripple belongs on — latched into
-          // p1RippleZone/p2RippleZone at press time (see the pressFlash effect above), NOT
-          // re-derived from the live faceoff.zones/disqualified here, so the ripple survives
-          // faceoff going null when the draw resolves (see that effect's comment for why). Reading
-          // it fresh from `faceoff` here would also reintroduce the exact bug the latching was
-          // added to fix: faceoff.disqualified defaults to false and faceoff.zones is populated
-          // from the start of the draw, so an ungated re-derivation would resolve to the CORRECT
-          // zone the instant the draw begins — long before either player has pressed anything —
-          // silently revealing the answer before the intended 'live' flash.
-          const pressedZoneIndex = c.player === 1 ? p1RippleZone : p2RippleZone
-          const showRipple = pressedZoneIndex === c.zoneIndex
-          const rippleR = c.player === 1 ? p1RippleR : p2RippleR
-          const rippleO = c.player === 1 ? p1RippleO : p2RippleO
-          const readyRingOpacity = c.player === 1 ? p1ReadyRingOpacity : p2ReadyRingOpacity
-          return (
-            <Group key={i}>
-              {pulsing && (
-                <Group opacity={faceoffPulse}>
-                  <Circle cx={c.cx} cy={c.cy} r={faceoffRadius} color={wallColor} />
+          {faceoffCenters.map((c, i) => {
+            const isChosen = faceoff !== null && faceoff.zones[c.player - 1] === c.zoneIndex
+            const live = faceoffLive && isChosen
+            const pulsing = faceoff !== null && (faceoff.stage === 'countdown' || faceoff.stage === 'hold')
+            // Ready-check (game's first draw only — see FaceoffState's doc comment): that player's
+            // ring gently pulses (see p1ReadyRingOpacity/p2ReadyRingOpacity above) to invite the tap
+            // while still unready, then brightens to a static full opacity the moment they signal
+            // ready — the plainest possible "you're set, waiting on the other player" cue.
+            const isReady = faceoff !== null && faceoff.stage === 'ready' && faceoff.ready[c.player - 1]
+            // Which of this player's two zones their press ripple belongs on — latched into
+            // p1RippleZone/p2RippleZone at press time (see the pressFlash effect above), NOT
+            // re-derived from the live faceoff.zones/disqualified here, so the ripple survives
+            // faceoff going null when the draw resolves (see that effect's comment for why). Reading
+            // it fresh from `faceoff` here would also reintroduce the exact bug the latching was
+            // added to fix: faceoff.disqualified defaults to false and faceoff.zones is populated
+            // from the start of the draw, so an ungated re-derivation would resolve to the CORRECT
+            // zone the instant the draw begins — long before either player has pressed anything —
+            // silently revealing the answer before the intended 'live' flash.
+            const pressedZoneIndex = c.player === 1 ? p1RippleZone : p2RippleZone
+            const showRipple = pressedZoneIndex === c.zoneIndex
+            const rippleR = c.player === 1 ? p1RippleR : p2RippleR
+            const rippleO = c.player === 1 ? p1RippleO : p2RippleO
+            const readyRingOpacity = c.player === 1 ? p1ReadyRingOpacity : p2ReadyRingOpacity
+            return (
+              <Group key={i}>
+                {pulsing && (
+                  <Group opacity={faceoffPulse}>
+                    <Circle cx={c.cx} cy={c.cy} r={faceoffRadius} color={wallColor} />
+                  </Group>
+                )}
+                {live && (
+                  <Group opacity={faceoffLiveTintOpacity}>
+                    <Circle cx={c.cx} cy={c.cy} r={faceoffRadius} color={c.color} />
+                  </Group>
+                )}
+                <Group opacity={isReady ? 1 : readyRingOpacity}>
+                  <Circle cx={c.cx} cy={c.cy} r={faceoffRadius} style='stroke' strokeWidth={1.5} color={c.color} />
                 </Group>
-              )}
-              {live && (
-                <Group opacity={faceoffLiveTintOpacity}>
-                  <Circle cx={c.cx} cy={c.cy} r={faceoffRadius} color={c.color} />
-                </Group>
-              )}
-              <Group opacity={isReady ? 1 : readyRingOpacity}>
-                <Circle cx={c.cx} cy={c.cy} r={faceoffRadius} style='stroke' strokeWidth={1.5} color={c.color} />
+                <Circle cx={c.cx} cy={c.cy} r={faceoffDotRadius} color={c.color} />
+                {showRipple && (
+                  <Group opacity={rippleO}>
+                    <Circle cx={c.cx} cy={c.cy} r={rippleR} style='stroke' strokeWidth={2.5} color={c.color} />
+                  </Group>
+                )}
               </Group>
-              <Circle cx={c.cx} cy={c.cy} r={faceoffDotRadius} color={c.color} />
-              {showRipple && (
-                <Group opacity={rippleO}>
-                  <Circle cx={c.cx} cy={c.cy} r={rippleR} style='stroke' strokeWidth={2.5} color={c.color} />
-                </Group>
-              )}
-            </Group>
-          )
-        })}
+            )
+          })}
 
-        {/* Zone lines — see the comment above */}
-        <Group opacity={0.5}>
-          <Line p1={vec(x, p1ZoneLineY)} p2={vec(x + width, p1ZoneLineY)} color={p1Color} strokeWidth={4} />
-          <Line p1={vec(x, p2ZoneLineY)} p2={vec(x + width, p2ZoneLineY)} color={p2Color} strokeWidth={4} />
-        </Group>
+          {/* Zone lines — see the comment above */}
+          <Group opacity={0.5}>
+            <Line p1={vec(x, p1ZoneLineY)} p2={vec(x + width, p1ZoneLineY)} color={p1Color} strokeWidth={4} />
+            <Line p1={vec(x, p2ZoneLineY)} p2={vec(x + width, p2ZoneLineY)} color={p2Color} strokeWidth={4} />
+          </Group>
 
-        {/* Goal lines — full board width like a real rink's goal line, broken across the actual
+          {/* Goal lines — full board width like a real rink's goal line, broken across the actual
             goal opening (matching the perimeter walls' own gap below) so the line itself marks
             exactly where the goal's edges are, staying at y/y+height always so it lines up with
             the posts exactly like before. Color is the only thing that changes: each player's own
@@ -1198,12 +1209,12 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             since with no pocket behind it this line IS the solid boundary a puck stops dead at,
             and should read like the neutral perimeter walls elsewhere rather than a permeable
             painted stripe. */}
-        <Line p1={vec(x, y)} p2={vec(goalAbsLeft, y)} color={board.behindGoalDepth === 0 ? wallColor : p2Color} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-        <Line p1={vec(goalAbsRight, y)} p2={vec(x + width, y)} color={board.behindGoalDepth === 0 ? wallColor : p2Color} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-        <Line p1={vec(x, y + height)} p2={vec(goalAbsLeft, y + height)} color={board.behindGoalDepth === 0 ? wallColor : p1Color} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-        <Line p1={vec(goalAbsRight, y + height)} p2={vec(x + width, y + height)} color={board.behindGoalDepth === 0 ? wallColor : p1Color} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+          <Line p1={vec(x, y)} p2={vec(goalAbsLeft, y)} color={board.behindGoalDepth === 0 ? wallColor : p2Color} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+          <Line p1={vec(goalAbsRight, y)} p2={vec(x + width, y)} color={board.behindGoalDepth === 0 ? wallColor : p2Color} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+          <Line p1={vec(x, y + height)} p2={vec(goalAbsLeft, y + height)} color={board.behindGoalDepth === 0 ? wallColor : p1Color} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+          <Line p1={vec(goalAbsRight, y + height)} p2={vec(x + width, y + height)} color={board.behindGoalDepth === 0 ? wallColor : p1Color} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
 
-        {/* Goal door flash — fills in exactly the gap the two goal-line <Line>s above deliberately
+          {/* Goal door flash — fills in exactly the gap the two goal-line <Line>s above deliberately
             leave open (goalAbsLeft..goalAbsRight), same y/strokeWidth as those lines so the crisp
             core layer reads as "the goal line, right here" rather than a new element. Invisible at
             rest until a real door hit snaps both layers on (see that effect above) — this is the
@@ -1212,24 +1223,24 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             board.behindGoalDepth > 0). Glow layer (wide, low-opacity, burns off fast) renders
             BEHIND the core layer (normal width, lingers much longer) so the bright burst reads as
             sitting on top of the settling colored line, not the other way around. */}
-        {board.behindGoalDepth > 0 && (
-          <>
-            <Group opacity={topGoalDoorGlowOpacity}>
-              <Line p1={vec(goalAbsLeft, y)} p2={vec(goalAbsRight, y)} color={topGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH * GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO} />
-            </Group>
-            <Group opacity={bottomGoalDoorGlowOpacity}>
-              <Line p1={vec(goalAbsLeft, y + height)} p2={vec(goalAbsRight, y + height)} color={bottomGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH * GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO} />
-            </Group>
-            <Group opacity={topGoalDoorCoreOpacity}>
-              <Line p1={vec(goalAbsLeft, y)} p2={vec(goalAbsRight, y)} color={topGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-            </Group>
-            <Group opacity={bottomGoalDoorCoreOpacity}>
-              <Line p1={vec(goalAbsLeft, y + height)} p2={vec(goalAbsRight, y + height)} color={bottomGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-            </Group>
-          </>
-        )}
+          {board.behindGoalDepth > 0 && (
+            <>
+              <Group opacity={topGoalDoorGlowOpacity}>
+                <Line p1={vec(goalAbsLeft, y)} p2={vec(goalAbsRight, y)} color={topGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH * GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO} />
+              </Group>
+              <Group opacity={bottomGoalDoorGlowOpacity}>
+                <Line p1={vec(goalAbsLeft, y + height)} p2={vec(goalAbsRight, y + height)} color={bottomGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH * GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO} />
+              </Group>
+              <Group opacity={topGoalDoorCoreOpacity}>
+                <Line p1={vec(goalAbsLeft, y)} p2={vec(goalAbsRight, y)} color={topGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+              </Group>
+              <Group opacity={bottomGoalDoorCoreOpacity}>
+                <Line p1={vec(goalAbsLeft, y + height)} p2={vec(goalAbsRight, y + height)} color={bottomGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+              </Group>
+            </>
+          )}
 
-        {/* Perimeter walls — same solid, neutral wallColor style as the center divider below (not
+          {/* Perimeter walls — same solid, neutral wallColor style as the center divider below (not
             a themed/player color — the box itself is scaffolding, not a gameplay signal), so the
             whole structure reads as one piece built from the same material. They sit flush
             against the play field's boundary but extend outward from it (not inward, which would
@@ -1245,48 +1256,48 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             the same "no gap, no drawn line" treatment every other variant's straight boundary
             already gets (see this comment's own note on showWalls above). SHOW_RINK_DEBUG_PERIMETER
             flips the curve back on for anyone tuning cornerRadius/behindGoalDepth by eye. */}
-        {SHOW_RINK_DEBUG_PERIMETER && rinkPerimeterPath && <Path path={rinkPerimeterPath} style='stroke' strokeWidth={wallThickness} strokeCap='round' color={wallColor} />}
-        {showWalls && !rinkPerimeterPath && (
-          <>
-            <Rect x={x - wallThickness} y={y - wallThickness} width={wallThickness} height={height + wallThickness * 2} color={wallColor} />
-            <Rect x={x + width} y={y - wallThickness} width={wallThickness} height={height + wallThickness * 2} color={wallColor} />
-            <Rect x={x} y={y - wallThickness} width={goalAbsLeft - x} height={wallThickness} color={wallColor} />
-            <Rect x={goalAbsRight} y={y - wallThickness} width={x + width - goalAbsRight} height={wallThickness} color={wallColor} />
-            <Rect x={x} y={y + height} width={goalAbsLeft - x} height={wallThickness} color={wallColor} />
-            <Rect x={goalAbsRight} y={y + height} width={x + width - goalAbsRight} height={wallThickness} color={wallColor} />
-          </>
-        )}
+          {SHOW_RINK_DEBUG_PERIMETER && rinkPerimeterPath && <Path path={rinkPerimeterPath} style='stroke' strokeWidth={wallThickness} strokeCap='round' color={wallColor} />}
+          {showWalls && !rinkPerimeterPath && (
+            <>
+              <Rect x={x - wallThickness} y={y - wallThickness} width={wallThickness} height={height + wallThickness * 2} color={wallColor} />
+              <Rect x={x + width} y={y - wallThickness} width={wallThickness} height={height + wallThickness * 2} color={wallColor} />
+              <Rect x={x} y={y - wallThickness} width={goalAbsLeft - x} height={wallThickness} color={wallColor} />
+              <Rect x={goalAbsRight} y={y - wallThickness} width={x + width - goalAbsRight} height={wallThickness} color={wallColor} />
+              <Rect x={x} y={y + height} width={goalAbsLeft - x} height={wallThickness} color={wallColor} />
+              <Rect x={goalAbsRight} y={y + height} width={x + width - goalAbsRight} height={wallThickness} color={wallColor} />
+            </>
+          )}
 
-        {/* Obstacles */}
-        {obstacles.map((obs, i) => (
-          <Rect key={i} x={obs.x} y={obs.y} width={obs.width} height={obs.height} color={wallColor} />
-        ))}
+          {/* Obstacles */}
+          {obstacles.map((obs, i) => (
+            <Rect key={i} x={obs.x} y={obs.y} width={obs.width} height={obs.height} color={wallColor} />
+          ))}
 
-        {/* Wall posts (rink-off only — see WallPost's own comment in types/index.ts) — small round
+          {/* Wall posts (rink-off only — see WallPost's own comment in types/index.ts) — small round
             pegs capping each divider/gauntlet-wall gap's edges, same neutral wallColor as the
             obstacles they cap (unlike goalPosts just below, which use a per-goal accent color). */}
-        {wallPosts.map((post, i) => (
-          <Circle key={i} cx={post.x} cy={post.y} r={post.radius} color={wallColor} />
-        ))}
+          {wallPosts.map((post, i) => (
+            <Circle key={i} cx={post.x} cy={post.y} r={post.radius} color={wallColor} />
+          ))}
 
-        {/* Goal posts (built for every variant now — see buildGoalPosts in utils/board.ts) — small
+          {/* Goal posts (built for every variant now — see buildGoalPosts in utils/board.ts) — small
             round pegs colored per-goal (see GoalPost's own comment in types/index.ts), not the
             neutral wallColor every obstacle above gets. */}
-        {goalPosts.map((post, i) => (
-          <Circle key={i} cx={post.x} cy={post.y} r={post.radius} color={post.player === 1 ? p1Color : p2Color} />
-        ))}
+          {goalPosts.map((post, i) => (
+            <Circle key={i} cx={post.x} cy={post.y} r={post.radius} color={post.player === 1 ? p1Color : p2Color} />
+          ))}
 
-        {/* Gravity wells */}
-        {gravityWells.map((well, i) => (
-          <GravityWellMarker key={i} x={well.x} y={well.y} holeRadius={well.radius} attracting={well.strength >= 0} progress={wellParticleProgress} foreground={well.strength >= 0 ? COLORS.wellAttract : COLORS.wellRepel} />
-        ))}
+          {/* Gravity wells */}
+          {gravityWells.map((well, i) => (
+            <GravityWellMarker key={i} x={well.x} y={well.y} holeRadius={well.radius} attracting={well.strength >= 0} progress={wellParticleProgress} foreground={well.strength >= 0 ? COLORS.wellAttract : COLORS.wellRepel} />
+          ))}
 
-        {/* Aim direction chevrons — dashed trail (base color + a brighter sweeping highlight per
+          {/* Aim direction chevrons — dashed trail (base color + a brighter sweeping highlight per
             chevron, see ChevronMark above) bending to follow a bank shot's post-bounce direction
             wherever previewLengthPx reaches far enough to reveal it. */}
-        {chevronPlacements.map((path, i) => path && <ChevronMark key={i} path={path} index={i} sweepPhase={chevronSweepPhase} color={activePlayerColor} fade={chevronFade(i, chevronPlacements.length)} />)}
+          {chevronPlacements.map((path, i) => path && <ChevronMark key={i} path={path} index={i} sweepPhase={chevronSweepPhase} color={activePlayerColor} fade={chevronFade(i, chevronPlacements.length)} />)}
 
-        {/* Phantom puck — a drag-distance indicator anchored at the exact point you first touched
+          {/* Phantom puck — a drag-distance indicator anchored at the exact point you first touched
             down (aim.startX/Y), distinct from the real puck below. Releasing back near it is
             releasing near your own start point, which already cancels the shot via MIN_SHOOT_DRAG
             in useGameState's shoot() — this is a pure visual for that existing rule, no
@@ -1297,14 +1308,14 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             anchor — showing this then would read as a static ghost drifting away from the real
             puck rather than a cancel-zone cue, so it's simply hidden for the isIntercepting case
             (the paddle/chevrons below still track the drag either way). */}
-        {phase === 'aiming' && aim && (
-          <Group opacity={0.3}>
-            <Circle cx={aim.startX} cy={aim.startY} r={puckRadius} color='#000000' />
-            <Circle cx={aim.startX} cy={aim.startY} r={puckRadius} style='stroke' strokeWidth={2} color='#FFFFFF' />
-          </Group>
-        )}
+          {phase === 'aiming' && aim && (
+            <Group opacity={0.3}>
+              <Circle cx={aim.startX} cy={aim.startY} r={puckRadius} color='#000000' />
+              <Circle cx={aim.startX} cy={aim.startY} r={puckRadius} style='stroke' strokeWidth={2} color='#FFFFFF' />
+            </Group>
+          )}
 
-        {/* Paddle — a solid rotated mallet head (see paddlePath above), not a ring: sits at the
+          {/* Paddle — a solid rotated mallet head (see paddlePath above), not a ring: sits at the
             pulled-back finger position facing the puck while aiming, then swings in to strike the
             puck's edge (see contactX/Y above) once released. Mounted whenever there's a live
             drag/intercept (isAimingSized/aim) at any tier ABOVE 'off' (see shotPreviewLength's own
@@ -1315,16 +1326,16 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             below. The 'striking' branch is unaffected by BOTH gates: once a shot is actually
             committed (past STRIKE, at any preview tier) the swing itself is ordinary game feedback,
             not an aiming aid, so it always shows. */}
-        {isAimingSized && aim && shotPreviewLength !== 'off' && <Path path={aimingPaddlePath} color={activePlayerColor} opacity={cancelZoneFadeOpacity} />}
-        {phase === 'striking' && <Path path={strikingPaddlePath} color={activePlayerColor} />}
+          {isAimingSized && aim && shotPreviewLength !== 'off' && <Path path={aimingPaddlePath} color={activePlayerColor} opacity={cancelZoneFadeOpacity} />}
+          {phase === 'striking' && <Path path={strikingPaddlePath} color={activePlayerColor} />}
 
-        {/* Front power arrow — see the frontArrowPath comment above. Mirrors the paddle onto the
+          {/* Front power arrow — see the frontArrowPath comment above. Mirrors the paddle onto the
             puck's opposite side at the identical pulled-back distance, so the two always read as
             one matched pair: stick behind, arrow ahead — including fading in/out together via the
             same cancelZoneFadeOpacity. */}
-        {frontArrowPath && <Path path={frontArrowPath} color={activePlayerColor} opacity={cancelZoneFadeOpacity} />}
+          {frontArrowPath && <Path path={frontArrowPath} color={activePlayerColor} opacity={cancelZoneFadeOpacity} />}
 
-        {/* Puck (+ glow, ring) — never clipped, rink pocket setting on or off. An earlier version
+          {/* Puck (+ glow, ring) — never clipped, rink pocket setting on or off. An earlier version
             clipped this to the front-line rectangle whenever the puck sat within the goal's own
             x-range, to visually "swallow" it the instant it crossed into the scoring slot. But
             the moment a puck's whole body actually clears the line, stepPhysics returns 'scored'
@@ -1334,128 +1345,112 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             comment) or drifted in from behind without a fresh crossing. Per explicit correction,
             that puck should stay visible — same as it already was everywhere else behind the
             line — not vanish as if it scored when it didn't. */}
-        {/* Skipped entirely during 'coinFlip' — the coin-flip ceremony below stands in for the
+          {/* Skipped entirely during 'coinFlip' — the coin-flip ceremony below stands in for the
             puck until it lands exactly where this would have rendered anyway (see its own
             comment), so drawing both at once would just double up two discs in different spots. */}
-        {phase !== 'coinFlip' && (
-          // opacity={puckVisibleO} is a no-op (1) outside the goal-celebration window — see that
-          // effect above — so this doesn't touch normal puck visibility at all.
-          <Group opacity={puckVisibleO}>
-            {/* Puck glow */}
-            {(phase === 'idle' || isAimingSized || puckInterceptable) && <Circle cx={puck.x} cy={puck.y} r={glowR} color={glowColor} />}
+          {phase !== 'coinFlip' && (
+            // opacity={puckVisibleO} is a no-op (1) outside the goal-celebration window — see that
+            // effect above — so this doesn't touch normal puck visibility at all.
+            <Group opacity={puckVisibleO}>
+              {/* Puck glow */}
+              {(phase === 'idle' || isAimingSized || puckInterceptable) && <Circle cx={puck.x} cy={puck.y} r={glowR} color={glowColor} />}
 
-            {/* Puck — always a flat black fill, in every phase and regardless of theme. The ring
+              {/* Puck — always a flat black fill, in every phase and regardless of theme. The ring
                 recolors to activePlayerColor and pulses only while waiting for a shot (idle); every
                 other phase it's a plain, literal white — see idlePulseT/ringColor/ringOpacity above. */}
-            <Circle cx={puck.x} cy={puck.y} r={puckRadius} color='#000000' />
-            <Group opacity={ringOpacity}>
-              <Circle cx={puck.x} cy={puck.y} r={puckRadius} style='stroke' strokeWidth={2} color={ringColor} />
+              <Circle cx={puck.x} cy={puck.y} r={puckRadius} color='#000000' />
+              <Group opacity={ringOpacity}>
+                <Circle cx={puck.x} cy={puck.y} r={puckRadius} style='stroke' strokeWidth={2} color={ringColor} />
+              </Group>
             </Group>
-          </Group>
-        )}
+          )}
 
-        {/* Goal celebration: board flash → goal line/post flash → expanding rings (unchanged) →
+          {/* Goal celebration: board flash → goal line/post flash → expanding rings (unchanged) →
             scorer's crease sweep. Placed after the puck/paddle so nothing else buries them. */}
-        {lastScoredGoal !== null && (
-          <>
-            <Group opacity={boardFlashO}>
-              <Rect x={x} y={y} width={width} height={height} color={celebColor} />
-            </Group>
+          {lastScoredGoal !== null && (
+            <>
+              <Group opacity={boardFlashO}>
+                <Rect x={x} y={y} width={width} height={height} color={celebColor} />
+              </Group>
 
-            <Group opacity={goalEdgeFlashT}>
-              {/* Crease half-circle light-up — the whole goalie box, not just the line/posts, per
+              <Group opacity={goalEdgeFlashT}>
+                {/* Crease half-circle light-up — the whole goalie box, not just the line/posts, per
                   explicit request. Same path the resting ambient tint uses (p1CreaseFill/
                   p2CreaseFill below) at the scored-on side — celebColor already picks that same
                   side's defender color (see celebColor's own comment), so this just reuses it. A
                   fresh overlay copy, not a change to the always-present dim tint underneath. */}
-              <Path path={lastScoredGoal === 'top' ? p2CreaseFill : p1CreaseFill} color={goalEdgeFlashColor} opacity={GOAL_CREASE_FLASH_PEAK_OPACITY} />
-              {lastScoredGoal === 'top' ? (
-                <>
-                  <Line p1={vec(x, y)} p2={vec(goalAbsLeft, y)} color={goalEdgeFlashColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-                  <Line p1={vec(goalAbsRight, y)} p2={vec(x + width, y)} color={goalEdgeFlashColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-                </>
-              ) : (
-                <>
-                  <Line p1={vec(x, y + height)} p2={vec(goalAbsLeft, y + height)} color={goalEdgeFlashColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-                  <Line p1={vec(goalAbsRight, y + height)} p2={vec(x + width, y + height)} color={goalEdgeFlashColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-                </>
-              )}
-              {goalPosts.filter((post) => post.player === (lastScoredGoal === 'top' ? 2 : 1)).map((post, i) => (
-                <Circle key={i} cx={post.x} cy={post.y} r={post.radius} color={goalEdgeFlashColor} />
-              ))}
-            </Group>
-
-            <Group>
-              <Group opacity={ring1O}>
-                <Circle cx={goalCX} cy={celebCY} r={ring1R} style='stroke' strokeWidth={2.5} color={celebColor} />
+                <Path path={lastScoredGoal === 'top' ? p2CreaseFill : p1CreaseFill} color={goalEdgeFlashColor} opacity={GOAL_CREASE_FLASH_PEAK_OPACITY} />
+                {lastScoredGoal === 'top' ? (
+                  <>
+                    <Line p1={vec(x, y)} p2={vec(goalAbsLeft, y)} color={goalEdgeFlashColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+                    <Line p1={vec(goalAbsRight, y)} p2={vec(x + width, y)} color={goalEdgeFlashColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+                  </>
+                ) : (
+                  <>
+                    <Line p1={vec(x, y + height)} p2={vec(goalAbsLeft, y + height)} color={goalEdgeFlashColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+                    <Line p1={vec(goalAbsRight, y + height)} p2={vec(x + width, y + height)} color={goalEdgeFlashColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
+                  </>
+                )}
+                {goalPosts
+                  .filter((post) => post.player === (lastScoredGoal === 'top' ? 2 : 1))
+                  .map((post, i) => (
+                    <Circle key={i} cx={post.x} cy={post.y} r={post.radius} color={goalEdgeFlashColor} />
+                  ))}
               </Group>
-              <Group opacity={ring2O}>
-                <Circle cx={goalCX} cy={celebCY} r={ring2R} style='stroke' strokeWidth={2} color={celebColor} />
-              </Group>
-              <Group opacity={ring3O}>
-                <Circle cx={goalCX} cy={celebCY} r={ring3R} style='stroke' strokeWidth={1.5} color={celebColor} />
-              </Group>
-            </Group>
 
-            {wedgeFlashScorer !== null && wedgeFlashNewIndex >= 0 && Array.from({ length: wedgeFlashNewIndex + 1 }, (_, i) => {
-              const isFinal = i === wedgeFlashNewIndex
-              return (
-                <WedgeFlashOverlay
-                  key={i}
-                  path={wedgeFlashScorer === 1 ? p1Wedges[i] : p2Wedges[i]}
-                  clockMs={wedgeFlashClockMs}
-                  startMs={i * wedgeFlashStepMs}
-                  durationMs={isFinal ? GOAL_WEDGE_FLASH_FINAL_MS : GOAL_WEDGE_FLASH_SEG_MS}
-                  peakOpacity={isFinal ? 1 : 0.65}
-                  color={wedgeFlashScorer === 1 ? p1Color : p2Color}
-                  blinkCount={isFinal ? GOAL_WEDGE_FLASH_FINAL_BLINKS : undefined}
-                />
-              )
-            })}
+              <Group>
+                <Group opacity={ring1O}>
+                  <Circle cx={goalCX} cy={celebCY} r={ring1R} style='stroke' strokeWidth={2.5} color={celebColor} />
+                </Group>
+                <Group opacity={ring2O}>
+                  <Circle cx={goalCX} cy={celebCY} r={ring2R} style='stroke' strokeWidth={2} color={celebColor} />
+                </Group>
+                <Group opacity={ring3O}>
+                  <Circle cx={goalCX} cy={celebCY} r={ring3R} style='stroke' strokeWidth={1.5} color={celebColor} />
+                </Group>
+              </Group>
 
-            {/* Puck departure burst — see the puckBurstProgress effect above. Shards fan out evenly
+              {wedgeFlashScorer !== null &&
+                wedgeFlashNewIndex >= 0 &&
+                Array.from({ length: wedgeFlashNewIndex + 1 }, (_, i) => {
+                  const isFinal = i === wedgeFlashNewIndex
+                  return <WedgeFlashOverlay key={i} path={wedgeFlashScorer === 1 ? p1Wedges[i] : p2Wedges[i]} clockMs={wedgeFlashClockMs} startMs={i * wedgeFlashStepMs} durationMs={isFinal ? GOAL_WEDGE_FLASH_FINAL_MS : GOAL_WEDGE_FLASH_SEG_MS} peakOpacity={isFinal ? 1 : 0.65} color={wedgeFlashScorer === 1 ? p1Color : p2Color} blinkCount={isFinal ? GOAL_WEDGE_FLASH_FINAL_BLINKS : undefined} />
+                })}
+
+              {/* Puck departure burst — see the puckBurstProgress effect above. Shards fan out evenly
                 around the puck's own resting (x, y) at the moment it scored, in celebColor to tie
                 into the rest of the celebration's color language. */}
-            {Array.from({ length: PUCK_BURST_SHARD_COUNT }, (_, i) => (
-              <PuckShard
-                key={i}
-                cx={puck.x}
-                cy={puck.y}
-                angleRad={(i / PUCK_BURST_SHARD_COUNT) * Math.PI * 2}
-                maxDist={puckBurstMaxDist}
-                radius={puckBurstShardR}
-                color={celebColor}
-                progress={puckBurstProgress}
-              />
-            ))}
-          </>
-        )}
+              {Array.from({ length: PUCK_BURST_SHARD_COUNT }, (_, i) => (
+                <PuckShard key={i} cx={puck.x} cy={puck.y} angleRad={(i / PUCK_BURST_SHARD_COUNT) * Math.PI * 2} maxDist={puckBurstMaxDist} radius={puckBurstShardR} color={celebColor} progress={puckBurstProgress} />
+              ))}
+            </>
+          )}
 
-        {/* Coin flip invite — the plain neutral pulse inviting the tap, before anything spins.
+          {/* Coin flip invite — the plain neutral pulse inviting the tap, before anything spins.
             Same coinFlipCX/CY/R the flip disc below uses (both rest at board-center/big whenever
             coinFlipCenteredT is 1 — see its own comment), so this hands off to the spin with zero
             visual jump the instant the tap lands. Solid black fill underneath, same as the real
             puck's own look (see its render further down) — a stroke ring alone would leave the
             board's own lines/dividers visible straight through its middle instead of reading as a
             solid disc. Only the ring's opacity breathes; the fill stays fully opaque throughout. */}
-        {coinFlipAwaitingTap && (
-          <Group>
-            <Circle cx={coinFlipCX} cy={coinFlipCY} r={coinFlipR} color='#000000' />
-            <Group opacity={coinFlipInvitePulse}>
-              <Circle cx={coinFlipCX} cy={coinFlipCY} r={coinFlipR} style='stroke' strokeWidth={2} color={wallColor} />
+          {coinFlipAwaitingTap && (
+            <Group>
+              <Circle cx={coinFlipCX} cy={coinFlipCY} r={coinFlipR} color='#000000' />
+              <Group opacity={coinFlipInvitePulse}>
+                <Circle cx={coinFlipCX} cy={coinFlipCY} r={coinFlipR} style='stroke' strokeWidth={2} color={wallColor} />
+              </Group>
             </Group>
-          </Group>
-        )}
+          )}
 
-        {/* Coin flip ceremony — see the comment above. Waits on coinFlipStarted (the tap) before
+          {/* Coin flip ceremony — see the comment above. Waits on coinFlipStarted (the tap) before
             rendering at all. Topmost/last so it always draws over everything else on the board
             while it plays. */}
-        {phase === 'coinFlip' && coinFlipStarted && (
-          <Group origin={coinFlipOrigin} transform={coinFlipTransform}>
-            <Circle cx={coinFlipCX} cy={coinFlipCY} r={coinFlipR} color={coinFlipFillColor} />
-            <Circle cx={coinFlipCX} cy={coinFlipCY} r={coinFlipR} style='stroke' strokeWidth={2} color='#FFFFFF' />
-          </Group>
-        )}
+          {phase === 'coinFlip' && coinFlipStarted && (
+            <Group origin={coinFlipOrigin} transform={coinFlipTransform}>
+              <Circle cx={coinFlipCX} cy={coinFlipCY} r={coinFlipR} color={coinFlipFillColor} />
+              <Circle cx={coinFlipCX} cy={coinFlipCY} r={coinFlipR} style='stroke' strokeWidth={2} color='#FFFFFF' />
+            </Group>
+          )}
         </Group>
       </Canvas>
     </View>
@@ -1463,5 +1458,5 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 }
+  container: { bottom: 0, flex: 1, left: 0, position: 'absolute', right: 0 }
 })

@@ -216,13 +216,7 @@ function buildWallPosts(variant: BoardVariant, x: number, y: number, width: numb
       const topY = y + height * 0.25
       const midY = y + height * 0.5
       const botY = y + height * 0.75
-      return [
-        ...postsForHole(centerX - holeOffset, topY),
-        ...postsForHole(centerX + holeOffset, topY),
-        ...postsForHole(centerX, midY),
-        ...postsForHole(centerX - holeOffset, botY),
-        ...postsForHole(centerX + holeOffset, botY)
-      ]
+      return [...postsForHole(centerX - holeOffset, topY), ...postsForHole(centerX + holeOffset, topY), ...postsForHole(centerX, midY), ...postsForHole(centerX - holeOffset, botY), ...postsForHole(centerX + holeOffset, botY)]
     }
     case 'gravity':
       // Same center divider as 'classic' — see buildObstacles' identical recursion.

@@ -3,6 +3,7 @@ import { AccelerometerOrientationProvider, getViewRotation, useAccelerometerOrie
 import * as Haptics from 'expo-haptics'
 import { Stack } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
+import { StyleSheet } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import * as RNPaper from 'react-native-paper'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
@@ -28,7 +29,7 @@ function RotationAwareStatusBar() {
 
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <Fonts>
           <Feedback>
@@ -52,3 +53,7 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   )
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1 }
+})
