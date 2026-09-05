@@ -1,10 +1,12 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Canvas, Circle, Group, Line, Path, Rect, Skia, SkPath, vec } from '@shopify/react-native-skia'
+import { GoalDoorFlash, ScoreWedges, ZoneLine } from '@tastic/sprites/hockey'
+import { CelebrationRings, Disc, GoalPost, ObstacleRect } from '@tastic/sprites/shapes'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { cancelAnimation, Easing, interpolateColor, SharedValue, useDerivedValue, useFrameCallback, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated'
 
-import { COIN_FLIP_BASE_HALF_TURNS, COIN_FLIP_FADE_MS, COIN_FLIP_HOLD_MS, COIN_FLIP_MIN_SCALE_X, COIN_FLIP_SPIN_MS, COIN_FLIP_TRAVEL_MS, COLORS, CONTROL_SCHEME_SIGN, FACEOFF_COUNTDOWN_STEP_MS, FACEOFF_PRESS_RIPPLE_DURATION_MS, GOAL_BOARD_FLASH_DECAY_MS, GOAL_BOARD_FLASH_PEAK_OPACITY, GOAL_CREASE_FLASH_PEAK_OPACITY, GOAL_DOOR_FLASH_COLOR_DECAY_MS, GOAL_DOOR_FLASH_GLOW_PEAK_OPACITY, GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO, GOAL_DOOR_FLASH_OPACITY_DECAY_MS, GOAL_LINE_STROKE_WIDTH, GOAL_WEDGE_FLASH_FINAL_BLINKS, GOAL_WEDGE_FLASH_FINAL_MS, GOAL_WEDGE_FLASH_SEG_MS, GOAL_WEDGE_FLASH_STEP_MS, GOAL_WEDGE_SWEEP_BUDGET_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, PUCK_BURST_DURATION_MS, PUCK_BURST_MAX_DIST_RATIO, PUCK_BURST_SHARD_COUNT, PUCK_SCORE_FADE_DELAY_MS, PUCK_SCORE_FADE_MS, STRIKE_DURATION_MS } from '@/constants/game'
+import { COIN_FLIP_BASE_HALF_TURNS, COIN_FLIP_FADE_MS, COIN_FLIP_HOLD_MS, COIN_FLIP_MIN_SCALE_X, COIN_FLIP_SPIN_MS, COIN_FLIP_TRAVEL_MS, COLORS, CONTROL_SCHEME_SIGN, FACEOFF_COUNTDOWN_STEP_MS, FACEOFF_PRESS_RIPPLE_DURATION_MS, GOAL_BOARD_FLASH_DECAY_MS, GOAL_BOARD_FLASH_PEAK_OPACITY, GOAL_CREASE_FLASH_PEAK_OPACITY, GOAL_LINE_STROKE_WIDTH, GOAL_WEDGE_FLASH_FINAL_BLINKS, GOAL_WEDGE_FLASH_FINAL_MS, GOAL_WEDGE_FLASH_SEG_MS, GOAL_WEDGE_FLASH_STEP_MS, GOAL_WEDGE_SWEEP_BUDGET_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, PUCK_BURST_DURATION_MS, PUCK_BURST_MAX_DIST_RATIO, PUCK_BURST_SHARD_COUNT, PUCK_SCORE_FADE_DELAY_MS, PUCK_SCORE_FADE_MS, STRIKE_DURATION_MS } from '@/constants/game'
 import { AimIndicator, BoardLayout, ControlScheme, FaceoffState, GamePhase, Player, PuckState, ShotPreviewLength } from '@/types'
 import { faceoffZoneCenter, faceoffZoneRadius } from '@/utils/board'
 import { computeGoalWedges } from '@/utils/goalWedges'
@@ -360,8 +362,8 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   const shootSign = CONTROL_SCHEME_SIGN[controlScheme]
 
   // Kept as a shared value (not read directly as the plain `puckRadius` prop) so derived values
-  // below stay current even if the board is resized (screen rotation, etc.) — same discipline as
-  // maxRingR just below, hoisted up here so the pulse/ring derivations that follow can use it too.
+  // below (glowR's idle/aiming pulse) stay current even if the board is resized (screen rotation,
+  // etc.), hoisted up here so those derivations can use it too.
   const puckRadiusSV = useSharedValue(puckRadius)
   puckRadiusSV.value = puckRadius
 
@@ -404,94 +406,20 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Goal celebration rings ───────────────────────────────────────────────
-  // puckRadiusSV is hoisted above (shared with the glow/ring pulse) — keep maxRingR as a shared
-  // value too so derived values stay current even if the board is resized (screen rotation, etc.).
-  const maxRingR = useSharedValue(board.goalWidth * 0.85)
-  maxRingR.value = board.goalWidth * 0.85
-
-  const ring1P = useSharedValue(0)
-  const ring2P = useSharedValue(0)
-  const ring3P = useSharedValue(0)
-
-  useEffect(() => {
-    if (lastScoredGoal === null) return
-    ring1P.value = 0
-    ring2P.value = 0
-    ring3P.value = 0
-    ring1P.value = withTiming(1, { duration: 850, easing: Easing.out(Easing.cubic) })
-    ring2P.value = withDelay(160, withTiming(1, { duration: 850, easing: Easing.out(Easing.cubic) }))
-    ring3P.value = withDelay(320, withTiming(1, { duration: 850, easing: Easing.out(Easing.cubic) }))
-  }, [lastScoredGoal]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const ring1R = useDerivedValue(() => puckRadiusSV.value + ring1P.value * maxRingR.value)
-  const ring2R = useDerivedValue(() => puckRadiusSV.value + ring2P.value * maxRingR.value)
-  const ring3R = useDerivedValue(() => puckRadiusSV.value + ring3P.value * maxRingR.value)
-  const ring1O = useDerivedValue(() => (1 - ring1P.value) * 0.75)
-  const ring2O = useDerivedValue(() => (1 - ring2P.value) * 0.75)
-  const ring3O = useDerivedValue(() => (1 - ring3P.value) * 0.75)
-
+  // Now the shared @tastic/sprites/shapes CelebrationRings component (see its render further down)
+  // — it owns the ring1P/2P/3P timing/radius/opacity derivation internally (confirmed byte-for-byte
+  // identical 850/160/320ms timings, 0.75 peak opacity, 2.5/2/1.5 stroke widths), keyed off
+  // lastScoredGoal itself as its triggerKey ('top'/'bottom' fit its string|number|null type
+  // directly). celebCY/celebColor stay local — still needed as CelebrationRings' own x/y/color
+  // props, and reused below by the edge-flash/wedge-flash celebration overlays too.
   const celebCY = lastScoredGoal === 'top' ? y : y + height
   const celebColor = lastScoredGoal === 'top' ? p2Color : p1Color
 
   // ─── Goal door flash (puck hit the invisible one-way door at the goal mouth, rink-on only) ──
-  // The static goal-line <Line>s (rendered further down) deliberately stop at goalAbsLeft/
-  // goalAbsRight, leaving the gap between the posts empty — that gap is exactly where the
-  // invisible door lives (see stepPhysics' own "one-way door" comment: it lets the puck IN toward
-  // the pocket but won't let it back OUT the same way), so a bounce off it needs a flash right in
-  // that gap to read as "that's not actually open". Driven off goalDoorHitCount, mirroring
-  // useGameState's own wellEnterCount/lastWellPolarity "counter + kind" shape: a plain
-  // useEffect(..., [goalDoorHitCount]) would also fire on every mount (there's no "previous" to
-  // diff against otherwise), which would be a real bug here since the counter never resets to 0
-  // between rounds/games — a remount partway through a game (e.g. Fast Refresh) could easily see a
-  // nonzero starting value and spuriously flash. prevGoalDoorHitCountRef, seeded with the CURRENT
-  // prop value on first render rather than a hardcoded 0, is what actually prevents that — same
-  // technique as prevPressFlashRef below, just without pressFlash's own null-reset case to worry
-  // about (this counter only ever goes up).
-  //
-  // Two independently-timed progress values per side, both driving useDerivedValue outputs rather
-  // than being read directly off the SharedValue — matching every other flash/pulse in this file
-  // (ring1O, p1RippleO, goalEdgeFlashColor below, etc.). Passing a bare SharedValue straight into a
-  // Skia `opacity` prop can paint the very first frame before Reanimated's UI-thread mapper is
-  // registered, at whatever default the native side falls back to — a real bug, caught live: the
-  // door flash was visibly showing on first layout, before any real hit. Routing through
-  // useDerivedValue (which evaluates synchronously against the SharedValue's actual current value)
-  // is what this codebase already does everywhere else for exactly this reason.
-  //
-  // *ColorT (fast, GOAL_DOOR_FLASH_COLOR_DECAY_MS): drives the hot-white-at-impact -> goal's-own-
-  // color cooldown (same interpolateColor technique goalEdgeFlashColor below uses — "color
-  // interpolation is what registers as brighter, since an opacity-only overlay in the same color
-  // as what's underneath is a no-op") AND the wide soft glow halo's own opacity (a bigger,
-  // lower-alpha duplicate line behind the crisp core — same non-blur "glow via an oversized
-  // translucent shape" technique as the puck's own idle glowR/glowColor above, since this codebase
-  // doesn't use Skia blur filters anywhere). Both snap straight to 1 on impact (no fade-in tween —
-  // an impact reads as sudden) and burn off quickly, giving the bright flash its "brighter" pop.
-  // *OpacityT (slow, GOAL_DOOR_FLASH_OPACITY_DECAY_MS): drives ONLY the crisp core line's opacity,
-  // independently of the color cooldown above — per explicit user feedback ("fade a lot slower
-  // from primary or secondary to off after the flash"), the line should settle into the goal's own
-  // color quickly and then linger there, fading to fully invisible much more slowly, rather than
-  // cooling and fading out in the same breath.
-  const topGoalDoorColorT = useSharedValue(0)
-  const bottomGoalDoorColorT = useSharedValue(0)
-  const topGoalDoorOpacityT = useSharedValue(0)
-  const bottomGoalDoorOpacityT = useSharedValue(0)
-  const prevGoalDoorHitCountRef = useRef(goalDoorHitCount)
-  useEffect(() => {
-    if (goalDoorHitCount === prevGoalDoorHitCountRef.current) return
-    prevGoalDoorHitCountRef.current = goalDoorHitCount
-    const colorSv = lastGoalDoorSide === 'top' ? topGoalDoorColorT : lastGoalDoorSide === 'bottom' ? bottomGoalDoorColorT : null
-    const opacitySv = lastGoalDoorSide === 'top' ? topGoalDoorOpacityT : lastGoalDoorSide === 'bottom' ? bottomGoalDoorOpacityT : null
-    if (!colorSv || !opacitySv) return
-    colorSv.value = 1
-    colorSv.value = withTiming(0, { duration: GOAL_DOOR_FLASH_COLOR_DECAY_MS, easing: Easing.out(Easing.quad) })
-    opacitySv.value = 1
-    opacitySv.value = withTiming(0, { duration: GOAL_DOOR_FLASH_OPACITY_DECAY_MS, easing: Easing.out(Easing.quad) })
-  }, [goalDoorHitCount]) // eslint-disable-line react-hooks/exhaustive-deps
-  const topGoalDoorColor = useDerivedValue(() => interpolateColor(topGoalDoorColorT.value, [0, 1], [p2Color, '#FFFFFF']))
-  const bottomGoalDoorColor = useDerivedValue(() => interpolateColor(bottomGoalDoorColorT.value, [0, 1], [p1Color, '#FFFFFF']))
-  const topGoalDoorGlowOpacity = useDerivedValue(() => topGoalDoorColorT.value * GOAL_DOOR_FLASH_GLOW_PEAK_OPACITY)
-  const bottomGoalDoorGlowOpacity = useDerivedValue(() => bottomGoalDoorColorT.value * GOAL_DOOR_FLASH_GLOW_PEAK_OPACITY)
-  const topGoalDoorCoreOpacity = useDerivedValue(() => topGoalDoorOpacityT.value)
-  const bottomGoalDoorCoreOpacity = useDerivedValue(() => bottomGoalDoorOpacityT.value)
+  // Now the shared @tastic/sprites/hockey GoalDoorFlash component (see its render further down) —
+  // it owns the goalDoorHitCount/lastGoalDoorSide-driven two-layer glow+core animation internally
+  // (confirmed byte-for-byte identical to this app's own prior GOAL_DOOR_FLASH_* constants), so no
+  // local SharedValues/useEffect/useDerivedValue are needed here anymore.
 
   // ─── Goal celebration: full-board flash ───────────────────────────────────
   // Translucent wash across the play field, celebColor (same defender's-color identity as the
@@ -757,7 +685,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // Highlight sweep — travels through the chevrons at a rate tied to live power, without
   // restarting/jumping every time power changes mid-drag (a fixed-duration withRepeat/withTiming
   // can't smoothly re-rate; a per-frame accumulator can). chevronPowerSV is assigned directly
-  // during render, same convention as puckRadiusSV/maxRingR above.
+  // during render, same convention as puckRadiusSV above.
   const chevronPowerSV = useSharedValue(0)
   chevronPowerSV.value = chevPower
 
@@ -807,23 +735,34 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
       .detach()
   }, [goalCX, y, goalCreaseRadius])
 
+  // Raw wedge angle data, memoized on its own (not just inline computeGoalWedges() calls) so the
+  // ScoreWedges instances below — which memoize their own SkPath building keyed on this exact array
+  // reference (see that component's own comment) — don't rebuild every render.
+  const p1WedgeAngles = useMemo(() => computeGoalWedges(scoreToWin, 180), [scoreToWin])
+  const p2WedgeAngles = useMemo(() => computeGoalWedges(scoreToWin, 0), [scoreToWin])
+
+  // Still built locally as SkPaths (not just left to the shared ScoreWedges component below) because
+  // WedgeFlashOverlay's own build-up sweep (see the goal-celebration render further down) needs to
+  // stroke a highlight over these exact same paths — ScoreWedges owns its paths internally and
+  // doesn't expose them, so the base wedge-outline rendering and the flash overlay can't both be
+  // driven off a single shared computation without this local copy.
   const p1Wedges = useMemo(() => {
     const r = goalCreaseRadius
-    return computeGoalWedges(scoreToWin, 180).map(({ startAngle, sweepAngle }) =>
+    return p1WedgeAngles.map(({ startAngle, sweepAngle }) =>
       Skia.PathBuilder.Make()
         .addArc({ x: goalCX - r, y: y + height - r, width: r * 2, height: r * 2 }, startAngle + WEDGE_GAP_DEG / 2, sweepAngle - WEDGE_GAP_DEG)
         .detach()
     )
-  }, [goalCX, y, height, goalCreaseRadius, scoreToWin])
+  }, [goalCX, y, height, goalCreaseRadius, p1WedgeAngles])
 
   const p2Wedges = useMemo(() => {
     const r = goalCreaseRadius
-    return computeGoalWedges(scoreToWin, 0).map(({ startAngle, sweepAngle }) =>
+    return p2WedgeAngles.map(({ startAngle, sweepAngle }) =>
       Skia.PathBuilder.Make()
         .addArc({ x: goalCX - r, y: y - r, width: r * 2, height: r * 2 }, startAngle + WEDGE_GAP_DEG / 2, sweepAngle - WEDGE_GAP_DEG)
         .detach()
     )
-  }, [goalCX, y, goalCreaseRadius, scoreToWin])
+  }, [goalCX, y, goalCreaseRadius, p2WedgeAngles])
 
   // ─── Rink faceoff circles ─────────────────────────────────────────────────
   // Mostly decorative — colored (with a center dot, like a real rink's faceoff dot) in whichever
@@ -1130,13 +1069,12 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             <Path path={p2CreaseFill} color={p2Color} />
           </Group>
 
-          {/* Score arcs — see the useMemo above */}
-          {p1Wedges.map((path, i) => (
-            <Path key={`p1-wedge-${i}`} path={path} style='stroke' strokeWidth={2.5} strokeCap='round' color={i < scores[0] ? p1Color : lineColor} />
-          ))}
-          {p2Wedges.map((path, i) => (
-            <Path key={`p2-wedge-${i}`} path={path} style='stroke' strokeWidth={2.5} strokeCap='round' color={i < scores[1] ? p2Color : lineColor} />
-          ))}
+          {/* Score arcs — shared @tastic/sprites/hockey ScoreWedges (confirmed identical gap-shrunk
+            arc-per-wedge geometry, same WEDGE_GAP_DEG=5/2.5px stroke defaults); takes the raw wedge
+            angle data and builds/memoizes its own SkPaths, separately from the p1Wedges/p2Wedges
+            SkPath copies above (kept only for WedgeFlashOverlay's sake — see that useMemo's comment). */}
+          <ScoreWedges cx={goalCX} cy={y + height} radius={goalCreaseRadius} wedges={p1WedgeAngles} score={scores[0]} color={p1Color} unfilledColor={lineColor} />
+          <ScoreWedges cx={goalCX} cy={y} radius={goalCreaseRadius} wedges={p2WedgeAngles} score={scores[1]} color={p2Color} unfilledColor={lineColor} />
 
           {/* Rink faceoff circles — see the comment above. The ring + center dot are permanent
             chrome, present in every state exactly alike (idle, pulsing, live) — only a background
@@ -1144,7 +1082,16 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             holding, or a muted "container" tint (faceoffLiveTintOpacity — a toned-down wash of
             the player's own color, not a full-saturation fill) the instant this is the live
             target. Keeping the ring/dot constant is what makes the background read as a state
-            change rather than a different decoration replacing it. */}
+            change rather than a different decoration replacing it.
+            NOT swapped to @tastic/sprites/hockey FaceoffCircle: that component bundles its ring+dot
+            as one shape under a single external opacity control, always at full opacity internally.
+            This app's own ring and dot genuinely need INDEPENDENT opacity — the dot renders below at
+            a flat, constant full opacity always, while the ring (readyRingOpacity/isReady just below)
+            is almost never at full opacity outside the brief ready-check window (it rests at 0.3, not
+            1, the rest of the game — see p1ReadyRingOpacity/p2ReadyRingOpacity above). Forcing this
+            through FaceoffCircle would mean either the dot starts dimming with the ring (it never has)
+            or the ring is stuck permanently brighter than today. A real divergence, not a naming
+            mismatch, so this stays its own local ring+dot render, unchanged. */}
           {faceoffCenters.map((c, i) => {
             const isChosen = faceoff !== null && faceoff.zones[c.player - 1] === c.zoneIndex
             const live = faceoffLive && isChosen
@@ -1193,11 +1140,12 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             )
           })}
 
-          {/* Zone lines — see the comment above */}
-          <Group opacity={0.5}>
-            <Line p1={vec(x, p1ZoneLineY)} p2={vec(x + width, p1ZoneLineY)} color={p1Color} strokeWidth={4} />
-            <Line p1={vec(x, p2ZoneLineY)} p2={vec(x + width, p2ZoneLineY)} color={p2Color} strokeWidth={4} />
-          </Group>
+          {/* Zone lines — see the comment above. Shared @tastic/sprites/hockey ZoneLine (confirmed
+            identical zoneLineFraction=0.72 geometry, same default 4px strokeWidth/0.5 opacity — two
+            calls, one per player's own line, rather than one shared wrapper Group, but the same
+            0.5-opacity result per line either way). */}
+          <ZoneLine x={x} width={width} y={p1ZoneLineY} color={p1Color} />
+          <ZoneLine x={x} width={width} y={p2ZoneLineY} color={p2Color} />
 
           {/* Goal lines — full board width like a real rink's goal line, broken across the actual
             goal opening (matching the perimeter walls' own gap below) so the line itself marks
@@ -1223,22 +1171,12 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             board.behindGoalDepth > 0). Glow layer (wide, low-opacity, burns off fast) renders
             BEHIND the core layer (normal width, lingers much longer) so the bright burst reads as
             sitting on top of the settling colored line, not the other way around. */}
-          {board.behindGoalDepth > 0 && (
-            <>
-              <Group opacity={topGoalDoorGlowOpacity}>
-                <Line p1={vec(goalAbsLeft, y)} p2={vec(goalAbsRight, y)} color={topGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH * GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO} />
-              </Group>
-              <Group opacity={bottomGoalDoorGlowOpacity}>
-                <Line p1={vec(goalAbsLeft, y + height)} p2={vec(goalAbsRight, y + height)} color={bottomGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH * GOAL_DOOR_FLASH_GLOW_WIDTH_RATIO} />
-              </Group>
-              <Group opacity={topGoalDoorCoreOpacity}>
-                <Line p1={vec(goalAbsLeft, y)} p2={vec(goalAbsRight, y)} color={topGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-              </Group>
-              <Group opacity={bottomGoalDoorCoreOpacity}>
-                <Line p1={vec(goalAbsLeft, y + height)} p2={vec(goalAbsRight, y + height)} color={bottomGoalDoorColor} strokeWidth={GOAL_LINE_STROKE_WIDTH} />
-              </Group>
-            </>
-          )}
+          {/* Shared @tastic/sprites/hockey GoalDoorFlash — confirmed byte-for-byte identical logic
+            (same COLOR_DECAY_MS=120/OPACITY_DECAY_MS=1200/GLOW_WIDTH_RATIO=4/GLOW_PEAK_OPACITY=0.55
+            internal constants as this app's own GOAL_DOOR_FLASH_* constants, same hot-white decay
+            peak color); the two-layer glow+core animation state (topGoalDoorColorT etc. above) now
+            lives inside the component itself. */}
+          {board.behindGoalDepth > 0 && <GoalDoorFlash leftX={goalAbsLeft} rightX={goalAbsRight} topY={y} bottomY={y + height} topColor={p2Color} bottomColor={p1Color} strokeWidth={GOAL_LINE_STROKE_WIDTH} hitCount={goalDoorHitCount} hitSide={lastGoalDoorSide} />}
 
           {/* Perimeter walls — same solid, neutral wallColor style as the center divider below (not
             a themed/player color — the box itself is scaffolding, not a gameplay signal), so the
@@ -1268,9 +1206,11 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             </>
           )}
 
-          {/* Obstacles */}
+          {/* Obstacles — shared @tastic/sprites/shapes ObstacleRect (plain opaque Rect, confirmed
+            identical to this app's own prior inline render; strokeColor/opacity are LightCycles-only
+            options this app never sets). */}
           {obstacles.map((obs, i) => (
-            <Rect key={i} x={obs.x} y={obs.y} width={obs.width} height={obs.height} color={wallColor} />
+            <ObstacleRect key={i} x={obs.x} y={obs.y} width={obs.width} height={obs.height} color={wallColor} />
           ))}
 
           {/* Wall posts (rink-off only — see WallPost's own comment in types/index.ts) — small round
@@ -1282,9 +1222,12 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
 
           {/* Goal posts (built for every variant now — see buildGoalPosts in utils/board.ts) — small
             round pegs colored per-goal (see GoalPost's own comment in types/index.ts), not the
-            neutral wallColor every obstacle above gets. */}
+            neutral wallColor every obstacle above gets. Shared @tastic/sprites/shapes GoalPost
+            component (confirmed byte-identical single filled Circle) — the goal-celebration flash's
+            own re-render of these same posts (below, in an animated SharedValue<string> color) stays
+            a plain Circle, since GoalPost's color prop is a plain string only. */}
           {goalPosts.map((post, i) => (
-            <Circle key={i} cx={post.x} cy={post.y} r={post.radius} color={post.player === 1 ? p1Color : p2Color} />
+            <GoalPost key={i} x={post.x} y={post.y} radius={post.radius} color={post.player === 1 ? p1Color : p2Color} />
           ))}
 
           {/* Gravity wells */}
@@ -1352,16 +1295,16 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             // opacity={puckVisibleO} is a no-op (1) outside the goal-celebration window — see that
             // effect above — so this doesn't touch normal puck visibility at all.
             <Group opacity={puckVisibleO}>
-              {/* Puck glow */}
+              {/* Puck glow — real game-phase-driven halo (isAimingSized/idle/interceptable), stays
+                app-local; not part of the shared Disc fill+ring below (see its own comment). */}
               {(phase === 'idle' || isAimingSized || puckInterceptable) && <Circle cx={puck.x} cy={puck.y} r={glowR} color={glowColor} />}
 
               {/* Puck — always a flat black fill, in every phase and regardless of theme. The ring
                 recolors to activePlayerColor and pulses only while waiting for a shot (idle); every
-                other phase it's a plain, literal white — see idlePulseT/ringColor/ringOpacity above. */}
-              <Circle cx={puck.x} cy={puck.y} r={puckRadius} color='#000000' />
-              <Group opacity={ringOpacity}>
-                <Circle cx={puck.x} cy={puck.y} r={puckRadius} style='stroke' strokeWidth={2} color={ringColor} />
-              </Group>
+                other phase it's a plain, literal white — see idlePulseT/ringColor/ringOpacity above.
+                Shared @tastic/sprites/shapes Disc (confirmed identical fill+ring shape, same 2px
+                default ring strokeWidth). */}
+              <Disc x={puck.x} y={puck.y} radius={puckRadius} color='#000000' ringColor={ringColor} ringWidth={2} ringOpacity={ringOpacity} />
             </Group>
           )}
 
@@ -1398,17 +1341,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
                   ))}
               </Group>
 
-              <Group>
-                <Group opacity={ring1O}>
-                  <Circle cx={goalCX} cy={celebCY} r={ring1R} style='stroke' strokeWidth={2.5} color={celebColor} />
-                </Group>
-                <Group opacity={ring2O}>
-                  <Circle cx={goalCX} cy={celebCY} r={ring2R} style='stroke' strokeWidth={2} color={celebColor} />
-                </Group>
-                <Group opacity={ring3O}>
-                  <Circle cx={goalCX} cy={celebCY} r={ring3R} style='stroke' strokeWidth={1.5} color={celebColor} />
-                </Group>
-              </Group>
+              <CelebrationRings x={goalCX} y={celebCY} color={celebColor} baseRadius={puckRadius} maxExpansionRadius={board.goalWidth * 0.85} triggerKey={lastScoredGoal} />
 
               {wedgeFlashScorer !== null &&
                 wedgeFlashNewIndex >= 0 &&

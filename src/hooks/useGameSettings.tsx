@@ -14,6 +14,10 @@ interface GameSettingsContextValue {
   // (the editable, persisted "next round" defaults) — see commitRoundSettings below.
   activeRoundSettings: GameSettings | null
   commitRoundSettings: (settings: GameSettings) => void
+  // False until the AsyncStorage read below has settled (success, corrupt blob, or unavailable
+  // storage) — see splashGate.ts's 'settings' gate and _layout.tsx's GatedApp, which holds every
+  // screen reading `settings` (index.tsx does so immediately on mount) off until this flips true.
+  loaded: boolean
 }
 
 const GameSettingsContext = createContext<GameSettingsContextValue | null>(null)
@@ -30,6 +34,10 @@ interface Props {
 // Theme.tsx's own Provider pattern for the same reason.
 export function GameSettingsProvider({ children }: Props) {
   const [settings, setSettingsState] = useState<GameSettings>(DEFAULT_SETTINGS)
+  // See GameSettingsContextValue.loaded's own doc — flipped in a `.finally()` below so it's set
+  // exactly once regardless of which branch (real value, corrupt blob, or unavailable storage)
+  // resolved.
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
@@ -43,9 +51,10 @@ export function GameSettingsProvider({ children }: Props) {
         }
       })
       .catch(() => {
-        // Unavailable storage — nothing gates on this (unlike Theme.tsx/Haptic.tsx), so keeping
-        // DEFAULT_SETTINGS already in state is a complete, silent fallback.
+        // Unavailable storage — keeping DEFAULT_SETTINGS already in state is a complete, silent
+        // fallback; `loaded` still needs to flip below regardless of which branch resolved.
       })
+      .finally(() => setLoaded(true))
   }, [])
 
   const setSettings = useCallback((update: Partial<GameSettings>) => {
@@ -68,7 +77,7 @@ export function GameSettingsProvider({ children }: Props) {
   const [activeRoundSettings, setActiveRoundSettings] = useState<GameSettings | null>(null)
   const commitRoundSettings = useCallback((next: GameSettings) => setActiveRoundSettings(next), [])
 
-  return <GameSettingsContext.Provider value={{ settings, setSettings, activeRoundSettings, commitRoundSettings }}>{children}</GameSettingsContext.Provider>
+  return <GameSettingsContext.Provider value={{ settings, setSettings, activeRoundSettings, commitRoundSettings, loaded }}>{children}</GameSettingsContext.Provider>
 }
 
 export function useGameSettings() {

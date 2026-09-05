@@ -53,6 +53,9 @@ export default function HomeScreen() {
       deliberately left outside this wrapper — it renders as a centered modal overlay via Portal,
       unaffected by (and not needing) this transform. */}
       <FakeLandscapeView orientationMode={orientationMode} p1OnRight={p1OnRight} upsideDown={upsideDown} style={styles.rotatable}>
+        {/* Same top-left slot every @tastic title screen uses for this — see LightCycles' own
+        identical trophy IconButton. */}
+        <IconButton icon='trophy' iconColor={fg} size={24} style={[styles.topLeft, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={() => router.push('/achievements')} accessibilityLabel='Stats & Achievements' />
         <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
 
         <HeroTitle color={fg} p1Color={colors.primary} p2Color={colors.secondary} />
@@ -67,7 +70,7 @@ export default function HomeScreen() {
         </View>
       </FakeLandscapeView>
 
-      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} rotation={rotation} />
+      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} rotation={rotation} settings={settings} setSettings={setSettings} />
     </View>
   )
 }
@@ -92,6 +95,11 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 48,
     justifyContent: 'center'
+  },
+  topLeft: {
+    left: 8,
+    position: 'absolute',
+    top: 8
   },
   topRight: {
     position: 'absolute',

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { isSharedProfileStoreAvailable, loadSharedProfiles, Profile as BaseProfile, saveSharedProfiles } from '@tastic/profile'
-import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { AppState } from 'react-native'
 
 import { ControlScheme, Player, Profile } from '@/types'
@@ -33,6 +33,10 @@ interface ProfilesContextValue {
   // reflects Player (no profile) for that seat rather than a dangling id until next reload.
   deleteProfile: (id: string) => void
   selectProfile: (seat: Player, profileId: string | null) => void
+  // False until the initial load effect below has fully resolved — see splashGate.ts's 'profiles'
+  // gate and _layout.tsx's GatedApp, which holds every screen reading `profiles`/`lastSelected` off
+  // until this flips true.
+  loaded: boolean
 }
 
 const ProfilesContext = createContext<ProfilesContextValue | null>(null)
@@ -65,6 +69,14 @@ export function ProfilesProvider({ children }: Props) {
   // null until the initial load below resolves — distinguishes "still loading" from "loaded, and
   // genuinely empty," which matters for the one-time seed-from-local migration in that same effect.
   const [sharedBase, setSharedBase] = useState<BaseProfile[] | null>(null)
+  // False until the initial load effect below has fully resolved — both the local AsyncStorage read
+  // AND (when isSharedProfileStoreAvailable) the shared-store read, not just the first of the two —
+  // see that effect's own two setLoaded(true) call sites, one per branch.
+  const [loaded, setLoaded] = useState(false)
+  // True for the duration of an in-flight saveSharedProfiles write — see persistBase and the
+  // AppState foreground-reload effect below, which skips a refresh while this is true rather than
+  // risk reading back a pre-write snapshot and reverting the change that's still landing.
+  const pendingWriteRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -85,6 +97,7 @@ export function ProfilesProvider({ children }: Props) {
 
       if (!isSharedProfileStoreAvailable) {
         setSharedBase(stored.localBase)
+        setLoaded(true)
         return
       }
       const shared = await loadSharedProfiles(SHARED_GROUP_ID)
@@ -98,6 +111,7 @@ export function ProfilesProvider({ children }: Props) {
       const seeded = shared.length === 0 && stored.localBase.length > 0 ? stored.localBase : shared
       if (seeded !== shared) saveSharedProfiles(SHARED_GROUP_ID, seeded).catch(() => {})
       setSharedBase(seeded)
+      setLoaded(true)
     })()
     return () => {
       cancelled = true
@@ -109,12 +123,16 @@ export function ProfilesProvider({ children }: Props) {
   // foreground is what catches "created/edited a profile in the other app, then switched back to
   // this one" — otherwise sharedBase only ever reflects what this app itself last wrote, until the
   // next cold start. controlScheme lives entirely in local.extensions (untouched here), so this
-  // only ever needs to replace the base roster.
+  // only ever needs to replace the base roster. Skipped while pendingWriteRef is still true:
+  // persistBase below never awaits its own saveSharedProfiles call, so backgrounding right after a
+  // create/edit/delete and foregrounding again before that write actually lands could otherwise read
+  // back a pre-write snapshot here and silently revert it. This only ever skips one redundant
+  // refresh — the next real foreground event, by which point the write has landed, reads correctly.
   useEffect(() => {
     if (!isSharedProfileStoreAvailable) return
     let cancelled = false
     const sub = AppState.addEventListener('change', (next) => {
-      if (next !== 'active') return
+      if (next !== 'active' || pendingWriteRef.current) return
       loadSharedProfiles(SHARED_GROUP_ID).then((shared) => {
         if (!cancelled) setSharedBase(shared)
       })
@@ -133,12 +151,27 @@ export function ProfilesProvider({ children }: Props) {
   // Writes the base roster to whichever store is authoritative — the shared App Group roster when
   // available, this app's own local `localBase` fallback otherwise — and always updates the
   // in-memory sharedBase, which is the merge source for `profiles` below regardless of which
-  // backend it actually came from.
+  // backend it actually came from. `extraLocalPatch` lets a caller fold an `extensions`/
+  // `lastSelected` change into the SAME persistLocal call as the `localBase` write below, rather
+  // than issuing a second call that would spread the stale pre-update `local` closure and silently
+  // revert this one (both calls happen synchronously within one event handler, so `local` never
+  // reflects the first call's setLocal by the time the second one reads it). saveSharedProfiles
+  // itself never rejects (see @tastic/profile's own doc), so the trailing `.catch` below is just
+  // defensive; pendingWriteRef is what the AppState foreground-reload effect above actually checks.
   const persistBase = useCallback(
-    (next: BaseProfile[]) => {
+    (next: BaseProfile[], extraLocalPatch?: Partial<LocalProfilesState>) => {
       setSharedBase(next)
-      if (isSharedProfileStoreAvailable) saveSharedProfiles(SHARED_GROUP_ID, next).catch(() => {})
-      else persistLocal({ ...local, localBase: next })
+      if (isSharedProfileStoreAvailable) {
+        pendingWriteRef.current = true
+        saveSharedProfiles(SHARED_GROUP_ID, next)
+          .catch(() => {})
+          .finally(() => {
+            pendingWriteRef.current = false
+          })
+        if (extraLocalPatch) persistLocal({ ...local, ...extraLocalPatch })
+      } else {
+        persistLocal({ ...local, localBase: next, ...extraLocalPatch })
+      }
     },
     [local, persistLocal]
   )
@@ -147,11 +180,12 @@ export function ProfilesProvider({ children }: Props) {
     (input: CreateProfileInput) => {
       const now = Date.now()
       const profile: Profile = { id: generateProfileId(), name: input.name, color: input.color, tag: input.tag, controlScheme: input.controlScheme, createdAt: now, updatedAt: now }
-      persistBase([...(sharedBase ?? []), { id: profile.id, name: profile.name, color: profile.color, tag: profile.tag, createdAt: now, updatedAt: now }])
-      persistLocal({ ...local, extensions: { ...local.extensions, [profile.id]: { controlScheme: input.controlScheme } } })
+      persistBase([...(sharedBase ?? []), { id: profile.id, name: profile.name, color: profile.color, tag: profile.tag, createdAt: now, updatedAt: now }], {
+        extensions: { ...local.extensions, [profile.id]: { controlScheme: input.controlScheme } }
+      })
       return profile
     },
-    [sharedBase, local, persistBase, persistLocal]
+    [sharedBase, local, persistBase]
   )
 
   const updateProfile = useCallback(
@@ -161,12 +195,15 @@ export function ProfilesProvider({ children }: Props) {
       // can touch both (see ProfilesManager's onSave, which always patches all three base fields
       // at once) or just one (loadout.tsx's own control-scheme sync-back, patch-of-one).
       const { controlScheme, ...baseChanges } = patch
+      const controlSchemePatch: Partial<LocalProfilesState> | undefined = controlScheme !== undefined ? { extensions: { ...local.extensions, [id]: { controlScheme } } } : undefined
       if (Object.keys(baseChanges).length > 0) {
         const base = sharedBase ?? []
-        persistBase(base.map((p) => (p.id === id ? { ...p, ...baseChanges, updatedAt: Date.now() } : p)))
-      }
-      if (controlScheme !== undefined) {
-        persistLocal({ ...local, extensions: { ...local.extensions, [id]: { controlScheme } } })
+        persistBase(
+          base.map((p) => (p.id === id ? { ...p, ...baseChanges, updatedAt: Date.now() } : p)),
+          controlSchemePatch
+        )
+      } else if (controlSchemePatch) {
+        persistLocal({ ...local, ...controlSchemePatch })
       }
     },
     [sharedBase, local, persistBase, persistLocal]
@@ -174,16 +211,17 @@ export function ProfilesProvider({ children }: Props) {
 
   const deleteProfile = useCallback(
     (id: string) => {
-      persistBase((sharedBase ?? []).filter((p) => p.id !== id))
       const extensions = { ...local.extensions }
       delete extensions[id]
-      persistLocal({
-        ...local,
-        extensions,
-        lastSelected: { 1: local.lastSelected[1] === id ? null : local.lastSelected[1], 2: local.lastSelected[2] === id ? null : local.lastSelected[2] }
-      })
+      persistBase(
+        (sharedBase ?? []).filter((p) => p.id !== id),
+        {
+          extensions,
+          lastSelected: { 1: local.lastSelected[1] === id ? null : local.lastSelected[1], 2: local.lastSelected[2] === id ? null : local.lastSelected[2] }
+        }
+      )
     },
-    [sharedBase, local, persistBase, persistLocal]
+    [sharedBase, local, persistBase]
   )
 
   const selectProfile = useCallback(
@@ -195,7 +233,7 @@ export function ProfilesProvider({ children }: Props) {
 
   const profiles: Profile[] = (sharedBase ?? []).map((p) => ({ ...p, controlScheme: local.extensions[p.id]?.controlScheme ?? DEFAULT_CONTROL_SCHEME }))
 
-  return <ProfilesContext.Provider value={{ profiles, lastSelected: local.lastSelected, createProfile, updateProfile, deleteProfile, selectProfile }}>{children}</ProfilesContext.Provider>
+  return <ProfilesContext.Provider value={{ profiles, lastSelected: local.lastSelected, createProfile, updateProfile, deleteProfile, selectProfile, loaded }}>{children}</ProfilesContext.Provider>
 }
 
 export function useProfiles() {

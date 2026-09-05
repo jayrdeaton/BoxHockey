@@ -1,14 +1,13 @@
 import { defaultColors, getThirdColor, useAutoPaperTheme, useThemeSettings } from '@rific/auto-paper'
-import { IconButton } from '@rific/feedback-press'
-import { MenuOption, PressAwayOverlay, ReadyButton, usePopoverHost } from '@tastic/hud'
-import { DualZoneLayout, FakeLandscapeView, getViewRotation, rotateInsets, useAccelerometerOrientation, useDualZoneLayout } from '@tastic/split-screen'
+import { CornerActionButtons, MenuOption, PressAwayOverlay, ReadyButton, SharedActionBand, usePopoverHost } from '@tastic/hud'
+import { DualZoneLayout, FakeLandscapeView, getViewRotation, needsSharedNeutralZone, rotateInsets, useAccelerometerOrientation, useDualZoneLayout } from '@tastic/split-screen'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import Animated from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { LoadoutSharedControls } from '@/components/LoadoutSharedControls'
+import { LOADOUT_SHARED_CONTROLS_IDS, LoadoutSharedControls } from '@/components/LoadoutSharedControls'
 import { PlayerSetupPanel } from '@/components/PlayerSetupPanel'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { loadCpuColor, loadGuestColors, saveCpuColor, saveGuestColors } from '@/components/Theme'
@@ -391,14 +390,10 @@ export default function LoadoutScreen() {
   const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   const isPortrait = panelLayout.orientationMode === 'faceToFace'
-  // Face-to-face two-player is the one arrangement where the top corners (where back/settings
-  // otherwise live) sit inside P2's own rotated zone (see DualZoneLayout: P2 always renders above
-  // the shared row in face-to-face) rather than neutral ground — a real reach problem. vsCpu never
-  // had that problem (only one human on screen ever reaching for anything) and stays on the plain
-  // corner placement every other screen in the app uses, in both orientations — this isn't about
-  // orientation in general, just the one specific reach problem two-player face-to-face has.
-  // Matches LightCycles' identical showMetaInSharedBand exactly.
-  const showMetaInSharedBand = gameMode === 'twoPlayer' && isPortrait
+  // See @tastic/split-screen's needsSharedNeutralZone for the full reasoning — extracted there
+  // once this exact boolean turned up independently hand-duplicated across LightCycles/AirHockey/
+  // Snake too.
+  const showMetaInSharedBand = needsSharedNeutralZone(panelLayout.orientationMode, humanPlayers.length)
 
   // Where P2's own press-away zone lives on screen — matches panelLayout (the already-committed,
   // currently-painted layout), not the live orientationMode/p1OnRight, since it needs to agree with
@@ -461,9 +456,6 @@ export default function LoadoutScreen() {
       tipoffMode={settings.tipoffMode}
       tipoffModeOptions={TIPOFF_MODE_OPTIONS}
       onTipoffModeChange={(value) => setSettings({ tipoffMode: value })}
-      aiDifficulty={gameMode === 'vsCpu' ? settings.aiDifficulty : undefined}
-      aiDifficultyOptions={gameMode === 'vsCpu' ? AI_DIFFICULTY_OPTIONS : undefined}
-      onAiDifficultyChange={gameMode === 'vsCpu' ? (value) => setSettings({ aiDifficulty: value }) : undefined}
       // Omitted (leaving LoadoutSharedControls' own actionsRow unrendered) whenever
       // showMetaInSharedBand is about to fold randomize/reset into its own merged header row below
       // instead — otherwise both would render at once.
@@ -476,19 +468,16 @@ export default function LoadoutScreen() {
     />
   )
 
-  // Only built/rendered for showMetaInSharedBand (see its own comment above) — everywhere else
-  // back/settings stay in their usual top corners and randomize/reset stay in LoadoutSharedControls'
-  // own row above the trigger gauges.
+  // Only wrapped for showMetaInSharedBand (see its own comment above) — everywhere else back/
+  // settings stay in their usual top corners (CornerActionButtons below) and randomize/reset stay
+  // in LoadoutSharedControls' own row above the trigger gauges. SharedActionBand owns the "is the
+  // open popover actually one of mine" self-elevation check internally, given just the resolved
+  // boolean below.
+  const sharedControlsPopoverOpen = controlsHost.openId !== null && LOADOUT_SHARED_CONTROLS_IDS.includes(controlsHost.openId)
   const sharedControls = showMetaInSharedBand ? (
-    <View style={styles.sharedColumn}>
-      <View style={styles.metaActionsRow}>
-        <IconButton icon='arrow-left' iconColor={fg} size={20} onPress={safeBack} />
-        <IconButton icon='dice-multiple' iconColor={fg} size={18} onPress={handleRandomizeMatchSettings} accessibilityLabel='Randomize match settings' />
-        <IconButton icon='restore' iconColor={fg} size={18} onPress={handleResetMatchSettings} accessibilityLabel='Reset match settings to defaults' />
-        <IconButton icon='cog' iconColor={fg} size={20} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
-      </View>
+    <SharedActionBand onBack={safeBack} onSettings={() => setSettingsOpen(true)} onRandomize={handleRandomizeMatchSettings} onReset={handleResetMatchSettings} fg={fg} popoverOpen={sharedControlsPopoverOpen}>
       {sharedControlsRow}
-    </View>
+    </SharedActionBand>
   ) : (
     sharedControlsRow
   )
@@ -498,7 +487,35 @@ export default function LoadoutScreen() {
   // the same word for both would make it impossible to tell "nothing selected yet" from "Player
   // deliberately selected" at a glance).
   const p1Panel = <PlayerSetupPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[1]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={handleP1ControlSchemeChange} accentColor={themeColors.tertiary} mutedColor={fgMuted} profiles={profiles} selectedProfileId={lastSelected[1]} takenProfileId={lastSelected[2]} guestLabel='P1' onProfileSelect={handleP1ProfileSelect} onManageProfiles={() => router.push('/profiles')} />
-  const p2Panel = <PlayerSetupPanel idPrefix='p2' host={p2Host} color={p2Color} onColorChange={handleP2ColorChange} swatches={defaultColors} takenColor={p1Color} allowSwapTaken={gameMode === 'vsCpu'} isHuman={p2IsHuman} ready={p2IsHuman ? ready[2] : undefined} onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined} dark={dark} showReadyButton={showReadyButton} controlScheme={settings.controlScheme[2]} controlSchemeOptions={CONTROL_SCHEME_OPTIONS} onControlSchemeChange={handleP2ControlSchemeChange} accentColor={themeColors.tertiary} mutedColor={fgMuted} profiles={p2IsHuman ? profiles : undefined} selectedProfileId={lastSelected[2]} takenProfileId={lastSelected[1]} guestLabel='P2' onProfileSelect={p2IsHuman ? handleP2ProfileSelect : undefined} />
+  const p2Panel = (
+    <PlayerSetupPanel
+      idPrefix='p2'
+      host={p2Host}
+      color={p2Color}
+      onColorChange={handleP2ColorChange}
+      swatches={defaultColors}
+      takenColor={p1Color}
+      allowSwapTaken={gameMode === 'vsCpu'}
+      isHuman={p2IsHuman}
+      ready={p2IsHuman ? ready[2] : undefined}
+      onToggleReady={p2IsHuman ? () => setReady((r) => ({ ...r, 2: !r[2] })) : undefined}
+      dark={dark}
+      showReadyButton={showReadyButton}
+      controlScheme={settings.controlScheme[2]}
+      controlSchemeOptions={CONTROL_SCHEME_OPTIONS}
+      onControlSchemeChange={handleP2ControlSchemeChange}
+      accentColor={themeColors.tertiary}
+      mutedColor={fgMuted}
+      profiles={p2IsHuman ? profiles : undefined}
+      selectedProfileId={lastSelected[2]}
+      takenProfileId={lastSelected[1]}
+      guestLabel='P2'
+      onProfileSelect={p2IsHuman ? handleP2ProfileSelect : undefined}
+      cpuDifficulty={p2IsHuman ? undefined : settings.aiDifficulty}
+      cpuDifficultyOptions={p2IsHuman ? undefined : AI_DIFFICULTY_OPTIONS}
+      onCpuDifficultyChange={p2IsHuman ? undefined : (value: AIDifficulty) => setSettings({ aiDifficulty: value })}
+    />
+  )
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
@@ -527,17 +544,29 @@ export default function LoadoutScreen() {
         <PressAwayOverlay active={controlsHost.openId !== null} onPress={controlsHost.close} />
         {p2ZoneStyle && <PressAwayOverlay active={controlsHost.openId !== null || p2Host.openId !== null} onPress={p2Host.close} style={p2ZoneStyle} />}
 
-        {!showMetaInSharedBand && (
-          <>
-            <IconButton icon='arrow-left' iconColor={fg} size={24} style={[styles.back, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={safeBack} />
-            <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
-          </>
-        )}
+        {!showMetaInSharedBand && <CornerActionButtons onBack={safeBack} onSettings={() => setSettingsOpen(true)} fg={fg} insets={insets} />}
 
         {gameMode === 'twoPlayer' ? (
           // See @tastic/split-screen's DualZoneLayout for the portrait-vs-landscape switch and its
           // own note on why P1's zone stays unrotated while P2's rotates 180° in portrait.
-          <DualZoneLayout panelLayout={panelLayout} panelFadeStyle={panelFadeStyle} p1={p1Panel} p2={p2Panel} shared={sharedControls} />
+          <DualZoneLayout
+            panelLayout={panelLayout}
+            panelFadeStyle={panelFadeStyle}
+            p1={p1Panel}
+            p2={p2Panel}
+            shared={sharedControls}
+            // Without these, a popover escaping its own zone (e.g. one of the shared row's own
+            // dropdowns growing down into P1/P2's row below it) paints underneath whichever zone
+            // happens to be the later DOM sibling, regardless of which one actually has something
+            // open — see DualZoneLayout's own p1Elevated/p2Elevated/sharedElevated doc for the
+            // stacking-context reason a zone can't just self-elevate the way
+            // PlayerSetupPanel/LoadoutSharedControls already do internally. Same openId checks those
+            // two components use for their own internal elevation, just re-run here for the outer
+            // zone wrapper neither of them can reach on its own.
+            p1Elevated={controlsHost.openId?.startsWith('p1-') ?? false}
+            p2Elevated={p2Host.openId !== null}
+            sharedElevated={sharedControlsPopoverOpen}
+          />
         ) : (
           <View style={styles.stackedZone}>
             {sharedControls}
@@ -550,27 +579,14 @@ export default function LoadoutScreen() {
         )}
       </FakeLandscapeView>
 
-      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} rotation={rotation} />
+      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} rotation={rotation} settings={settings} setSettings={setSettings} />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  back: {
-    left: 8,
-    position: 'absolute',
-    top: 8
-  },
   container: {
     flex: 1
-  },
-  // Deliberately its own gap, not styles.rotatable's outer 32 — that spacing is tuned for the room
-  // between whole screen sections (panels, shared row, ready button), while this is one section's
-  // own internal stack: back, randomize/reset, and settings all in one row.
-  metaActionsRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 16
   },
   p2ZoneLeft: {
     bottom: 0,
@@ -624,19 +640,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 16
   },
-  // Only used for showMetaInSharedBand's wrapper (face-to-face two-player) — everywhere else
-  // `shared` is just LoadoutSharedControls directly, no wrapping column needed.
-  sharedColumn: {
-    alignItems: 'center',
-    gap: 8
-  },
   stackedZone: {
     alignItems: 'center',
     gap: 28
-  },
-  topRight: {
-    position: 'absolute',
-    right: 8,
-    top: 8
   }
 })

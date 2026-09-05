@@ -1,5 +1,6 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
+import { useToast } from '@rific/toaster'
 import { getFixedZoneRotation, useAccelerometerOrientation } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
@@ -8,17 +9,20 @@ import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Icon, Text } from 'react-native-paper'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { type EdgeInsets, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import Board from '@/components/BoardHost'
 import { SettingsDialog } from '@/components/SettingsDialog'
+import { ACHIEVEMENT_TIER_COLORS } from '@/constants/achievements'
 import { COIN_FLIP_TOTAL_MS, DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, INTERCEPT_SPEED_THRESHOLDS, MIN_SHOOT_DRAG, SHOT_PREVIEW_LENGTH_RATIOS, STRIKE_DURATION_MS } from '@/constants/game'
 import { useAIOpponent } from '@/hooks/useAIOpponent'
 import { useFaceoff } from '@/hooks/useFaceoff'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameSound } from '@/hooks/useGameSound'
 import { useGameState } from '@/hooks/useGameState'
-import { GamePhase, Player } from '@/types'
+import { useGameStats } from '@/hooks/useGameStats'
+import { useProfiles } from '@/hooks/useProfiles'
+import { BoardLayout, GamePhase, GameSettings, Player } from '@/types'
 import { computeBoardLayout, faceoffZoneCenter, faceoffZoneCenters, faceoffZoneRadius } from '@/utils/board'
 import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
 import { safeBack } from '@/utils/navigation'
@@ -52,7 +56,14 @@ export default function GameScreen() {
   // falls back to defaults for a direct/deep link to this screen, which never went through
   // /loadout to commit anything. orientationMode is a /loadout-only layout setting (see
   // types/index.ts) and never reaches here.
-  const { activeRoundSettings } = useGameSettings()
+  // settings/setSettings (the persisted "next round" defaults, not this round's own locked-in
+  // activeRoundSettings above) are only needed to hand off to MatchOverlays' own SettingsDialog
+  // below — its Lock Orientation/Edge Guard toggles edit the persisted defaults, not this
+  // already-underway round's own snapshot.
+  const { activeRoundSettings, settings, setSettings } = useGameSettings()
+  const { recordMatchOutcome } = useGameStats()
+  const { lastSelected } = useProfiles()
+  const { success: showAchievementToast } = useToast()
   const roundSettings = activeRoundSettings ?? DEFAULT_SETTINGS
   const scoreToWin = roundSettings.scoreToWin
   const layout = roundSettings.boardVariant
@@ -167,23 +178,6 @@ export default function GameScreen() {
   const playerOnColor: Record<Player, string> = { 1: themeColors.onPrimary, 2: themeColors.onSecondary }
   const winner: Player = scores[0] >= scoreToWin ? 1 : 2
   const loser: Player = winner === 1 ? 2 : 1
-
-  // Corner buttons (back/settings) fade out during an active drag or swing rather than just
-  // disappearing — FAB's own `visible` prop used to provide this for free, but the plain
-  // IconButton used here now (matching index.tsx/loadout.tsx's bare-icon style) has no
-  // equivalent, so it's rebuilt directly. Covers 'striking' and 'simulating' as well as 'aiming':
-  // not just gameplay polish — it closes the window where a CPU turn's own windup/shoot/settle
-  // timer chain (see useAIOpponent.ts) could otherwise get interrupted mid-flight by a
-  // just-opened dialog. With all three phases covered, `paused` can only ever turn true while
-  // nothing in that chain is pending. 'simulating' is also just the puck actually moving — per
-  // explicit feedback, the chips should stay out of the way for that whole stretch, not reappear
-  // the instant a shot is struck while the puck is still in motion.
-  const cornerButtonsVisible = phase !== 'aiming' && phase !== 'striking' && phase !== 'simulating'
-  const cornerButtonsOpacity = useSharedValue(1)
-  useEffect(() => {
-    cornerButtonsOpacity.value = withTiming(cornerButtonsVisible ? 1 : 0, { duration: 150 })
-  }, [cornerButtonsVisible]) // eslint-disable-line react-hooks/exhaustive-deps
-  const cornerButtonsStyle = useAnimatedStyle(() => ({ opacity: cornerButtonsOpacity.value }))
 
   // Coin flip's tap-target is live until this flips false — the invite itself (a plain pulsing
   // ring at board center) is Board.tsx's job, same visual language as 'faceoff' mode's own
@@ -327,6 +321,19 @@ export default function GameScreen() {
   useEffect(() => {
     if (prevPhaseRef.current !== 'gameOver' && phase === 'gameOver') {
       soundRef.current.playWin()
+      // Recorded here rather than in the reducer so it fires exactly once per match, on the
+      // transition — the reducer runs on every physics step and has no notion of "this is new".
+      // prevPhaseRef guards against a re-run from any other dep changing identity.
+      const matchWinner: Player = scores[0] >= scoreToWin ? 1 : 2
+      const profileIds = { 1: lastSelected[1] ?? undefined, 2: aiPlayer === null ? (lastSelected[2] ?? undefined) : undefined }
+      const result = recordMatchOutcome({ winner: matchWinner, scores: [scores[0], scores[1]] }, { gameMode: roundSettings.gameMode, aiDifficulty, boardVariant: layout, profileIds })
+      // One toast per newly-unlocked achievement, in its own tier color and icon. vsCpu has a
+      // single human perspective, so seat 1's own profile unlocks join the same toasts; in
+      // pass-and-play every unlock is still surfaced here, since neither seat owns the toast area.
+      const seatUnlocks = aiPlayer === null ? [...(result.profiles[1] ?? []), ...(result.profiles[2] ?? [])] : (result.profiles[1] ?? [])
+      ;[...result.device, ...seatUnlocks].forEach((achievement) => {
+        showAchievementToast(achievement.title, 'Achievement unlocked', undefined, { color: ACHIEVEMENT_TIER_COLORS[achievement.tier], icon: achievement.icon })
+      })
     }
     // Reset the tap-to-flip gate the instant a fresh coin-flip draw begins (game start, or a new
     // game via Game Over's "Play Again") — see coinFlipStarted/stableCoinFlipTap below. This is the
@@ -336,7 +343,7 @@ export default function GameScreen() {
       setCoinFlipStarted(false)
     }
     prevPhaseRef.current = phase
-  }, [phase])
+  }, [phase, scores, scoreToWin, aiPlayer, aiDifficulty, layout, lastSelected, roundSettings.gameMode, recordMatchOutcome, showAchievementToast])
 
   // ─── Gesture bridge ───────────────────────────────────────────────────────
   const stableAimStart = useCallback(
@@ -676,37 +683,10 @@ export default function GameScreen() {
           })}
       </View>
 
-      {/* Back + settings — vertically centered on the side edges at the dividing-wall centerline
-          (board.boardMarginTop + board.centerY in root-relative coordinates), rather than the top
-          corners used on every other screen. Unlike index.tsx/loadout.tsx, this screen is split
-          face-to-face with P2's half rotated 180°, so a top corner sits inside P2's near zone; the
-          wall centerline is the one strip of the board no puck can ever occupy, making it neutral
-          ground for both players. Deliberately centered on the board's own field (top: board.y,
-          height: board.height, both local to boardArea) rather than on root's full height the way
-          the very first version of this did — boardMarginTop/insets.bottom aren't generally equal
-          (see computeViewportSize/computeBoardLayout's own comments), so the screen's own vertical
-          midpoint and the board's own vertical midpoint are two different points; centering on
-          root would put these visibly off the wall on any device where those two insets differ.
-          Same single-constraint top+height anchor faceoffZoneTop/Bottom below already use, for the
-          same reason (see that comment) — mixing top+bottom here would still be exact today, but
-          top+height is what stays exact if this view is ever nested somewhere its own height isn't
-          implicitly root's. Filled circular chip (fg icon on a semi-opaque bg container — see
-          cornerButtonBg's own comment) rather than a bare icon, so it reads as a fixture bolted to
-          the wall instead of chrome floating over the ice; flush against the safe-area edge (no
-          extra inset padding, default IconButton margin zeroed) to sit as close to the true screen
-          edge as the notch/home-indicator allows. Both fade out together during an active drag,
-          swing, or simulating shot (cornerButtonsStyle above); pointerEvents follows the same
-          condition so a faded-out button can't still be tapped underneath the puck gesture layer. */}
-      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.backButton, { top: board.boardMarginTop + board.y, height: board.height, left: insets.left }, cornerButtonsStyle]}>
-        <IconButton icon='arrow-left' iconColor={fg} containerColor={cornerButtonBg} style={styles.chipButton} size={24} onPress={onBackPress} />
-      </Animated.View>
-
-      {/* Settings — mirrored on the opposite side edge, same centerline and chip treatment as the back button. */}
-      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.settingsButton, { top: board.boardMarginTop + board.y, height: board.height, right: insets.right }, cornerButtonsStyle]}>
-        <IconButton icon='cog' iconColor={fg} containerColor={cornerButtonBg} style={styles.chipButton} size={24} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
-      </Animated.View>
-
-      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} secondaryColor={themeColors.secondary} onSecondaryColor={themeColors.onSecondary} primaryColor={themeColors.primary} onPrimaryColor={themeColors.onPrimary} onResetGame={() => resetGame(board)} confirmBackVisible={confirmBackVisible} onQuitCancel={() => setConfirmBackVisible(false)} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} />
+      {/* Back + settings chips moved into MatchOverlays below (see its own comment) — they need the
+      same live rotation-in-place treatment as its dialogs, which only that component's isolated
+      tilt subscription provides. */}
+      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} secondaryColor={themeColors.secondary} onSecondaryColor={themeColors.onSecondary} primaryColor={themeColors.primary} onPrimaryColor={themeColors.onPrimary} onResetGame={() => resetGame(board)} confirmBackVisible={confirmBackVisible} onQuitCancel={() => setConfirmBackVisible(false)} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={onBackPress} />
     </View>
   )
 }
@@ -730,19 +710,54 @@ interface MatchOverlaysProps {
   onQuitCancel: () => void
   settingsOpen: boolean
   onSettingsDismiss: () => void
+  // Opens the settings dialog — lives here, not just onSettingsDismiss, now that the chip button
+  // that triggers it (see the chip JSX below) is rendered here too, alongside the dialog itself.
+  onSettingsOpen: () => void
+  // The persisted "next round" defaults — passed through from GameScreen's own useGameSettings()
+  // for its own SettingsDialog below (its Lock Orientation/Edge Guard toggles edit these, not the
+  // round's own locked-in activeRoundSettings).
+  settings: GameSettings
+  setSettings: (update: Partial<GameSettings>) => void
+  // GameScreen's own board layout/insets — needed here only for the back/settings chips' position
+  // (see their own comment below), not for anything this component already renders.
+  board: BoardLayout
+  insets: EdgeInsets
+  fg: string
+  cornerButtonBg: string
+  onBackPress: () => void
 }
 
 // Kept as its own sibling of the board/gesture tree above, specifically so this live tilt
 // subscription's re-renders never cascade into it — mirrors LightCycles' identically-shaped
 // MatchOverlays. The board itself is permanently 'faceToFace' (see GameScreen's own comment above)
-// and never rotates, but the dialogs this renders float on top of it and should still read
-// right-side-up however the phone is actually being held, so they rotate their own card content in
-// place via `rotation` rather than reflowing layout (unlike /index and /loadout's FakeLandscapeView)
-// — the fixed zones have to keep the exact shape TouchInputLayer's unrotated hit-zones already use.
-function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, secondaryColor, onSecondaryColor, primaryColor, onPrimaryColor, onResetGame, confirmBackVisible, onQuitCancel, settingsOpen, onSettingsDismiss }: MatchOverlaysProps) {
+// and never rotates, but the dialogs (and, below, the back/settings chips) this renders float on
+// top of it and should still read right-side-up however the phone is actually being held, so they
+// rotate their own content in place via `rotation` rather than reflowing layout (unlike /index and
+// /loadout's FakeLandscapeView) — the fixed zones have to keep the exact shape TouchInputLayer's
+// unrotated hit-zones already use.
+function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, secondaryColor, onSecondaryColor, primaryColor, onPrimaryColor, onResetGame, confirmBackVisible, onQuitCancel, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
   const liveOrientation = useAccelerometerOrientation()
   const rotation = getFixedZoneRotation(liveOrientation.orientationMode, liveOrientation.p1OnRight, liveOrientation.upsideDown)
   const cardRotationStyle = rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }
+
+  // Corner buttons (back/settings) fade out during an active drag or swing rather than just
+  // disappearing — FAB's own `visible` prop used to provide this for free, but the plain IconButton
+  // used here now (matching index.tsx/loadout.tsx's bare-icon style) has no equivalent, so it's
+  // rebuilt directly. Covers 'striking' and 'simulating' as well as 'aiming': not just gameplay
+  // polish — it closes the window where a CPU turn's own windup/shoot/settle timer chain (see
+  // useAIOpponent.ts) could otherwise get interrupted mid-flight by a just-opened dialog. With all
+  // three phases covered, `paused` can only ever turn true while nothing in that chain is pending.
+  // 'simulating' is also just the puck actually moving — per explicit feedback, the chips should
+  // stay out of the way for that whole stretch, not reappear the instant a shot is struck while the
+  // puck is still in motion. Lives here (not GameScreen, where these buttons used to render) so the
+  // fade and the `cardRotationStyle` rotation above can share the one live tilt subscription instead
+  // of needing a second one back in GameScreen.
+  const cornerButtonsVisible = phase !== 'aiming' && phase !== 'striking' && phase !== 'simulating'
+  const cornerButtonsOpacity = useSharedValue(1)
+  useEffect(() => {
+    cornerButtonsOpacity.value = withTiming(cornerButtonsVisible ? 1 : 0, { duration: 150 })
+  }, [cornerButtonsVisible]) // eslint-disable-line react-hooks/exhaustive-deps
+  const cornerButtonsStyle = useAnimatedStyle(() => ({ opacity: cornerButtonsOpacity.value }))
 
   return (
     <>
@@ -800,7 +815,42 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
         </View>
       )}
 
-      <SettingsDialog visible={settingsOpen} onDismiss={onSettingsDismiss} rotation={rotation} />
+      {/* Back + settings — vertically centered on the side edges at the dividing-wall centerline
+          (board.boardMarginTop + board.centerY in root-relative coordinates), rather than the top
+          corners used on every other screen. Unlike index.tsx/loadout.tsx, this screen is split
+          face-to-face with P2's half rotated 180°, so a top corner sits inside P2's near zone; the
+          wall centerline is the one strip of the board no puck can ever occupy, making it neutral
+          ground for both players. Deliberately centered on the board's own field (top: board.y,
+          height: board.height, both local to boardArea) rather than on root's full height the way
+          the very first version of this did — boardMarginTop/insets.bottom aren't generally equal
+          (see computeViewportSize/computeBoardLayout's own comments), so the screen's own vertical
+          midpoint and the board's own vertical midpoint are two different points; centering on
+          root would put these visibly off the wall on any device where those two insets differ.
+          Same single-constraint top+height anchor faceoffZoneTop/Bottom below already use, for the
+          same reason (see that comment) — mixing top+bottom here would still be exact today, but
+          top+height is what stays exact if this view is ever nested somewhere its own height isn't
+          implicitly root's. Filled circular chip (fg icon on a semi-opaque bg container — see
+          cornerButtonBg's own comment) rather than a bare icon, so it reads as a fixture bolted to
+          the wall instead of chrome floating over the ice; flush against the safe-area edge (no
+          extra inset padding, default IconButton margin zeroed) to sit as close to the true screen
+          edge as the notch/home-indicator allows. Both fade out together during an active drag,
+          swing, or simulating shot (cornerButtonsStyle above); pointerEvents follows the same
+          condition so a faded-out button can't still be tapped underneath the puck gesture layer.
+          Icon rotates in place via the same cardRotationStyle the dialogs above use, applied to the
+          IconButton's own style rather than the outer Animated.View — the fade/position wrapper
+          stays fixed to the true screen edge, only the glyph inside turns to stay legible however
+          the phone is actually being held (previously missing here, unlike Snake's/LightCycles' own
+          chip buttons). */}
+      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.backButton, { top: board.boardMarginTop + board.y, height: board.height, left: insets.left }, cornerButtonsStyle]}>
+        <IconButton icon='arrow-left' iconColor={fg} containerColor={cornerButtonBg} style={[styles.chipButton, cardRotationStyle]} size={24} onPress={onBackPress} />
+      </Animated.View>
+
+      {/* Settings — mirrored on the opposite side edge, same centerline and chip treatment as the back button. */}
+      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.settingsButton, { top: board.boardMarginTop + board.y, height: board.height, right: insets.right }, cornerButtonsStyle]}>
+        <IconButton icon='cog' iconColor={fg} containerColor={cornerButtonBg} style={[styles.chipButton, cardRotationStyle]} size={24} onPress={onSettingsOpen} accessibilityLabel='Settings' />
+      </Animated.View>
+
+      <SettingsDialog visible={settingsOpen} onDismiss={onSettingsDismiss} rotation={rotation} settings={settings} setSettings={setSettings} />
     </>
   )
 }

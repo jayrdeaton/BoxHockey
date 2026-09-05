@@ -1,5 +1,5 @@
 import { computeAimVector as computeSharedAimVector } from '@tastic/input'
-import { applyFriction, applyGravityWells, circleVsCircle as sharedCircleVsCircle, circleVsRect as sharedCircleVsRect, reflectOffNormal } from '@tastic/physics'
+import { applyFriction, applyGravityWells, boardCornerQuadrant, circleVsCircle as sharedCircleVsCircle, circleVsRect as sharedCircleVsRect, circleVsRoundedCorner, reflectOffNormal } from '@tastic/physics'
 
 import { FRICTION_LEVELS, GRAVITY_WELL_MIN_DIST, MAX_SPEED, STOP_THRESHOLD, WALL_RESTITUTION } from '@/constants/game'
 import { BoardLayout, GravityWell, PuckState } from '@/types'
@@ -85,45 +85,6 @@ export function circleVsCircle(cx: number, cy: number, r: number, ox: number, oy
   const nx = dist < 0.001 ? 0 : dx / dist
   const ny = dist < 0.001 ? -1 : dy / dist
   return { hit: true, nx, ny, depth: combined - dist }
-}
-
-// Concave circle-vs-arc collision for a single rounded outer corner (only active when
-// GameSettings.rink is on, see BoardLayout.cornerRadius) — unlike circleVsRect's convex "puck
-// outside a rect" check, this
-// treats the arc as a boundary the puck's center must stay WITHIN (distance <= cornerRadius -
-// puckRadius of the arc's own center), same sense as the flat wall checks it replaces near a
-// rounded corner. cx/cy is the puck's position, arcCenterX/Y is the corner's arc center (inset
-// cornerRadius from both the true outer boundary edges it joins — see boardCornerQuadrant below).
-export function circleVsRoundedCorner(cx: number, cy: number, r: number, arcCenterX: number, arcCenterY: number, cornerRadius: number): { hit: boolean; x: number; y: number; nx: number; ny: number } {
-  const dx = cx - arcCenterX
-  const dy = cy - arcCenterY
-  const dist = Math.hypot(dx, dy)
-  const maxDist = cornerRadius - r
-  if (dist <= maxDist || dist < 0.001) return { hit: false, x: cx, y: cy, nx: 0, ny: 0 }
-  const nx = dx / dist
-  const ny = dy / dist
-  return { hit: true, x: arcCenterX + nx * maxDist, y: arcCenterY + ny * maxDist, nx, ny }
-}
-
-// Which of the 4 outer corners (if any) the puck currently sits within, using the TRUE outer
-// boundary (board.y/board.height extended by board.behindGoalDepth — see computeBoardLayout) as
-// the anchor rather than the front-line board.y/board.height, so the quadrant's reach lines up
-// with where the arc itself is actually drawn. Returns null whenever GameSettings.rink is off
-// (cornerRadius === 0) and everywhere outside the 4 small corner squares when it's on — both
-// stepPhysics and computeTrajectory call this identically before their own flat wall checks, and
-// skip those flat checks for this frame whenever it returns non-null (see each call site).
-export function boardCornerQuadrant(x: number, y: number, board: BoardLayout): { arcCenterX: number; arcCenterY: number } | null {
-  if (board.cornerRadius <= 0) return null
-  const cr = board.cornerRadius
-  const outerTop = board.y - board.behindGoalDepth
-  const outerBottom = board.y + board.height + board.behindGoalDepth
-  const left = board.x
-  const right = board.x + board.width
-  if (x < left + cr && y < outerTop + cr) return { arcCenterX: left + cr, arcCenterY: outerTop + cr }
-  if (x > right - cr && y < outerTop + cr) return { arcCenterX: right - cr, arcCenterY: outerTop + cr }
-  if (x < left + cr && y > outerBottom - cr) return { arcCenterX: left + cr, arcCenterY: outerBottom - cr }
-  if (x > right - cr && y > outerBottom - cr) return { arcCenterX: right - cr, arcCenterY: outerBottom - cr }
-  return null
 }
 
 function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, friction: number): PhysicsResult {

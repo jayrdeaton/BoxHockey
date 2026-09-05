@@ -1,5 +1,5 @@
 import { SeedColor } from '@rific/auto-paper'
-import { InlineColorPicker, MenuOption, PopoverHost, ReadyButton, SectionedDropdown, usePopoverHost } from '@tastic/hud'
+import { InlineColorPicker, LabeledDropdown, LabeledDropdownOption, MenuOption, PopoverHost, ReadyButton, SectionedDropdown, usePopoverHost } from '@tastic/hud'
 import { ProfilePicker } from '@tastic/profile'
 import { useCallback } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -7,6 +7,7 @@ import { Text } from 'react-native-paper'
 
 import { MONO_FONT } from '@/constants/fonts'
 import { ControlScheme, Profile } from '@/types'
+import { AIDifficulty } from '@/utils/aiOpponent'
 
 export interface PlayerSetupPanelProps {
   // Namespaces this panel's popover id so two panels can safely share one host (see `host` below)
@@ -56,19 +57,24 @@ export interface PlayerSetupPanelProps {
   // Navigates to the profile-management screen — only ever provided for P1 (see ProfilePicker's
   // own doc for why: P2's rotated zone can't host a working text keyboard).
   onManageProfiles?: () => void
+  // CPU slots only (see isHuman) — the same "trigger sits above pickerRow" slot ProfilePicker uses
+  // for a human seat's name, just for picking who's actually driving the CPU instead of who you are.
+  // Matches LightCycles' identical per-seat cpuDifficulty slot.
+  cpuDifficulty?: AIDifficulty
+  cpuDifficultyOptions?: LabeledDropdownOption<AIDifficulty>[]
+  onCpuDifficultyChange?: (value: AIDifficulty) => void
 }
 
 // One panel per player slot in the loadout screen: a name label (tap to switch profiles or create
-// one, human slots only — falls back to the plain `label` text below when profiles isn't wired in),
-// a color picker (interactive for both human and CPU slots, matching the title screen's own past
-// behavior of letting the CPU's color be chosen too), and a Ready toggle for human slots only. Owns
-// its own popover host shared by its own color/profile picker unless a `host` is passed in to share
-// with another panel or the shared controls instead. Mirrors LightCycles' LobbyPlayerPanel.tsx for
-// its profile-switcher slot; unlike that component there's no per-panel CPU-difficulty picker to
-// swap in for the CPU slot (BoxHockey's aiDifficulty is a single shared-controls setting, not
-// per-seat), so the CPU slot (and any human slot not wired with profiles) just keeps this panel's
-// original plain-text `label`.
-export function PlayerSetupPanel({ idPrefix, host, label, color, onColorChange, swatches, takenColor, allowSwapTaken, isHuman, controlScheme, controlSchemeOptions, onControlSchemeChange, ready, onToggleReady, dark, showReadyButton = true, accentColor, mutedColor, profiles, selectedProfileId, takenProfileId, guestLabel, onProfileSelect, onManageProfiles }: PlayerSetupPanelProps) {
+// one, human slots only — falls back to a CPU-difficulty picker for a non-human slot with one wired
+// in, or the plain `label` text below when neither applies), a color picker (interactive for both
+// human and CPU slots, matching the title screen's own past behavior of letting the CPU's color be
+// chosen too), and a Ready toggle for human slots only. Owns its own popover host shared by its own
+// color/profile/difficulty picker unless a `host` is passed in to share with another panel or the
+// shared controls instead. Mirrors LightCycles' LobbyPlayerPanel.tsx for both its profile-switcher
+// slot and its per-seat CPU-difficulty slot — aiDifficulty moved here from LoadoutSharedControls'
+// own shared row, matching that cross-app convention.
+export function PlayerSetupPanel({ idPrefix, host, label, color, onColorChange, swatches, takenColor, allowSwapTaken, isHuman, controlScheme, controlSchemeOptions, onControlSchemeChange, ready, onToggleReady, dark, showReadyButton = true, accentColor, mutedColor, profiles, selectedProfileId, takenProfileId, guestLabel, onProfileSelect, onManageProfiles, cpuDifficulty, cpuDifficultyOptions, onCpuDifficultyChange }: PlayerSetupPanelProps) {
   const ownHost = usePopoverHost()
   const popover = host ?? ownHost
   // Checking *this panel's own* id, not just "is anything open on the host" — when `host` is
@@ -78,6 +84,7 @@ export function PlayerSetupPanel({ idPrefix, host, label, color, onColorChange, 
   const ownPopoverOpen = popover.openId?.startsWith(`${idPrefix}-`) ?? false
   const showControlScheme = isHuman && !!controlScheme && !!controlSchemeOptions && !!onControlSchemeChange && !!accentColor && !!mutedColor
   const showProfilePicker = isHuman && profiles !== undefined && !!onProfileSelect
+  const showCpuDifficulty = !isHuman && cpuDifficulty !== undefined && !!cpuDifficultyOptions && !!onCpuDifficultyChange
   // The color button's own tag display (see InlineColorPicker) — read live from the selected
   // profile rather than snapshotted at selection time, since there's no other editing surface for
   // it on this screen at all (see app/profiles.tsx's ProfilesManager, the only place a tag is
@@ -102,6 +109,8 @@ export function PlayerSetupPanel({ idPrefix, host, label, color, onColorChange, 
     <View style={[styles.panel, ownPopoverOpen && styles.panelOpen]}>
       {showProfilePicker ? (
         <ProfilePicker idPrefix={idPrefix} host={popover} profiles={profiles!} selectedId={selectedProfileId ?? null} takenId={takenProfileId} color={color} dark={dark} guestLabel={guestLabel ?? 'GUEST'} onSelect={handleProfileSelect} onManage={onManageProfiles} />
+      ) : showCpuDifficulty ? (
+        <LabeledDropdown id={`${idPrefix}-difficulty`} host={popover} options={cpuDifficultyOptions!} value={cpuDifficulty!} onChange={onCpuDifficultyChange!} color={color} dark={dark} />
       ) : (
         label && (
           <Text variant='labelSmall' style={{ color, fontFamily: MONO_FONT }}>

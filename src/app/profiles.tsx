@@ -1,6 +1,7 @@
 import { defaultColors, useAutoPaperTheme } from '@rific/auto-paper'
 import { IconButton } from '@rific/feedback-press'
-import { ProfilesManager } from '@tastic/profile'
+import { ProfilesManager, ProfilesManagerHandle } from '@tastic/profile'
+import { useRef } from 'react'
 import { StyleSheet, View } from 'react-native'
 
 import { useProfiles } from '@/hooks/useProfiles'
@@ -24,10 +25,19 @@ export default function ProfilesScreen() {
   const bg = dark ? '#000000' : '#FFFFFF'
   const fg = dark ? '#FFFFFF' : '#000000'
   const { profiles, createProfile, updateProfile, deleteProfile } = useProfiles()
+  // See LightCycles' identical comment in app/profiles.tsx for why this ref/handler pair is needed
+  // — expo-router web keeps a popped screen mounted-but-hidden, so ProfilesManager's own
+  // unmount-flush fallback never fires here without it.
+  const managerRef = useRef<ProfilesManagerHandle>(null)
+
+  const handleBack = () => {
+    managerRef.current?.commitPendingEdit()
+    safeBack()
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      <ProfilesManager profiles={profiles} defaultColor={defaultColors[0].value} onCreate={(patch) => createProfile({ ...patch, controlScheme: NEW_PROFILE_CONTROL_SCHEME })} onSave={(id, patch) => updateProfile(id, patch)} onDelete={(id) => deleteProfile(id)} headerLeft={<IconButton icon='arrow-left' iconColor={fg} size={24} onPress={safeBack} accessibilityLabel='Back' />} />
+      <ProfilesManager ref={managerRef} profiles={profiles} defaultColor={defaultColors[0].value} onCreate={(patch) => createProfile({ ...patch, controlScheme: NEW_PROFILE_CONTROL_SCHEME })} onSave={(id, patch) => updateProfile(id, patch)} onDelete={(id) => deleteProfile(id)} headerLeft={<IconButton icon='arrow-left' iconColor={fg} size={24} onPress={handleBack} accessibilityLabel='Back' />} />
     </View>
   )
 }

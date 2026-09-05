@@ -1,3 +1,5 @@
+import { AchievementDefinition as BaseAchievementDefinition, DayStreakState, OutcomeRecord, RoundResult, WinStreakState } from '@tastic/achievements'
+
 export type Player = 1 | 2
 
 export type GamePhase = 'idle' | 'aiming' | 'striking' | 'simulating' | 'scored' | 'gameOver' | 'faceoff' | 'coinFlip'
@@ -5,6 +7,8 @@ export type GamePhase = 'idle' | 'aiming' | 'striking' | 'simulating' | 'scored'
 export type BoardVariant = 'classic' | 'gauntlet' | 'gravity'
 
 export type GameMode = 'twoPlayer' | 'vsCpu'
+
+export type AiDifficulty = 'easy' | 'medium' | 'hard'
 
 // How a shot is aimed & released — per-PLAYER, not a single round-wide choice (two people sharing
 // one device may simply prefer a different feel — see GameSettings.controlScheme below, and
@@ -97,7 +101,7 @@ export interface GameSettings {
   gameMode: GameMode
   boardVariant: BoardVariant
   scoreToWin: number
-  aiDifficulty: 'easy' | 'medium' | 'hard'
+  aiDifficulty: AiDifficulty
   // Opt-in — see useOrientationLock. Off by default: /loadout's panel arrangement just follows
   // however the phone is actually being held, rather than being a stored preference itself.
   lockOrientation: boolean
@@ -345,4 +349,52 @@ export interface GameState {
   // to distinguish "a real new draw started" from "the same draw progressed" using object identity
   // alone.
   faceoffRound: number
+}
+
+// ─── Stats & achievements ───────────────────────────────────────────────────
+// Tier, unlock-map and definition types come from @tastic/achievements; the shapes below are
+// BoxHockey's own — what this game tracks (per-variant records, goals, shutouts, win margins)
+// is nothing another game would carry, which is exactly why that package stays generic over it.
+export type { AchievementTier, UnlockedAchievementsState } from '@tastic/achievements'
+export type AchievementDefinition = BaseAchievementDefinition<StatsState>
+
+export type MatchRecord = OutcomeRecord
+
+// The human's own record against the CPU — the human is always seat 1 in vsCpu mode (see
+// hooks/useAIOpponent.ts). A draw is impossible in BoxHockey (a match ends the instant one side
+// reaches scoreToWin), so `draws` here stays 0 forever; the field rides along because
+// @tastic/achievements' applyResult maintains the whole quadruple, and a shape that matches the
+// helper is worth more than a field saved.
+export interface VsCpuStats extends OutcomeRecord, WinStreakState {
+  byDifficulty: Record<AiDifficulty, MatchRecord>
+}
+
+// Tallied by SEAT, not by person — p1Wins/p2Wins is the whole point, so this isn't an OutcomeRecord.
+export interface TwoPlayerStats {
+  played: number
+  p1Wins: number
+  p2Wins: number
+}
+
+// Goals for/against across every match, both modes — the raw counters behind the scoring
+// achievements. Seat 1's perspective device-wide; the profile's own perspective in a profile bucket.
+export interface GoalTotals {
+  scored: number
+  conceded: number
+}
+
+export interface ProfileStats extends DayStreakState {
+  vsCpu: VsCpuStats
+  twoPlayer: TwoPlayerStats
+  variants: Record<BoardVariant, MatchRecord>
+  goals: GoalTotals
+  shutouts: number
+  bestWinMargin: number
+}
+
+export interface StatsState extends ProfileStats {
+  profiles: Record<string, ProfileStats>
+  // Set once, on the very first match ever recorded, from seat 1's perspective — powers the
+  // one-off "your first game ever was a win" achievement, which cumulative totals can't express.
+  firstGameResult: RoundResult | null
 }

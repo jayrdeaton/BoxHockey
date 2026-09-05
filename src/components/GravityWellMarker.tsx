@@ -1,4 +1,4 @@
-import { GravityWell } from '@tastic/animations/gravity'
+import { GravityWell } from '@tastic/sprites/gravity'
 import { useEffect } from 'react'
 import { SharedValue, useSharedValue } from 'react-native-reanimated'
 
@@ -9,7 +9,7 @@ import { SharedValue, useSharedValue } from 'react-native-reanimated'
 // a big field legible without it visually dominating the board.
 const GRAVITY_WELL_FIELD_FILL_OPACITY = 0.16
 
-// Bridges a plain, render-scoped value into a SharedValue that stays in sync — @tastic/animations'
+// Bridges a plain, render-scoped value into a SharedValue that stays in sync — @tastic/sprites'
 // GravityWell needs SharedValues throughout (it also serves Swirlio's continuously-dragged wells),
 // but this app's own wells are static per board layout: plain props that only change on a real
 // resize/variant-change re-render. useSharedValue's own initial-value argument is only read once,

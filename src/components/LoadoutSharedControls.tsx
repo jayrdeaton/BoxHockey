@@ -42,10 +42,6 @@ interface Props {
   tipoffMode: TipoffMode
   tipoffModeOptions: MenuOption<TipoffMode>[]
   onTipoffModeChange: (value: TipoffMode) => void
-  // Omitted entirely for two-player — there's no CPU to tune the difficulty of.
-  aiDifficulty?: 'easy' | 'medium' | 'hard'
-  aiDifficultyOptions?: MenuOption<'easy' | 'medium' | 'hard'>[]
-  onAiDifficultyChange?: (value: 'easy' | 'medium' | 'hard') => void
   // Both one-shot actions on the settings above as a whole, not a value with a "current state" to
   // show — rendered as plain IconButtons in their own row above the trigger row (not a
   // SectionedDropdown trigger itself, which would misleadingly suggest a selected value to land
@@ -63,17 +59,18 @@ interface Props {
 // Always-upright row of shared (not per-player) settings in the loadout screen. Shares P1's popover
 // host (passed in by loadout.tsx in every game mode — see the `host` prop above) rather than owning
 // an independent one, so this row participates in P1's mutual-exclusivity and press-away wiring the
-// same way P1's own panel does.
-const OWN_IDS = ['boardVariant', 'puckPhysics', 'slapShot', 'matchRules', 'shotPreviewLength', 'aiDifficulty']
+// same way P1's own panel does. Exported so loadout.tsx's own SharedActionBand wrapper can run this
+// same "is one of my own popovers open" membership check on itself — see @tastic/hud's
+// SharedActionBand for why it needs to.
+export const LOADOUT_SHARED_CONTROLS_IDS = ['boardVariant', 'puckPhysics', 'slapShot', 'matchRules', 'shotPreviewLength']
 
-export function LoadoutSharedControls({ host: sharedHost, boardVariant, boardVariantOptions, onBoardVariantChange, rink, rinkOption, onRinkChange, friction, frictionOptions, onFrictionChange, puckSize, puckSizeOptions, onPuckSizeChange, interceptSpeed, interceptSpeedOptions, onInterceptSpeedChange, scoreToWin, scoreToWinOptions, onScoreToWinChange, shotPreviewLength, shotPreviewLengthOptions, onShotPreviewLengthChange, tipoffMode, tipoffModeOptions, onTipoffModeChange, aiDifficulty, aiDifficultyOptions, onAiDifficultyChange, onRandomize, onReset, accentColor, mutedColor, onAccentColor, dark }: Props) {
+export function LoadoutSharedControls({ host: sharedHost, boardVariant, boardVariantOptions, onBoardVariantChange, rink, rinkOption, onRinkChange, friction, frictionOptions, onFrictionChange, puckSize, puckSizeOptions, onPuckSizeChange, interceptSpeed, interceptSpeedOptions, onInterceptSpeedChange, scoreToWin, scoreToWinOptions, onScoreToWinChange, shotPreviewLength, shotPreviewLengthOptions, onShotPreviewLengthChange, tipoffMode, tipoffModeOptions, onTipoffModeChange, onRandomize, onReset, accentColor, mutedColor, onAccentColor, dark }: Props) {
   const ownHost = usePopoverHost()
   const host = sharedHost ?? ownHost
   // See PlayerSetupPanel's identical ownPopoverOpen comment — elevating this row for *any* open
   // popover on a shared host (rather than only its own) would tie it with whichever sibling panel
   // actually has the open popover, letting DOM order wrongly decide which one paints on top.
-  const ownPopoverOpen = host.openId !== null && OWN_IDS.includes(host.openId)
-  const showAiDifficulty = !!(aiDifficulty && aiDifficultyOptions && onAiDifficultyChange)
+  const ownPopoverOpen = host.openId !== null && LOADOUT_SHARED_CONTROLS_IDS.includes(host.openId)
   // Same fg convention as every other component keying off a `dark` prop — full-contrast, unlike
   // mutedColor/accentColor above, which are tuned for a TriggerGauge's own unselected/selected
   // states rather than a plain icon button. Matches LightCycles' LobbySharedControls exactly.
@@ -155,8 +152,6 @@ export function LoadoutSharedControls({ host: sharedHost, boardVariant, boardVar
         />
 
         <SectionedDropdown id='shotPreviewLength' host={host} icon='ray-start-arrow' accessibilityLabel='Shot preview length' sections={[{ kind: 'single', id: 'shotPreviewLength', options: shotPreviewLengthOptions, value: shotPreviewLength, onChange: onShotPreviewLengthChange }]} accentColor={accentColor} mutedColor={mutedColor} onAccentColor={onAccentColor} dark={dark} />
-
-        {showAiDifficulty && <SectionedDropdown id='aiDifficulty' host={host} icon='chip' accessibilityLabel='CPU difficulty' sections={[{ kind: 'single', id: 'aiDifficulty', options: aiDifficultyOptions!, value: aiDifficulty!, onChange: onAiDifficultyChange! }]} accentColor={accentColor} mutedColor={mutedColor} onAccentColor={onAccentColor} dark={dark} />}
       </View>
     </View>
   )
