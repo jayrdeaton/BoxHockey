@@ -24,52 +24,54 @@ export const SHOT_PREVIEW_LENGTH_RATIOS: Record<ShotPreviewLength, number> = {
 }
 export const WALL_RESTITUTION = 0.72
 export const MAX_SPEED = 22
-// Release speed (points/sec, from react-native-gesture-handler's own velocityX/velocityY) at/above
-// which a shot maxes out at MAX_SPEED — see useGameState.ts's STRIKE case. First-pass value, not
-// yet verified by feel on a real device (same caveat as INTERCEPT_SPEED_THRESHOLDS below) — retune
-// here if shots feel like they max out too easily/too rarely.
-export const MAX_FLICK_VELOCITY = 2200
-// Release speed floor below which useGameState's shoot() cancels the aim (AIM_CANCEL) instead of
-// firing a near-motionless dud shot — the velocity-model counterpart to MIN_SHOOT_DRAG below (see
-// its own comment for why BOTH gates exist and are ANDed together, not just this one). First-pass
-// value, not yet verified by feel.
-export const MIN_FLICK_VELOCITY = 300
+// 'flick' scheme ONLY (see ControlScheme in types/index.ts) — release speed (points/sec, from
+// react-native-gesture-handler's own velocityX/velocityY) at/above which a shot maxes out at
+// MAX_SPEED. 'pull'/'push' never read this; their power comes from drag DISTANCE instead (see
+// MAX_STICK_PULLBACK_PIXELS below). Retuned down from an initial 2200 — real user feedback was that
+// a firm, deliberate flick still felt like it wasn't "translating" into real power, which pointed at
+// this ceiling being set for a harder flick than most people actually throw. Still a feel-tuned
+// value, not a hard-science one — retune here if shots max out too easily/rarely on a real device.
+export const MAX_FLICK_VELOCITY = 1300
+// 'flick' scheme ONLY. Release speed floor below which the shot is treated as too weak to count —
+// see resolveStrikeVelocity in useGameState.ts (ANDed with MIN_SHOOT_DRAG below: a flick needs BOTH
+// real distance AND real speed, so a fast-but-tiny jitter and a slow-but-long drag both cancel
+// cleanly instead of firing a limp accidental shot). Scaled down alongside MAX_FLICK_VELOCITY above
+// so the floor stays the same ~14% fraction of the ceiling.
+export const MIN_FLICK_VELOCITY = 180
 // One-pole exponential-smoothing factor applied to the live velocity reading stored on
-// AimIndicator.vx/vy — display-only (drives Board.tsx's live stick/chevron preview), since RNGH's
-// raw per-frame velocity is noisy enough to jitter the preview. The actual shot fired at release
-// reads the RAW, unsmoothed velocity straight off the gesture's onEnd event (see game.tsx's
-// panGesture and useGameState's shoot()), never this smoothed value — so smoothing can never rob
-// real power from an actual release, only stabilize what's shown while still aiming. First-pass
-// value.
+// AimIndicator.vx/vy — display-only (drives Board.tsx's live flick-preview direction/power while
+// aiming in 'flick' mode), since RNGH's raw per-frame velocity is noisy enough to jitter the
+// preview. The actual shot fired at release reads the RAW, unsmoothed velocity straight off the
+// gesture's onEnd event (see game.tsx's panGesture and useGameState's resolveStrikeVelocity), never
+// this smoothed value — so smoothing can never rob real power from an actual release, only
+// stabilize what's shown while still aiming. First-pass value.
 export const AIM_VELOCITY_SMOOTHING_ALPHA = 0.3
-// Purely visual now — how far (in pixels) Board.tsx's aiming stick is allowed to swing back behind
-// the puck, and the antenna length synthetic drags in useAIOpponent.ts target. No longer a power
-// cap: shot power comes from release VELOCITY (see MAX_FLICK_VELOCITY above), not from how far the
-// finger dragged — renamed from MAX_DRAG_PIXELS, value unchanged, when that was still power's cap.
+// 'pull'/'push' schemes: the real power cap — drag distance (finger's net displacement from
+// touch-down to release) up to this many pixels maps linearly to shot power, same mechanic either
+// scheme has always used (see resolveStrikeVelocity in useGameState.ts). Also Board.tsx's aiming
+// stick's own visual pullback cap for those two schemes, and the target distance
+// useAIOpponent.ts's synthetic drag aims for (shared by all three schemes' CPU gesture math, even
+// though 'flick' never renders a stick to show it — see ControlScheme's own doc comment). Named
+// for the stick specifically (was MAX_DRAG_PIXELS) since 'flick' has its own separate, unrelated
+// power cap (MAX_FLICK_VELOCITY above).
 export const MAX_STICK_PULLBACK_PIXELS = 160
-// Below this drag DISTANCE (finger's net displacement from where it first touched down to where it
-// released), useGameState's shoot() cancels the aim (AIM_CANCEL) instead of firing a shot — the
-// intended way to back out mid-aim and reset without losing your turn (see AIM_CANCEL's own comment
-// in useGameState.ts: it doesn't touch currentPlayer). Bumped from the original 12 per user feedback
-// ("really hard to release a shot so you can set up again") — 12px was tight enough to be an
-// unreliable target in practice, undersized even against Board.tsx's own phantom-puck cancel-zone
-// indicator (drawn at radius puckRadius, which comfortably exceeds 12px at every puck size), so the
-// visual affordance implied a bigger safe-return zone than the actual threshold honored.
-//
-// Now one of TWO independent gates shoot() ANDs together (alongside MIN_FLICK_VELOCITY above) — kept
-// at its existing, user-tuned value rather than shrunk to "make room" for short-but-fast flicks,
-// since a real flick rarely stays under 28px of travel anyway. This one specifically protects the
-// "snap back near your start point to abort" cancel affordance: shot DIRECTION is now purely
-// velocity-derived, so without a distance floor a fast abort-swipe back toward the start point could
-// read as a real, unintended shot. MIN_FLICK_VELOCITY protects the opposite failure mode — dragged
-// out far, released gently, producing a limp accidental shot instead of a clean cancel.
+// Universal across all three ControlSchemes — below this drag DISTANCE (finger's net displacement
+// from where it first touched down to where it released), the shot is treated as too weak to count
+// (see resolveStrikeVelocity in useGameState.ts). For 'pull'/'push' this is their ONLY gate; for
+// 'flick' it's ANDed with MIN_FLICK_VELOCITY above (see that constant's own comment for why both
+// exist for that scheme). Bumped from the original 12 per user feedback ("really hard to release a
+// shot so you can set up again") — 12px was tight enough to be an unreliable target in practice,
+// undersized even against Board.tsx's own phantom-puck cancel-zone indicator (drawn at radius
+// puckRadius, which comfortably exceeds 12px at every puck size), so the visual affordance implied
+// a bigger safe-return zone than the actual threshold honored.
 export const MIN_SHOOT_DRAG = 28
 
-// Sign applied to a shot's raw drag vector before computeAimVector — see ControlScheme in
-// types/index.ts. 'pull' fires opposite the drag (slingshot), 'push' fires along it (swipe/flick).
-// The single place this is read is useGameState.ts's STRIKE case (and useAIOpponent.ts, which has
-// to cancel it back out so a CPU seat's own intended shot direction stays scheme-independent).
-export const CONTROL_SCHEME_SIGN: Record<ControlScheme, 1 | -1> = { pull: -1, push: 1 }
+// Sign applied to a shot's raw drag/flick vector before computeAimVector — see ControlScheme in
+// types/index.ts. 'pull' fires opposite the drag (slingshot); 'push' and 'flick' both fire along it
+// (same sign, different power model — see resolveStrikeVelocity in useGameState.ts for which). The
+// single place this is read is useGameState.ts's STRIKE case (and useAIOpponent.ts, which has to
+// cancel it back out so a CPU seat's own intended shot direction stays scheme-independent).
+export const CONTROL_SCHEME_SIGN: Record<ControlScheme, 1 | -1> = { pull: -1, push: 1, flick: 1 }
 
 // Per-round puck radius, as a fraction of board.width — see PuckSizeLevel in types/index.ts.
 // 'medium' is unchanged from the single fixed PUCK_RADIUS_RATIO constant this replaces, so a

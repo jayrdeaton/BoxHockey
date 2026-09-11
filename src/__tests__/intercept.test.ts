@@ -5,7 +5,7 @@
 // calls — no React, no timers, no physics simulation loop (each test seeds a puck velocity/phase
 // directly rather than simulating a shot down to that state).
 
-import { FRICTION_LEVELS, MAX_FLICK_VELOCITY, MAX_SPEED } from '@/constants/game'
+import { FRICTION_LEVELS, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS } from '@/constants/game'
 import { makeReducer } from '@/hooks/useGameState'
 import { BoardLayout, ControlScheme, GameState, Player } from '@/types'
 
@@ -107,8 +107,8 @@ describe('STRIKE on an in-progress interceptAim', () => {
       puck: { x: 100, y: 100, vx: 0.5, vy: 0 },
       interceptAim: { startX: 100, startY: 100, currentX: 140, currentY: 100, vx: 0, vy: 0 }
     })
-    const pullResult = makeReducer(999, 'coinFlip', FRICTION_LEVELS.medium, { 1: 'pull', 2: 'pull' }, INTERCEPT_THRESHOLD)(state, { type: 'STRIKE', vx: 40, vy: 0 })
-    const pushResult = reducer(state, { type: 'STRIKE', vx: 40, vy: 0 })
+    const pullResult = makeReducer(999, 'coinFlip', FRICTION_LEVELS.medium, { 1: 'pull', 2: 'pull' }, INTERCEPT_THRESHOLD)(state, { type: 'STRIKE', dx: 40, dy: 0, vx: 0, vy: 0 })
+    const pushResult = reducer(state, { type: 'STRIKE', dx: 40, dy: 0, vx: 0, vy: 0 })
     // 'pull' fires opposite the drag, 'push' fires along it — same magnitude, opposite sign.
     expect(pushResult.pendingShot!.vx).toBeCloseTo(-pullResult.pendingShot!.vx, 10)
   })
@@ -120,7 +120,7 @@ describe('STRIKE on an in-progress interceptAim', () => {
       puck: { x: 100, y: 100, vx: 0.5, vy: 0 },
       interceptAim: { startX: 100, startY: 100, currentX: 140, currentY: 100, vx: 0, vy: 0 }
     })
-    const next = reducer(state, { type: 'STRIKE', vx: 40, vy: 0 })
+    const next = reducer(state, { type: 'STRIKE', dx: 40, dy: 0, vx: 0, vy: 0 })
     expect(next.phase).toBe('striking')
     expect(next.currentPlayer).toBe(2)
     expect(next.interceptAim).toBeNull()
@@ -167,7 +167,7 @@ describe('PHYSICS_STEP with an unstruck interceptAim in progress', () => {
     // they would against any other in-progress intercept.
     const updated = reducer(next, { type: 'AIM_UPDATE', x: 130, y: 100, vx: 100, vy: 0 })
     expect(updated.interceptAim!.currentX).toBe(130)
-    const struck = reducer(updated, { type: 'STRIKE', vx: 30, vy: 0 })
+    const struck = reducer(updated, { type: 'STRIKE', dx: 30, dy: 0, vx: 0, vy: 0 })
     expect(struck.phase).toBe('striking')
     expect(struck.currentPlayer).toBe(2) // flips only now, at STRIKE
     expect(struck.interceptAim).toBeNull()
@@ -227,7 +227,7 @@ describe('end-to-end: faceoff knock intercepted mid-coast by the loser', () => {
     expect(intercepted.interceptAim).not.toBeNull()
     expect(intercepted.currentPlayer).toBe(1) // still not flipped — deferred to STRIKE
 
-    const struck = reducer(intercepted, { type: 'STRIKE', vx: 40, vy: 0 })
+    const struck = reducer(intercepted, { type: 'STRIKE', dx: 40, dy: 0, vx: 0, vy: 0 })
     expect(struck.currentPlayer).toBe(2)
     expect(struck.phase).toBe('striking')
 
@@ -245,7 +245,7 @@ describe("APPLY_STRIKE combines the puck's own pre-strike velocity into the shot
       puck: { x: 100, y: 100, vx: 0.5, vy: 0.2 },
       interceptAim: { startX: 100, startY: 100, currentX: 140, currentY: 100, vx: 0, vy: 0 }
     })
-    const struck = reducer(state, { type: 'STRIKE', vx: 40, vy: 0 })
+    const struck = reducer(state, { type: 'STRIKE', dx: 40, dy: 0, vx: 0, vy: 0 })
     const applied = reducer(struck, { type: 'APPLY_STRIKE' })
     // Well under MAX_SPEED here, so no clamping kicks in — the result should be an exact vector sum.
     expect(applied.puck.vx).toBeCloseTo(state.puck.vx + struck.pendingShot!.vx, 10)
@@ -269,10 +269,10 @@ describe("APPLY_STRIKE combines the puck's own pre-strike velocity into the shot
       puck: { x: 100, y: 100, vx: MAX_SPEED * 0.5, vy: 0 },
       interceptAim: { startX: 100, startY: 100, currentX: 100, currentY: 100, vx: 0, vy: 0 }
     })
-    // 'pull' fires opposite the drag/flick — flick left (negative vx) to fire right (positive vx),
-    // same direction as the puck's own incoming velocity. Full-power magnitude (MAX_FLICK_VELOCITY)
-    // so the resulting shot itself maxes out, same as the old dx: -MAX_DRAG_PIXELS did.
-    const struck = reducer(state, { type: 'STRIKE', vx: -MAX_FLICK_VELOCITY, vy: 0 })
+    // 'pull' fires opposite the drag — drag left (negative dx) to fire right (positive vx), same
+    // direction as the puck's own incoming velocity. Full-power magnitude (MAX_STICK_PULLBACK_PIXELS)
+    // so the resulting shot itself maxes out.
+    const struck = reducer(state, { type: 'STRIKE', dx: -MAX_STICK_PULLBACK_PIXELS, dy: 0, vx: 0, vy: 0 })
     const applied = reducer(struck, { type: 'APPLY_STRIKE' })
     const rawSum = state.puck.vx + struck.pendingShot!.vx
     expect(rawSum).toBeGreaterThan(MAX_SPEED) // sanity-check the test actually exercises the clamp

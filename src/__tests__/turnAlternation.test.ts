@@ -331,7 +331,7 @@ function driveFuzzRun(tipoffMode: TipoffMode, totalShots: number, seed: number):
       const { dx, dy, vx, vy } = randomDragForPlayer(rng, shooter, state.puck.x, state.puck.y)
       state = reducer(state, { type: 'AIM_UPDATE', x: state.puck.x + dx, y: state.puck.y + dy, vx, vy })
       recentLog.push({ type: 'AIM_UPDATE' })
-      state = reducer(state, { type: 'STRIKE', vx, vy })
+      state = reducer(state, { type: 'STRIKE', dx, dy, vx, vy })
       recentLog.push({ type: 'STRIKE', vx, vy, shooter })
       state = reducer(state, { type: 'APPLY_STRIKE' })
       recentLog.push({ type: 'APPLY_STRIKE' })

@@ -1,6 +1,7 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton } from '@rific/feedback-press'
-import { FakeLandscapeView, getViewRotation, rotateInsets, useAccelerometerOrientation } from '@tastic/split-screen'
+import { rotateInsets, useRotation } from '@tastic/core'
+import { FakeLandscapeView } from '@tastic/split-screen'
 import { router } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -13,13 +14,13 @@ import { GameMode } from '@/types'
 
 export default function HomeScreen() {
   const { settings, setSettings } = useGameSettings()
-  // orientationMode just follows the device's current physical tilt (see
-  // useAccelerometerOrientation), so the title screen rotates along with everywhere else as soon as
-  // the phone is turned — Lock Orientation (see SettingsDialog) is the opt-in for pinning it.
+  // Follows the device's current physical tilt (see @tastic/core's useOrientationState, which
+  // useRotation reads internally), so the title screen rotates along with everywhere else as soon
+  // as the phone is turned — Lock Orientation (see SettingsDialog) is the opt-in for pinning it.
   // app.json is portrait-locked at the OS level now (no more real OS rotation to rely on) — see
   // FakeLandscapeView below, which fakes the rest entirely in JS from this hook's live
   // accelerometer reading.
-  const { orientationMode, p1OnRight, upsideDown } = useAccelerometerOrientation(settings.lockOrientation)
+  const rotation = useRotation(settings.lockOrientation)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { colors, dark } = useAutoPaperTheme()
@@ -29,7 +30,6 @@ export default function HomeScreen() {
   // whichever edge they actually correspond to once visually rotated, using the same rotation
   // FakeLandscapeView itself renders with, so `top`/`right` below always mean the screen's real,
   // visual edges regardless of how the phone is being held.
-  const rotation = getViewRotation(orientationMode, p1OnRight, upsideDown)
   const insets = rotateInsets(useSafeAreaInsets(), rotation)
 
   // High-contrast retro look: literal black/white, flipped by appearance, rather than auto-paper's
@@ -52,7 +52,7 @@ export default function HomeScreen() {
       portrait-locked at the OS level (no more real OS rotation to rely on). SettingsDialog is
       deliberately left outside this wrapper — it renders as a centered modal overlay via Portal,
       unaffected by (and not needing) this transform. */}
-      <FakeLandscapeView orientationMode={orientationMode} p1OnRight={p1OnRight} upsideDown={upsideDown} style={styles.rotatable}>
+      <FakeLandscapeView locked={settings.lockOrientation} style={styles.rotatable}>
         {/* Same top-left slot every @tastic title screen uses for this — see LightCycles' own
         identical trophy IconButton. */}
         <IconButton icon='trophy' iconColor={fg} size={24} style={[styles.topLeft, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={() => router.push('/achievements')} accessibilityLabel='Stats & Achievements' />

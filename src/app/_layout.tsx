@@ -1,7 +1,8 @@
 import { Toaster, ToastProvider } from '@rific/toaster'
-import { AccelerometerOrientationProvider, getViewRotation, useAccelerometerOrientation } from '@tastic/split-screen'
+import { getViewRotation, OrientationProvider, useOrientationState } from '@tastic/core'
 import * as Haptics from 'expo-haptics'
 import { Stack } from 'expo-router'
+import { DeviceMotion } from 'expo-sensors'
 import { StatusBar } from 'expo-status-bar'
 import { ReactNode } from 'react'
 import { StyleSheet } from 'react-native'
@@ -25,7 +26,7 @@ import { SplashGate } from '@/utils/splashGate'
 // OS status bar reads wrong sitting over rotated content. /game hides it unconditionally regardless
 // (see its own <StatusBar hidden />), so this only actually matters on /index and /loadout.
 function RotationAwareStatusBar() {
-  const { orientationMode, p1OnRight, upsideDown } = useAccelerometerOrientation()
+  const { orientationMode, p1OnRight, upsideDown } = useOrientationState()
   const rotation = getViewRotation(orientationMode, p1OnRight, upsideDown)
   return <StatusBar hidden={rotation !== 0} />
 }
@@ -66,14 +67,22 @@ export default function RootLayout() {
                 <ProfilesProvider>
                   <GameStatsProvider>
                     <GatedApp>
-                      <AccelerometerOrientationProvider>
+                      {/* @tastic/core never imports expo-sensors itself — a real top-level import
+                      there would force every consumer of the package (even one with zero interest
+                      in tilt tracking) to have expo-sensors installed, or Metro fails to resolve
+                      it. This app wants live tilt tracking, so it does its own real import and
+                      hands the resolved module in — same injection convention as @rific/auto-paper's
+                      <Provider reanimated={...}>/<Provider expoBlur={...}>. Omitting this prop
+                      degrades gracefully (orientation just never resolves past its default guess,
+                      logged once in dev), it doesn't throw. */}
+                      <OrientationProvider deviceMotion={DeviceMotion}>
                         <ToastProvider haptics={Haptics} paper={RNPaper}>
                           <Stack screenOptions={{ headerShown: false, gestureEnabled: false }} />
                           <Toaster />
                           <UpdateDialog />
                           <RotationAwareStatusBar />
                         </ToastProvider>
-                      </AccelerometerOrientationProvider>
+                      </OrientationProvider>
                     </GatedApp>
                   </GameStatsProvider>
                 </ProfilesProvider>

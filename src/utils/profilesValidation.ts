@@ -49,7 +49,7 @@ interface LegacyProfilesState {
 }
 
 function isValidControlScheme(value: unknown): value is ControlScheme {
-  return value === 'pull' || value === 'push'
+  return value === 'pull' || value === 'push' || value === 'flick'
 }
 
 // Full, merged shape — used only to validate a LEGACY stored blob (see migrateLegacyProfilesState)

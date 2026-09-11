@@ -1,11 +1,11 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
-import { getFixedZoneRotation, useAccelerometerOrientation } from '@tastic/split-screen'
+import { useOrientationState, useRotation, useSettledWindowDimensions } from '@tastic/core'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native'
+import { Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Icon, Text } from 'react-native-paper'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
@@ -14,7 +14,7 @@ import { type EdgeInsets, useSafeAreaInsets } from 'react-native-safe-area-conte
 import Board from '@/components/BoardHost'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { ACHIEVEMENT_TIER_COLORS } from '@/constants/achievements'
-import { COIN_FLIP_TOTAL_MS, DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, INTERCEPT_SPEED_THRESHOLDS, MIN_SHOOT_DRAG, SHOT_PREVIEW_LENGTH_RATIOS, STRIKE_DURATION_MS } from '@/constants/game'
+import { COIN_FLIP_TOTAL_MS, DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, GOAL_LINE_STROKE_WIDTH, INTERCEPT_SPEED_THRESHOLDS, MIN_SHOOT_DRAG, SHOT_PREVIEW_LENGTH_RATIOS, STRIKE_DURATION_MS } from '@/constants/game'
 import { useAIOpponent } from '@/hooks/useAIOpponent'
 import { useFaceoff } from '@/hooks/useFaceoff'
 import { useGameSettings } from '@/hooks/useGameSettings'
@@ -77,14 +77,78 @@ export default function GameScreen() {
   const aiPlayer: Player | null = roundSettings.gameMode === 'vsCpu' ? 2 : null
   const aiDifficulty = roundSettings.aiDifficulty
 
-  const { width, height } = useWindowDimensions()
+  const { width, height } = useSettledWindowDimensions()
   const insets = useSafeAreaInsets()
 
   const rink = roundSettings.rink
-  const board = useMemo(() => computeBoardLayout(width, height, insets, layout, puckSize, rink), [width, height, insets, layout, puckSize, rink])
+
+  // Whole-board 180° flip for a physically upside-down faceToFace hold — deliberately narrower than
+  // MatchOverlays' own `rotation` (which also covers sideBySide's ±90°, still handled there):
+  // rotating the board a quarter turn would need a genuinely different feature (swapped
+  // width/height, a new goal axis, the works — see AirHockey's own goalAxis for how big that is).
+  // A half turn is the one case cheap enough to support here, since it doesn't change the board's
+  // own aspect ratio at all — it only needs every raw touch coordinate this screen reads converted
+  // back to the board's own canonical (never-rotated) space before it reaches useGameState, since
+  // that reducer, Board.tsx's own drawing, and faceoffZoneCenters all still assume the board's
+  // original, un-rotated frame. Read directly here (not just in MatchOverlays) specifically so the
+  // touch handlers below can close over it — the tradeoff called out in MatchOverlays' own comment
+  // (this board/gesture tree now re-renders on a live tilt change too) is accepted deliberately for
+  // this feature; tilt changes are debounced at the source (see useOrientationState) so this is an
+  // occasional re-render, not a per-frame one.
+  const liveOrientation = useOrientationState()
+  const isUpsideDown = liveOrientation.orientationMode === 'faceToFace' && liveOrientation.upsideDown
+
+  // computeBoardLayout's own insets.top/bottom handling is asymmetric BY DESIGN for the normal,
+  // never-rotated case: the top inset is reserved externally (boardArea's own marginTop below,
+  // outside anything that ever rotates) while the bottom inset is reserved internally (fieldHeight
+  // shrinks, leaving empty canvas at the container's own bottom edge, wherever that physically is).
+  // That asymmetry is exactly what breaks under a 180° flip: rotating boardAreaTouchable spins its
+  // OWN internal bottom-gap up to become its own top, but the external marginTop reservation is
+  // OUTSIDE that rotation and never moves — so post-rotation, the two reservations stack at the
+  // physical top (leaving none at the bottom) instead of one relocating to each end. There's no
+  // value of boardMarginTop that fixes this while keeping one end external/one end internal, since
+  // rotation can only ever flip the internal one. The fix is to stop asking computeBoardLayout to
+  // reserve either end at all when upside-down (feed it a shrunk container + zeroed top/bottom
+  // insets, so it fills edge-to-edge with no internal gap to mis-flip) and instead reserve BOTH
+  // insets externally and symmetrically, via marginTop AND marginBottom on boardArea below — neither
+  // of which ever rotates, so both stay pinned to their own real physical edge regardless.
+  // One accepted narrower side effect: GameSettings.rink's own "pocket reaches all the way to the
+  // screen edge" enhancement (see computeBoardLayout's behindGoalDepth/topBorrow/bottomBorrow) reads
+  // its own reach from these SAME insets — zeroing them for this case also disables that reach,
+  // falling back to the plain physics-minimum pocket depth instead. Narrow and cosmetic (rink AND
+  // upside-down AND rink's own pocket-reach specifically), not a correctness bug like the one this
+  // whole comment is about, so left as a known tradeoff rather than solved here too.
+  // Memoized in its own right (not just inlined into the board useMemo below) since a fresh object
+  // literal on every render would otherwise bust that memo every single time regardless of whether
+  // any of its actual inputs changed.
+  const boardInsets: EdgeInsets = useMemo(() => (isUpsideDown ? { top: 0, right: insets.right, bottom: 0, left: insets.left } : insets), [isUpsideDown, insets])
+  // A goal line's own stroke is centered ON board.y/board.y+board.height, so it needs half its own
+  // width of clear canvas beyond whichever edge it sits on to render un-clipped. Board.tsx's own
+  // topBleed already reserves (more than) this much above board.y=0, unconditionally, for a
+  // different reason (room for the strike-swing animation) — nothing has ever reserved the matching
+  // half-stroke below board.y+board.height, because it never needed it: outside this upside-down
+  // case, fieldHeight is always already smaller than the real container by insets.bottom (see the
+  // big comment above), which was always by itself far more slack than half a 4px stroke needs. This
+  // case is the one place that natural slack is gone (fieldHeight now fills the container exactly),
+  // so it's the one place a deliberate bottomBleed has to stand in for it.
+  const bottomBleed = isUpsideDown ? GOAL_LINE_STROKE_WIDTH / 2 : 0
+  const boardScreenHeight = isUpsideDown ? height - insets.top - insets.bottom - bottomBleed : height
+  const board = useMemo(() => computeBoardLayout(width, boardScreenHeight, boardInsets, layout, puckSize, rink), [width, boardScreenHeight, boardInsets, layout, puckSize, rink])
   // Resolved to pixels here (not inside Board.tsx) for the same reason `friction` is resolved
   // above — the enum→number mapping is a settings concern, board.width isn't known until here.
   const shotPreviewLengthPx = board.width * SHOT_PREVIEW_LENGTH_RATIOS[roundSettings.shotPreviewLength]
+
+  // The REAL, physical Y-offset of boardArea's own origin (see the big comment above) — NOT simply
+  // board.boardMarginTop once upside-down, since that now reflects the zeroed boardInsets.top (0),
+  // not the real inset boardArea's own marginTop below actually has to reserve.
+  const boardAreaMarginTop = isUpsideDown ? insets.top : board.boardMarginTop
+  // The real on-screen size of boardAreaTouchable below — what e.x/e.y and
+  // e.absoluteY - boardAreaMarginTop are actually measured against, and so the correct extent to
+  // reflect a raw coordinate around. Normal case fills to the screen's own bottom edge (height -
+  // boardAreaMarginTop, insets.bottom handled internally instead — see the big comment above);
+  // upside-down instead stops boardAreaHeight/insets.bottom short of it, since boardArea now also
+  // carries an explicit marginBottom reserving that same space externally.
+  const boardAreaHeight = isUpsideDown ? height - insets.top - insets.bottom : height - boardAreaMarginTop
 
   // Settings/quit-confirm dialogs pause gameplay while open — declared up here, ahead of
   // useGameState/useAIOpponent/useFaceoff below, so `paused` exists in time to thread into all
@@ -346,15 +410,24 @@ export default function GameScreen() {
   }, [phase, scores, scoreToWin, aiPlayer, aiDifficulty, layout, lastSelected, roundSettings.gameMode, recordMatchOutcome, showAchievementToast])
 
   // ─── Gesture bridge ───────────────────────────────────────────────────────
+  // isUpsideDown-conditional reflection lives in these stable JS callbacks, not in the Gesture.*
+  // worklets that feed them (panGesture below still passes raw e.x/e.y/e.translationX/Y straight
+  // through, unchanged) — keeping the worklet definitions untouched avoids adding
+  // isUpsideDown/width/boardAreaHeight to their own dependency arrays, where any risk of a
+  // less-than-stable reference would recreate (and re-mount) the native gesture recognizer itself.
+  // A point (absolute position) reflects around the real container extent; see stableAimUpdate/
+  // stableShoot below for why a vector (translation/velocity) instead just negates.
+  const toCanonicalPoint = (x: number, y: number): [number, number] => (isUpsideDown ? [width - x, boardAreaHeight - y] : [x, y])
   const stableAimStart = useCallback(
     (x: number, y: number) => {
-      const started = tryAimStart(x, y)
+      const [px, py] = toCanonicalPoint(x, y)
+      const started = tryAimStart(px, py)
       if (started) {
         vibrationRef.current.short()
         soundRef.current.playSelect()
       }
     },
-    [tryAimStart]
+    [tryAimStart, isUpsideDown, width, boardAreaHeight] // eslint-disable-line react-hooks/exhaustive-deps -- toCanonicalPoint is derived from these same primitives every render, not an independent dep
   )
 
   // While intercepting (phase === 'simulating'), skip the AIM_UPDATE dispatch path entirely and
@@ -369,19 +442,27 @@ export default function GameScreen() {
   // is off then, so there's nothing for it to compete with.
   const stableAimUpdate = useCallback(
     (x: number, y: number, vx: number, vy: number) => {
+      const [px, py] = toCanonicalPoint(x, y)
+      // vx/vy is a velocity VECTOR, not a position — reflecting it around the container extent the
+      // way px/py above does would be wrong (a vector has no origin to reflect around); rotating a
+      // vector 180° instead just negates both components, so upside-down only flips its sign.
+      const [pvx, pvy] = isUpsideDown ? [-vx, -vy] : [vx, vy]
       if (phase === 'simulating') {
-        setInterceptTouch(x, y, vx, vy)
+        setInterceptTouch(px, py, pvx, pvy)
         return
       }
-      aimUpdate(x, y, vx, vy)
+      aimUpdate(px, py, pvx, pvy)
     },
-    [aimUpdate, setInterceptTouch, phase]
+    [aimUpdate, setInterceptTouch, phase, isUpsideDown, width, boardAreaHeight] // eslint-disable-line react-hooks/exhaustive-deps -- toCanonicalPoint derives from these same primitives every render
   )
   const stableShoot = useCallback(
     (tx: number, ty: number, vx: number, vy: number) => {
-      shoot(tx, ty, vx, vy)
+      // tx/ty here is e.translationX/Y (a displacement VECTOR from the drag's own start point, not
+      // an absolute position) — same negate-not-reflect treatment as vx/vy, see stableAimUpdate above.
+      const [ptx, pty, pvx, pvy] = isUpsideDown ? [-tx, -ty, -vx, -vy] : [tx, ty, vx, vy]
+      shoot(ptx, pty, pvx, pvy)
     },
-    [shoot]
+    [shoot, isUpsideDown]
   )
   const stableAimCancel = useCallback(() => {
     aimCancel()
@@ -459,12 +540,19 @@ export default function GameScreen() {
         stableFaceoffReady(player)
         return
       }
+      // (x, y) arrives in real, physical boardArea-local space; faceoffZoneCenters returns the
+      // board's own canonical (never-rotated) circle positions, so reflect back to that space first
+      // when upside-down — same treatment as stableAimStart/Update's own px/py above, and load-
+      // bearing together with the faceoffZoneBottom/Top swap in the JSX below (that swap gets the
+      // right PLAYER for whichever physical zone was actually touched; this reflection is what then
+      // makes that player's own true zone positions hit-test correctly against it).
+      const [px, py] = toCanonicalPoint(x, y)
       const r = faceoffZoneRadius(board)
-      const zoneIndex = faceoffZoneCenters(board, player).findIndex((c) => Math.hypot(x - c.x, y - c.y) <= r)
+      const zoneIndex = faceoffZoneCenters(board, player).findIndex((c) => Math.hypot(px - c.x, py - c.y) <= r)
       if (zoneIndex === -1) return
       stableFaceoffZoneTap(player, zoneIndex as 0 | 1)
     },
-    [board, stableFaceoffZoneTap, stableFaceoffReady]
+    [board, stableFaceoffZoneTap, stableFaceoffReady, isUpsideDown, width, boardAreaHeight] // eslint-disable-line react-hooks/exhaustive-deps -- toCanonicalPoint derives from these same primitives every render
   )
 
   // Keyboard path (web only) — a shared touchscreen lets two people press two different spots at
@@ -567,17 +655,17 @@ export default function GameScreen() {
     () =>
       Gesture.Tap()
         // eslint-disable-next-line react-hooks/refs -- stableFaceoffTouch reads a ref; see panGesture's .onStart comment above
-        .onBegin((e) => runOnJS(stableFaceoffTouch)(1, e.absoluteX, e.absoluteY - board.boardMarginTop))
+        .onBegin((e) => runOnJS(stableFaceoffTouch)(1, e.absoluteX, e.absoluteY - boardAreaMarginTop))
         .enabled(phase === 'faceoff'),
-    [stableFaceoffTouch, phase, board.boardMarginTop]
+    [stableFaceoffTouch, phase, boardAreaMarginTop]
   )
   const p2TapGesture = useMemo(
     () =>
       Gesture.Tap()
         // eslint-disable-next-line react-hooks/refs -- see p1TapGesture's own comment above
-        .onBegin((e) => runOnJS(stableFaceoffTouch)(2, e.absoluteX, e.absoluteY - board.boardMarginTop))
+        .onBegin((e) => runOnJS(stableFaceoffTouch)(2, e.absoluteX, e.absoluteY - boardAreaMarginTop))
         .enabled(phase === 'faceoff'),
-    [stableFaceoffTouch, phase, board.boardMarginTop]
+    [stableFaceoffTouch, phase, boardAreaMarginTop]
   )
 
   // Coin flip's own "go" tap — spans the whole board (no zones, no player-attribution, unlike the
@@ -620,9 +708,9 @@ export default function GameScreen() {
           bar or turn indicator above it: the puck's own color already says whose turn it is, and
           the score lives on the board itself as pips at each goal (see Board.tsx). The one-finger
           aim gesture only runs during idle/aiming (see gestureEnabled below). */}
-      <View style={[styles.boardArea, { marginTop: board.boardMarginTop }]}>
+      <View style={[styles.boardArea, { marginTop: boardAreaMarginTop, ...(isUpsideDown && { marginBottom: insets.bottom }) }]}>
         <GestureDetector gesture={panGesture.enabled(gestureEnabled)}>
-          <View style={styles.boardAreaTouchable}>
+          <View style={[styles.boardAreaTouchable, isUpsideDown && styles.boardAreaUpsideDown]}>
             <Board board={board} puck={puck} aim={displayAim} phase={phase} currentPlayer={currentPlayer} aimingPlayer={aimingPlayer} isIntercepting={isIntercepting} puckInterceptable={puckInterceptable} lastScoredGoal={lastScoredGoal} scores={scores} scoreToWin={scoreToWin} goalDoorHitCount={goalDoorHitCount} lastGoalDoorSide={lastGoalDoorSide} faceoff={faceoff} controlScheme={controlScheme[aimingPlayer]} coinFlipStarted={coinFlipStarted} showWalls={isDesktopWeb} previewLengthPx={shotPreviewLengthPx} shotPreviewLength={roundSettings.shotPreviewLength} friction={friction} />
           </View>
         </GestureDetector>
@@ -639,12 +727,21 @@ export default function GameScreen() {
             accounts for it once). A sibling-of-root placement would double an inset.top>0 into
             every tap's y before stableFaceoffTouch's circular hit-test compares it against
             faceoffZoneCenters' board-local coordinates, silently mis-hitting on any device with a
-            notch/status bar. */}
+            notch/status bar.
+
+            Which physical zone (top half vs. bottom half of the real screen) maps to which
+            gesture/player SWAPS when upside-down, rather than the Board's own P1/P2 assignment
+            moving — Board.tsx keeps drawing P1 at canonical local-bottom always (see
+            playerGoalSide), and the visual 180° flip above is what carries that to the screen's
+            physical top. A real player's own circle is now physically up there, so the gesture
+            that fires on a touch in that physical half has to be p1TapGesture for the two to agree
+            — stableFaceoffTouch's own toCanonicalPoint reflection (see its own comment) is what
+            then makes that touch's (x, y) hit-test correctly against P1's true canonical zone. */}
         <GestureDetector gesture={p1TapGesture}>
-          <View style={styles.faceoffZoneBottom} pointerEvents={phase === 'faceoff' ? 'auto' : 'none'} />
+          <View style={isUpsideDown ? styles.faceoffZoneTop : styles.faceoffZoneBottom} pointerEvents={phase === 'faceoff' ? 'auto' : 'none'} />
         </GestureDetector>
         <GestureDetector gesture={p2TapGesture}>
-          <View style={styles.faceoffZoneTop} pointerEvents={phase === 'faceoff' ? 'auto' : 'none'} />
+          <View style={isUpsideDown ? styles.faceoffZoneBottom : styles.faceoffZoneTop} pointerEvents={phase === 'faceoff' ? 'auto' : 'none'} />
         </GestureDetector>
 
         {/* Coin flip's "go" tap zone — the whole board, not split into halves like the faceoff
@@ -686,7 +783,7 @@ export default function GameScreen() {
       {/* Back + settings chips moved into MatchOverlays below (see its own comment) — they need the
       same live rotation-in-place treatment as its dialogs, which only that component's isolated
       tilt subscription provides. */}
-      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} secondaryColor={themeColors.secondary} onSecondaryColor={themeColors.onSecondary} primaryColor={themeColors.primary} onPrimaryColor={themeColors.onPrimary} onResetGame={() => resetGame(board)} confirmBackVisible={confirmBackVisible} onQuitCancel={() => setConfirmBackVisible(false)} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={onBackPress} />
+      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} secondaryColor={themeColors.secondary} onSecondaryColor={themeColors.onSecondary} primaryColor={themeColors.primary} onPrimaryColor={themeColors.onPrimary} onResetGame={() => resetGame(board)} confirmBackVisible={confirmBackVisible} onQuitCancel={() => setConfirmBackVisible(false)} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={onBackPress} />
     </View>
   )
 }
@@ -722,6 +819,10 @@ interface MatchOverlaysProps {
   // (see their own comment below), not for anything this component already renders.
   board: BoardLayout
   insets: EdgeInsets
+  // GameScreen's own real physical Y-offset of boardArea (see its own doc comment there) — NOT
+  // simply board.boardMarginTop once upside-down, since GameScreen feeds computeBoardLayout a
+  // zeroed-out inset for that case (see the same comment), making board.boardMarginTop itself 0.
+  boardAreaMarginTop: number
   fg: string
   cornerButtonBg: string
   onBackPress: () => void
@@ -735,10 +836,17 @@ interface MatchOverlaysProps {
 // rotate their own content in place via `rotation` rather than reflowing layout (unlike /index and
 // /loadout's FakeLandscapeView) — the fixed zones have to keep the exact shape TouchInputLayer's
 // unrotated hit-zones already use.
-function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, secondaryColor, onSecondaryColor, primaryColor, onPrimaryColor, onResetGame, confirmBackVisible, onQuitCancel, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
-  const liveOrientation = useAccelerometerOrientation()
-  const rotation = getFixedZoneRotation(liveOrientation.orientationMode, liveOrientation.p1OnRight, liveOrientation.upsideDown)
+function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, secondaryColor, onSecondaryColor, primaryColor, onPrimaryColor, onResetGame, confirmBackVisible, onQuitCancel, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
+  const rotation = useRotation()
   const cardRotationStyle = rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }
+  // The 180° upsideDown case also swaps which edge each chip sits on — a pure in-place spin isn't
+  // enough there: back is coded at the LEFT edge pointing left, and turning only the glyph 180°
+  // leaves it pointing right while still sitting on the left, which reads backwards. Repositioning
+  // it to the RIGHT edge (rotated glyph included) is what actually reads correctly regardless of
+  // which way up the device is held. sideBySide's ±90° doesn't need this: the centerline pair's two
+  // endpoints already land on each other under a quarter turn without knowing which JSX block is
+  // which, so only the glyph needs to turn there.
+  const swapSides = rotation === 180
 
   // Corner buttons (back/settings) fade out during an active drag or swing rather than just
   // disappearing — FAB's own `visible` prop used to provide this for free, but the plain IconButton
@@ -841,12 +949,12 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
           stays fixed to the true screen edge, only the glyph inside turns to stay legible however
           the phone is actually being held (previously missing here, unlike Snake's/LightCycles' own
           chip buttons). */}
-      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.backButton, { top: board.boardMarginTop + board.y, height: board.height, left: insets.left }, cornerButtonsStyle]}>
+      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.backButton, { top: boardAreaMarginTop + board.y, height: board.height, ...(swapSides ? { right: insets.right } : { left: insets.left }) }, cornerButtonsStyle]}>
         <IconButton icon='arrow-left' iconColor={fg} containerColor={cornerButtonBg} style={[styles.chipButton, cardRotationStyle]} size={24} onPress={onBackPress} />
       </Animated.View>
 
-      {/* Settings — mirrored on the opposite side edge, same centerline and chip treatment as the back button. */}
-      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.settingsButton, { top: board.boardMarginTop + board.y, height: board.height, right: insets.right }, cornerButtonsStyle]}>
+      {/* Settings — mirrored on the opposite side edge, same centerline and chip treatment as the back button. swapSides also mirrors which edge each sits on for the 180° upsideDown case — see its own comment above. */}
+      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.settingsButton, { top: boardAreaMarginTop + board.y, height: board.height, ...(swapSides ? { left: insets.left } : { right: insets.right }) }, cornerButtonsStyle]}>
         <IconButton icon='cog' iconColor={fg} containerColor={cornerButtonBg} style={[styles.chipButton, cardRotationStyle]} size={24} onPress={onSettingsOpen} accessibilityLabel='Settings' />
       </Animated.View>
 
@@ -861,6 +969,9 @@ const styles = StyleSheet.create({
   backButton: { justifyContent: 'center', position: 'absolute' },
   boardArea: { flex: 1 },
   boardAreaTouchable: { flex: 1 },
+  // Pure 180°, never ±90° — see isUpsideDown's own doc comment on why a quarter turn here is a much
+  // bigger, unrequested feature (it'd change the board's own aspect ratio) that this doesn't attempt.
+  boardAreaUpsideDown: { transform: [{ rotate: '180deg' }] },
   // Cancels IconButton's own built-in 6px margin (react-native-paper's default Surface spacing)
   // so nothing but the safe-area inset stands between the chip and the true screen edge.
   chipButton: { margin: 0 },

@@ -11,8 +11,11 @@ import { safeBack } from '@/utils/navigation'
 // Neutral default (the swatch grid's own first color, not either seat's own current color) — a new
 // profile isn't necessarily *for* whichever seat opened this screen (the whole point of a dedicated
 // screen is P1 handing the phone to P2 to create theirs), and whoever it's for can always change
-// their own profile's color later regardless. Mirrors LightCycles' identical NEW_PROFILE default.
-const NEW_PROFILE_CONTROL_SCHEME: ControlScheme = 'push'
+// their own profile's color later regardless. Mirrors LightCycles' identical NEW_PROFILE pattern
+// (that sibling app has no controlScheme concept of its own, so the specific value doesn't need to
+// match — just the "give a fresh profile a sensible default" shape). Matches
+// gameSettingsValidation.ts's own DEFAULT_SETTINGS.controlScheme, the app-wide default philosophy.
+const NEW_PROFILE_CONTROL_SCHEME: ControlScheme = 'flick'
 
 // A real routed screen — reachable only from P1's dropdown (see ProfilePicker's own doc for why P2
 // can't host this: its zone is 180°-rotated in face-to-face mode, and the OS keyboard doesn't rotate

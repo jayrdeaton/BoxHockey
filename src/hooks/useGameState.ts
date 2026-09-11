@@ -1,7 +1,7 @@
 import { useGameLoop } from '@tastic/core'
 import { useCallback, useReducer, useRef } from 'react'
 
-import { AIM_VELOCITY_SMOOTHING_ALPHA, CONTROL_SCHEME_SIGN, FACEOFF_GUESS_BONUS_MS, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/constants/game'
+import { AIM_VELOCITY_SMOOTHING_ALPHA, CONTROL_SCHEME_SIGN, FACEOFF_GUESS_BONUS_MS, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/constants/game'
 import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, PuckState, TipoffMode } from '@/types'
 import { centerPuck, faceoffZoneCenter } from '@/utils/board'
 import { computeAimVector, stepPhysics } from '@/utils/physics'
@@ -10,7 +10,7 @@ type Action =
   | { type: 'AIM_START'; x: number; y: number }
   | { type: 'AIM_UPDATE'; x: number; y: number; vx: number; vy: number }
   | { type: 'AIM_CANCEL' }
-  | { type: 'STRIKE'; vx: number; vy: number }
+  | { type: 'STRIKE'; dx: number; dy: number; vx: number; vy: number }
   | { type: 'APPLY_STRIKE' }
   | { type: 'PHYSICS_STEP'; board: BoardLayout; dt: number; interceptTouch: { x: number; y: number; vx: number; vy: number } | null }
   | { type: 'NEXT_ROUND'; board: BoardLayout; zoneIndex: 0 | 1; faceoffZones: [0 | 1, 0 | 1]; faceoffReadyGuess: [0 | 1, 0 | 1] }
@@ -34,6 +34,26 @@ function otherPlayer(p: Player): Player {
 // which reads the raw velocity straight off the release gesture event instead (see STRIKE below).
 function smoothVelocity(prevVx: number, prevVy: number, rawVx: number, rawVy: number): { vx: number; vy: number } {
   return { vx: prevVx + AIM_VELOCITY_SMOOTHING_ALPHA * (rawVx - prevVx), vy: prevVy + AIM_VELOCITY_SMOOTHING_ALPHA * (rawVy - prevVy) }
+}
+
+// The one place a ControlScheme's power model actually branches — see ControlScheme's own doc
+// comment in types/index.ts. 'pull'/'push' are distance-based: dx/dy (the finger's net
+// displacement) drives power, up to MAX_STICK_PULLBACK_PIXELS; the release velocity (vx/vy) is
+// ignored entirely. 'flick' is velocity-based: vx/vy (raw release speed) drives power, up to
+// MAX_FLICK_VELOCITY, and is gated by BOTH a distance AND a speed floor (see MIN_FLICK_VELOCITY's
+// own comment in constants/game.ts for why flick needs both). Returns null when the gesture is too
+// weak to count as a real shot — the caller's job is to treat that exactly like AIM_CANCEL.
+function resolveStrikeVelocity(scheme: ControlScheme, dx: number, dy: number, vx: number, vy: number): { vx: number; vy: number } | null {
+  const sign = CONTROL_SCHEME_SIGN[scheme]
+  const dist = Math.hypot(dx, dy)
+  if (scheme === 'flick') {
+    if (dist < MIN_SHOOT_DRAG || Math.hypot(vx, vy) < MIN_FLICK_VELOCITY) return null
+    const result = computeAimVector(sign * vx, sign * vy, MAX_FLICK_VELOCITY, MAX_SPEED)
+    return { vx: result.vx, vy: result.vy }
+  }
+  if (dist < MIN_SHOOT_DRAG) return null
+  const result = computeAimVector(sign * dx, sign * dy, MAX_STICK_PULLBACK_PIXELS, MAX_SPEED)
+  return { vx: result.vx, vy: result.vy }
 }
 
 // Coin-flip randomness lives here, at the call sites below (RESET/NEXT_ROUND dispatch and the
@@ -149,32 +169,36 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
         }
         return state
 
-      // Release: velocity is computed now (from the raw drag, signed per the shooting player's own
-      // ControlScheme — see CONTROL_SCHEME_SIGN) but not applied to the puck yet. `aim` is kept
-      // as-is so Board.tsx can animate the player's stick from its pulled-back position to the
-      // puck over the 'striking' phase, and only APPLY_STRIKE actually sets the puck moving. The
-      // sign lives here, not in useGameState().shoot below, specifically so it always reads
-      // state.currentPlayer fresh off the reducer's own state rather than a closure that could go
-      // stale between whose turn it was when the drag started and when it ended.
+      // Release: velocity is computed now (from the raw gesture, signed AND power-modeled per the
+      // shooting player's own ControlScheme — see resolveStrikeVelocity above) but not applied to
+      // the puck yet. `aim` is kept as-is so Board.tsx can animate the player's stick from its
+      // pulled-back position to the puck over the 'striking' phase, and only APPLY_STRIKE actually
+      // sets the puck moving. The scheme lookup lives here, not in useGameState().shoot below,
+      // specifically so it always reads state.currentPlayer fresh off the reducer's own state
+      // rather than a closure that could go stale between whose turn it was when the drag started
+      // and when it ended — same reasoning now covers the gesture-too-weak-to-count check too,
+      // which used to live in shoot() itself before a real ControlScheme (not just its sign) needed
+      // to be known to decide it (see resolveStrikeVelocity: 'flick' gates on speed, 'pull'/'push'
+      // don't).
       case 'STRIKE': {
         if (state.phase === 'aiming') {
-          const sign = CONTROL_SCHEME_SIGN[controlScheme[state.currentPlayer]]
-          const { vx, vy } = computeAimVector(sign * action.vx, sign * action.vy, MAX_FLICK_VELOCITY, MAX_SPEED)
-          return { ...state, phase: 'striking', pendingShot: { vx, vy } }
+          const result = resolveStrikeVelocity(controlScheme[state.currentPlayer], action.dx, action.dy, action.vx, action.vy)
+          if (!result) return { ...state, phase: 'idle', aim: null } // too weak to count — same effect as AIM_CANCEL
+          return { ...state, phase: 'striking', pendingShot: result }
         }
         // Intercept release: currentPlayer flips to the interceptor HERE, not at AIM_START — so an
         // abandoned/never-struck intercept attempt (cancelled, or the original puck scores or
         // naturally stops first) never disturbs PHYSICS_STEP's own otherPlayer(state.currentPlayer)
         // math above, which still assumes the SHOOTER is state.currentPlayer until a real strike
-        // lands. Signed by the interceptor's OWN ControlScheme (not the shooter's) — same reasoning
-        // as the normal case, just against otherPlayer(state.currentPlayer) instead of
+        // lands. Resolved against the interceptor's OWN ControlScheme (not the shooter's) — same
+        // reasoning as the normal case, just against otherPlayer(state.currentPlayer) instead of
         // state.currentPlayer directly. `aim` is populated from `interceptAim` so the existing
         // 'striking' paddle-swing visual (which reads `aim`, not `interceptAim`) works unmodified.
         if (state.interceptAim) {
           const interceptor = otherPlayer(state.currentPlayer)
-          const sign = CONTROL_SCHEME_SIGN[controlScheme[interceptor]]
-          const { vx, vy } = computeAimVector(sign * action.vx, sign * action.vy, MAX_FLICK_VELOCITY, MAX_SPEED)
-          return { ...state, phase: 'striking', pendingShot: { vx, vy }, aim: { ...state.interceptAim }, interceptAim: null, currentPlayer: interceptor }
+          const result = resolveStrikeVelocity(controlScheme[interceptor], action.dx, action.dy, action.vx, action.vy)
+          if (!result) return { ...state, interceptAim: null } // true no-op, same as AIM_CANCEL's intercept branch
+          return { ...state, phase: 'striking', pendingShot: result, aim: { ...state.interceptAim }, interceptAim: null, currentPlayer: interceptor }
         }
         return state
       }
@@ -562,20 +586,14 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
     dispatch({ type: 'AIM_CANCEL' })
   }, [])
 
-  // dx/dy is the raw drag (release position minus start position), passed through unsigned — the
-  // STRIKE case above is what actually applies the shooting player's own ControlScheme sign to
-  // vx/vy, so this only has to gate the dual cancel check: a real shot needs BOTH a large enough
-  // net displacement (protects the "snap back near start to abort" cancel affordance) AND a fast
-  // enough release velocity (protects against "dragged out far, released gently" producing a limp
-  // accidental shot) — see MIN_SHOOT_DRAG/MIN_FLICK_VELOCITY's own comments in constants/game.ts.
+  // dx/dy is the raw drag (release position minus start position); vx/vy is the raw release
+  // velocity. Both are passed through unsigned and un-gated — the STRIKE case (via
+  // resolveStrikeVelocity) is what actually applies the shooting player's own ControlScheme sign
+  // AND decides which of the two ends up mattering (distance for 'pull'/'push', velocity for
+  // 'flick'), since that decision needs to know whose turn it really is (the shooter, or an
+  // in-progress interceptor) — see STRIKE's own comment for why that can't be resolved out here.
   const shoot = useCallback((dx: number, dy: number, vx: number, vy: number) => {
-    const dist = Math.sqrt(dx * dx + dy * dy)
-    const speed = Math.sqrt(vx * vx + vy * vy)
-    if (dist < MIN_SHOOT_DRAG || speed < MIN_FLICK_VELOCITY) {
-      dispatch({ type: 'AIM_CANCEL' })
-      return
-    }
-    dispatch({ type: 'STRIKE', vx, vy })
+    dispatch({ type: 'STRIKE', dx, dy, vx, vy })
   }, [])
 
   const applyStrike = useCallback(() => {

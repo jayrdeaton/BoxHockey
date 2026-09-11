@@ -13,13 +13,24 @@ export type AiDifficulty = 'easy' | 'medium' | 'hard'
 // How a shot is aimed & released — per-PLAYER, not a single round-wide choice (two people sharing
 // one device may simply prefer a different feel — see GameSettings.controlScheme below, and
 // LightCycles' identically-shaped keyScheme setting, the pattern this one mirrors). Read by
-// useGameState.ts's STRIKE case (via CONTROL_SCHEME_SIGN in constants/game.ts) to decide the sign
-// applied to the raw drag vector, and mirrored by Board.tsx for the stick/chevron-preview direction.
+// useGameState.ts's STRIKE case (via CONTROL_SCHEME_SIGN and resolveStrikeVelocity in
+// constants/game.ts and useGameState.ts respectively) to decide both the sign and the power model
+// applied to the raw gesture, and mirrored by Board.tsx for the stick/chevron-preview direction.
+// 'pull' and 'push' share ONE mechanic — distance-based power (see MAX_STICK_PULLBACK_PIXELS/
+// MIN_SHOOT_DRAG in constants/game.ts): how far the finger travels from touch-down to release sets
+// the power, up to a cap, and Board.tsx shows a pulled-back stick + trajectory preview the whole
+// time. They differ only in direction:
 // 'pull': slingshot/pool-cue — drag AWAY from where you want to shoot, puck fires in the opposite
-// direction on release. The original/only behavior before this setting existed.
-// 'push': swipe/flick — drag TOWARD where you want to shoot, puck fires in the SAME direction as
-// the drag on release.
-export type ControlScheme = 'pull' | 'push'
+// direction on release. The original/only behavior before either of the other two existed.
+// 'push': drag TOWARD where you want to shoot, puck fires in the SAME direction as the drag —
+// otherwise identical to 'pull' (same stick, same preview, same distance-based power).
+// 'flick' is a genuinely different THIRD mechanic, not a variant of push: velocity-based power (see
+// MAX_FLICK_VELOCITY/MIN_FLICK_VELOCITY) — a fast, short swipe fires hard even if the finger barely
+// traveled, and a slow long drag fires weakly even if it traveled far. Fires along the swipe
+// direction, same sign as 'push'. Board.tsx never shows the pulled-back stick for this scheme —
+// there's nothing to visually "pull back" when power comes from speed, not distance — though the
+// trajectory preview (chevron trail / front arrow, per ShotPreviewLength) still applies.
+export type ControlScheme = 'pull' | 'push' | 'flick'
 
 // A locally-saved player identity — name, color, and a short tag, entirely opt-in. A seat's own live
 // round color, while this profile's selected there, is derived FROM this (see loadout.tsx's own

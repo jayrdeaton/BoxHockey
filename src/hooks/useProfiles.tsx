@@ -15,7 +15,7 @@ const SHARED_GROUP_ID = 'group.com.infinitetoken.tastic'
 // DEFAULT_SETTINGS) — what a profile that's never had one set locally on THIS app falls back to.
 // That's exactly the state of any profile created on another @tastic app (LightCycles has no
 // concept of controlScheme at all) the very first time it's selected here.
-const DEFAULT_CONTROL_SCHEME: ControlScheme = 'push'
+const DEFAULT_CONTROL_SCHEME: ControlScheme = 'flick'
 
 interface CreateProfileInput {
   name: string

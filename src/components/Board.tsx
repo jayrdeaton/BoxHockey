@@ -587,46 +587,61 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // bounce (maxBounces=1 in the computeTrajectory call below, not more) — see that call's own
   // comment for why a second predicted bend isn't trustworthy enough to draw with the same
   // confidence as the first.
-  // Raw finger position delta (current touch minus where the drag started) — used only for the
-  // DISTANCE half of the dual cancel-zone gate below (see MIN_SHOOT_DRAG's own comment in
-  // constants/game.ts for why distance still matters once power/direction are velocity-based).
+  // Raw finger position delta (current touch minus where the drag started) — the actual shot
+  // INPUT for 'pull'/'push' (see below), and, for every scheme, the DISTANCE half of the cancel
+  // gate (MIN_SHOOT_DRAG's own comment in constants/game.ts).
   const rawAimDx = aim ? aim.currentX - aim.startX : 0
   const rawAimDy = aim ? aim.currentY - aim.startY : 0
   const rawAimDist = Math.sqrt(rawAimDx * rawAimDx + rawAimDy * rawAimDy)
-  // Live release-velocity ESTIMATE (points/sec, smoothed — see AimIndicator.vx/vy's own comment),
-  // signed by the active player's own ControlScheme (shootSign above) to get the actual shot
-  // direction: 'pull' points opposite the drag (like a slingshot or pool cue), 'push' points along
-  // it (like a flick). This is also computeAimVector/computeTrajectory's expected sign convention
-  // (they don't re-negate), so reuse liveVx/liveVy as-is without flipping again. This is the ONE
-  // shared source of truth for shot direction across the stick, front arrow, and chevron trail
-  // below — all three track the same live velocity, so the preview never disagrees with what
-  // would actually fire if released right now.
-  const liveVx = aim ? shootSign * aim.vx : 0
-  const liveVy = aim ? shootSign * aim.vy : 0
+  // Mirrors resolveStrikeVelocity in useGameState.ts exactly, so this preview never disagrees with
+  // what would actually fire on release: 'flick' derives shot power/direction from the live
+  // release-velocity ESTIMATE (aim.vx/vy, points/sec, smoothed — see AimIndicator's own comment);
+  // 'pull'/'push' derive it from the raw drag distance instead (rawAimDx/Dy above) — the ORIGINAL
+  // mechanic both of those schemes have always used, unrelated to release speed. shotInputMin/Max
+  // are whichever pair of caps actually applies, so every formula below can stay written once, in
+  // terms of these, rather than re-branching on scheme at each step.
+  const isFlick = controlScheme === 'flick'
+  const shotInputX = isFlick ? (aim?.vx ?? 0) : rawAimDx
+  const shotInputY = isFlick ? (aim?.vy ?? 0) : rawAimDy
+  const shotInputMin = isFlick ? MIN_FLICK_VELOCITY : MIN_SHOOT_DRAG
+  const shotInputMax = isFlick ? MAX_FLICK_VELOCITY : MAX_STICK_PULLBACK_PIXELS
+  // Signed by the active player's own ControlScheme (shootSign above) to get the actual shot
+  // direction: 'pull' points opposite the drag (like a slingshot or pool cue), 'push'/'flick' point
+  // along it. This is also computeAimVector/computeTrajectory's expected sign convention (they
+  // don't re-negate), so reuse liveVx/liveVy as-is without flipping again. This is the ONE shared
+  // source of truth for shot direction across the front arrow and chevron trail below (and, for
+  // 'pull'/'push', the stick too) — every visual tracks the same live value, so the preview never
+  // disagrees with what would actually fire if released right now.
+  const liveVx = aim ? shootSign * shotInputX : 0
+  const liveVy = aim ? shootSign * shotInputY : 0
   const liveSpeed = Math.hypot(liveVx, liveVy)
   // Unit direction of the live shot vector — falls back to (0,0) at/near zero speed rather than
   // dividing by zero; harmless, since every visual that uses it is also scaled by livePowerT/
   // pastCancelZone below, both 0 in that same near-zero-speed regime.
   const liveDirX = liveSpeed > 0.0001 ? liveVx / liveSpeed : 0
   const liveDirY = liveSpeed > 0.0001 ? liveVy / liveSpeed : 0
-  // Same dual gate useGameState's shoot() uses to decide cancel vs. strike (MIN_SHOOT_DRAG AND
-  // MIN_FLICK_VELOCITY — see their own comments in constants/game.ts). Gates the chevron trail
-  // below, and now also the stick and front arrow further down: none of the three aiming
-  // indicators should show while a release right now would just cancel, since none of them
-  // represent a real committed shot yet.
-  const pastCancelZone = isAimingSized && !!aim && rawAimDist >= MIN_SHOOT_DRAG && liveSpeed >= MIN_FLICK_VELOCITY
-  // 0 right at the cancel-zone boundary, 1 at MAX_FLICK_VELOCITY — drives the stick's own length
-  // (paddleFace below) and the front arrow's sharpness the same way a drag-distance ratio used to,
-  // now velocity-based so the preview honestly reflects what a release right now would produce
-  // (a slow, sustained drag shows little to no wind-up until the player actually starts flicking).
-  const livePowerT = Math.min(1, Math.max(0, (liveSpeed - MIN_FLICK_VELOCITY) / (MAX_FLICK_VELOCITY - MIN_FLICK_VELOCITY)))
+  // Same gate useGameState's resolveStrikeVelocity uses to decide cancel vs. strike: 'pull'/'push'
+  // gate on distance alone (their only cancel condition, same as the pre-flick original); 'flick'
+  // ANDs a speed floor on top (MIN_FLICK_VELOCITY — see its own comment in constants/game.ts for
+  // why that scheme needs both). Gates the chevron trail below, and now also the stick and front
+  // arrow further down: none of the three aiming indicators should show while a release right now
+  // would just cancel, since none of them represent a real committed shot yet.
+  const pastCancelZone = isAimingSized && !!aim && rawAimDist >= MIN_SHOOT_DRAG && (!isFlick || liveSpeed >= MIN_FLICK_VELOCITY)
+  // 0 right at the cancel-zone boundary, 1 at shotInputMax — drives the stick's own length
+  // (paddleFace below) and the front arrow's sharpness: for 'pull'/'push' this is a plain
+  // drag-distance ratio (more pull = a longer stick/sharper arrow, the original mechanic); for
+  // 'flick' it's velocity-based so the preview honestly reflects what a release right now would
+  // produce (a slow, sustained drag shows little to no wind-up until the player actually starts
+  // flicking).
+  const livePowerT = Math.min(1, Math.max(0, (liveSpeed - shotInputMin) / (shotInputMax - shotInputMin)))
   // Opacity for the stick and front arrow (NOT the chevron trail — pastCancelZone above still
-  // hard-gates that unchanged): cross-fades smoothly across BOTH cancel gates around their own
-  // thresholds, rather than a hard pop at either boundary.
+  // hard-gates that unchanged): cross-fades smoothly across the cancel gate(s) around their own
+  // thresholds, rather than a hard pop at the boundary. velocityFade only applies to 'flick' — for
+  // 'pull'/'push' there's no velocity gate at all, so it's left at 1 (a no-op in the min() below).
   const distanceFade = Math.min(1, Math.max(0, (rawAimDist - (MIN_SHOOT_DRAG - CANCEL_ZONE_FADE_PX)) / CANCEL_ZONE_FADE_PX))
-  const velocityFade = Math.min(1, Math.max(0, (liveSpeed - (MIN_FLICK_VELOCITY - CANCEL_ZONE_VELOCITY_FADE_UNITS)) / CANCEL_ZONE_VELOCITY_FADE_UNITS))
+  const velocityFade = isFlick ? Math.min(1, Math.max(0, (liveSpeed - (MIN_FLICK_VELOCITY - CANCEL_ZONE_VELOCITY_FADE_UNITS)) / CANCEL_ZONE_VELOCITY_FADE_UNITS)) : 1
   const cancelZoneFadeOpacity = Math.min(distanceFade, velocityFade)
-  const { power: chevPower } = computeAimVector(liveVx, liveVy, MAX_FLICK_VELOCITY, MAX_SPEED)
+  const { power: chevPower } = computeAimVector(liveVx, liveVy, shotInputMax, MAX_SPEED)
 
   // The real bounce-aware trail only shows at 'medium'/'long' — see shotPreviewLength's own doc
   // comment on BoardProps for the full tier breakdown ('off' none, 'short' stick+arrow, 'medium'/
@@ -646,7 +661,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
     // first, closely-matching segment and letting the trail simply run out past that bounce is the
     // honest choice: real distance/power still reads clearly from how far it reaches, it just never
     // asserts a bend it can't back up.
-    const waypoints = computeTrajectory(puck.x, puck.y, liveVx, liveVy, board, MAX_FLICK_VELOCITY, MAX_SPEED, 1, friction)
+    const waypoints = computeTrajectory(puck.x, puck.y, liveVx, liveVy, board, shotInputMax, MAX_SPEED, 1, friction)
     const chevronWidth = puckRadius * 0.14
     const chevronDepth = puckRadius * 0.11
     const spacing = puckRadius * 0.55
@@ -680,7 +695,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
       placements.push(path)
     }
     return placements
-  }, [showTrajectoryTrail, puck.x, puck.y, puckRadius, liveVx, liveVy, board, previewLengthPx, chevPower, friction])
+  }, [showTrajectoryTrail, puck.x, puck.y, puckRadius, liveVx, liveVy, board, previewLengthPx, chevPower, friction, shotInputMax])
 
   // Highlight sweep — travels through the chevrons at a rate tied to live power, without
   // restarting/jumping every time power changes mid-drag (a fixed-duration withRepeat/withTiming
@@ -943,14 +958,20 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   }, [board.cornerRadius, board.behindGoalDepth, x, y, width, height])
 
   // ─── Stick/paddle ─────────────────────────────────────────────────────────
+  // Only ever RENDERED for 'pull'/'push' (see the render gates further down) — computed
+  // unconditionally anyway (including for 'flick') since that's simpler than threading a
+  // scheme-gated branch through every value below, and the extra math is free if unused.
   // While aiming, the paddle sits at puck position - shot-direction offset (i.e. opposite the
   // direction the puck is actually about to travel) rather than at the raw touch point — a drag
   // can now start anywhere on the board (see useGameState's tryAimStart), so drawing it at the
   // literal finger position could put it far from the puck entirely. Offset from the puck instead,
   // it always reads as "pulled back from the puck, about to swing forward" regardless of where the
-  // finger landed or which ControlScheme is active. livePowerT (computed above, from live release
-  // velocity) drives how far out that offset reaches, capped at MAX_STICK_PULLBACK_PIXELS — purely
-  // visual now, decoupled from shot power (see that constant's own comment in constants/game.ts).
+  // finger landed or which ControlScheme is active. livePowerT (computed above, scheme-correctly
+  // from either drag distance or release velocity) drives how far out that offset reaches, capped
+  // at MAX_STICK_PULLBACK_PIXELS specifically (never shotInputMax) — this is a PIXEL-space visual
+  // distance the front arrow below also places itself by, so it must stay in pixel units
+  // regardless of scheme, unlike shotInputMax which is in whatever unit that scheme's power model
+  // uses (a raw velocity number for 'flick', meaningless as a screen distance).
   const stickOffset = livePowerT * MAX_STICK_PULLBACK_PIXELS
 
   const paddleFace = puckRadius * (1.8 + 1.0 * livePowerT) // 1.8 (short, at the cancel-zone boundary) -> 2.8 (long, at max pull)
@@ -1268,9 +1289,13 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             there yet" through a fade rather than a hard pop, same treatment as the front arrow
             below. The 'striking' branch is unaffected by BOTH gates: once a shot is actually
             committed (past STRIKE, at any preview tier) the swing itself is ordinary game feedback,
-            not an aiming aid, so it always shows. */}
-          {isAimingSized && aim && shotPreviewLength !== 'off' && <Path path={aimingPaddlePath} color={activePlayerColor} opacity={cancelZoneFadeOpacity} />}
-          {phase === 'striking' && <Path path={strikingPaddlePath} color={activePlayerColor} />}
+            not an aiming aid, so it always shows. Neither branch renders at all for 'flick' — see
+            ControlScheme's own doc comment: there's nothing to visually "pull back" when power
+            comes from swipe speed, not distance, so a stick here would show a pulled-back position
+            that has no bearing on the actual shot. The front arrow/chevron trail below are NOT
+            gated the same way — that preview stays meaningful for 'flick' too. */}
+          {!isFlick && isAimingSized && aim && shotPreviewLength !== 'off' && <Path path={aimingPaddlePath} color={activePlayerColor} opacity={cancelZoneFadeOpacity} />}
+          {!isFlick && phase === 'striking' && <Path path={strikingPaddlePath} color={activePlayerColor} />}
 
           {/* Front power arrow — see the frontArrowPath comment above. Mirrors the paddle onto the
             puck's opposite side at the identical pulled-back distance, so the two always read as

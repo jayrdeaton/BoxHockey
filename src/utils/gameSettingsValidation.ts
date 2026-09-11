@@ -24,18 +24,19 @@ export const DEFAULT_SETTINGS: GameSettings = {
   // mathematically an empty intercept window, so an existing stored settings blob (or a fresh
   // install) behaves exactly as before by default.
   interceptSpeed: 'low',
-  // Both start on 'push' — swipe toward your shot, matching the new "swipe to hit, aim by feel"
-  // default philosophy (see shotPreviewLength above). 'pull' (the original slingshot mechanic)
-  // stays fully available per-player in the loadout for anyone who prefers it.
-  controlScheme: { 1: 'push', 2: 'push' },
+  // Both start on 'flick' — swipe fast to fire, matching the new "swipe to hit, aim by feel"
+  // default philosophy (see shotPreviewLength above). 'pull' (the original slingshot mechanic) and
+  // 'push' (the same distance-based mechanic, opposite direction) both stay fully available
+  // per-player in the loadout for anyone who prefers a stick-and-drag feel over a flick.
+  controlScheme: { 1: 'flick', 2: 'flick' },
   // Off by default, matching every variant's original, pre-rink-work behavior — see its own doc
   // comment on GameSettings.
   rink: false,
   deferBottomEdgeGestures: false
 }
 
-function isValidControlScheme(value: unknown): value is 'pull' | 'push' {
-  return value === 'pull' || value === 'push'
+function isValidControlScheme(value: unknown): value is 'pull' | 'push' | 'flick' {
+  return value === 'pull' || value === 'push' || value === 'flick'
 }
 
 export function isValidSettings(value: unknown): value is GameSettings {
