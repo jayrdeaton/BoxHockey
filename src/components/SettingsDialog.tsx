@@ -1,4 +1,5 @@
 import { useToast } from '@rific/toaster'
+import { ViewRotation } from '@tastic/core'
 import { BaseSettingsDialog } from '@tastic/hud'
 
 import { release } from '@/constants/release'
@@ -11,7 +12,7 @@ export interface SettingsDialogProps {
   // as a centered Portal modal, unaffected by whichever screen's own FakeLandscapeView wraps its
   // trigger, so it has to rotate its own card content to read right-side-up for whichever way the
   // phone is actually being held. Defaults to 0 (unrotated) for any caller that doesn't track it.
-  rotation?: number
+  rotation?: ViewRotation
   // The persisted "next round" settings (not a round's own locked-in activeRoundSettings) — passed
   // in rather than read internally via useGameSettings() so this stays a pure adapter, matching the
   // cross-app SettingsDialog convention (see LightCycles' identical props-based contract). Each of
