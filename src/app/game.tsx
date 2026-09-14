@@ -2,6 +2,7 @@ import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
 import { useOrientationState, useRotation, useSettledWindowDimensions } from '@tastic/core'
+import { ConfirmDialog } from '@tastic/hud'
 import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -783,7 +784,7 @@ export default function GameScreen() {
       {/* Back + settings chips moved into MatchOverlays below (see its own comment) — they need the
       same live rotation-in-place treatment as its dialogs, which only that component's isolated
       tilt subscription provides. */}
-      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} secondaryColor={themeColors.secondary} onSecondaryColor={themeColors.onSecondary} primaryColor={themeColors.primary} onPrimaryColor={themeColors.onPrimary} onResetGame={() => resetGame(board)} confirmBackVisible={confirmBackVisible} onQuitCancel={() => setConfirmBackVisible(false)} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={onBackPress} />
+      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} onResetGame={() => resetGame(board)} confirmBackVisible={confirmBackVisible} onQuitCancel={() => setConfirmBackVisible(false)} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={onBackPress} />
     </View>
   )
 }
@@ -798,10 +799,6 @@ interface MatchOverlaysProps {
   cardBg: string
   cardBorder: string
   fgMuted: string
-  secondaryColor: string
-  onSecondaryColor: string
-  primaryColor: string
-  onPrimaryColor: string
   onResetGame: () => void
   confirmBackVisible: boolean
   onQuitCancel: () => void
@@ -836,7 +833,7 @@ interface MatchOverlaysProps {
 // rotate their own content in place via `rotation` rather than reflowing layout (unlike /index and
 // /loadout's FakeLandscapeView) — the fixed zones have to keep the exact shape TouchInputLayer's
 // unrotated hit-zones already use.
-function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, secondaryColor, onSecondaryColor, primaryColor, onPrimaryColor, onResetGame, confirmBackVisible, onQuitCancel, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
+function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, onResetGame, confirmBackVisible, onQuitCancel, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
   const rotation = useRotation()
   const cardRotationStyle = rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }
   // The 180° upsideDown case also swaps which edge each chip sits on — a pure in-place spin isn't
@@ -896,32 +893,33 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
         </View>
       )}
 
-      {/* Quit confirmation — same overlay/card shell as the Game Over dialog above and as
-          LightCycles' own quit-confirmation: icon stacked above the title, the score spelled out
-          in each player's own color so it's clear who has what, and two contained buttons — Cancel
-          in primary (the "keep playing" default) and Quit in secondary, the same pairing
-          LightCycles uses, not tied to who's ahead since there's no winner mid-game. */}
-      {confirmBackVisible && (
-        <View style={styles.overlay}>
-          <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }, cardRotationStyle]}>
-            <Icon source='alert-circle-outline' size={64} color={secondaryColor} />
-            <Text variant='headlineLarge' style={[styles.overlayTitle, { color: secondaryColor, fontFamily: MONO_FONT }]}>
-              Quit Match?
-            </Text>
-            <Text variant='bodyLarge' style={[styles.overlayScore, { fontFamily: MONO_FONT }]}>
-              <Text style={{ color: playerColor[1] }}>{scores[0]}</Text>
-              <Text style={{ color: fgMuted }}> – </Text>
-              <Text style={{ color: playerColor[2] }}>{scores[1]}</Text>
-            </Text>
-            <Button mode='contained' onPress={onQuitCancel} style={styles.overlayButton} buttonColor={primaryColor} textColor={onPrimaryColor}>
-              Cancel
-            </Button>
-            <Button mode='contained' onPress={safeBack} style={styles.overlayButton} buttonColor={secondaryColor} textColor={onSecondaryColor}>
-              Quit
-            </Button>
-          </View>
-        </View>
-      )}
+      {/* Quit confirmation — now the fleet-shared @tastic/hud ConfirmDialog instead of a hand-rolled
+          overlay, so this converges on the same component LightCycles' own quit-confirmation uses.
+          The score is still spelled out in each player's own color so it's clear who has what
+          (same colored-segment markup as before, just without the outer MONO_FONT-styled Text —
+          ConfirmDialog supplies its own body Text, which these inherit). `rotation` is the same
+          live physical-hold value already computed above for cardRotationStyle/the chip buttons,
+          passed through as the raw number rather than re-derived. Trades away this dialog's old
+          secondary-accent Quit button and MONO_FONT styling for the shared component's primary
+          accent and default font — an approved trade-off, not an oversight. */}
+      <ConfirmDialog
+        visible={confirmBackVisible}
+        title='Quit Match?'
+        message={
+          <>
+            <Text style={{ color: playerColor[1] }}>{scores[0]}</Text>
+            <Text style={{ color: fgMuted }}> – </Text>
+            <Text style={{ color: playerColor[2] }}>{scores[1]}</Text>
+          </>
+        }
+        confirmLabel='Quit'
+        cancelLabel='Cancel'
+        icon='alert-circle-outline'
+        destructive={false}
+        onConfirm={safeBack}
+        onCancel={onQuitCancel}
+        rotation={rotation}
+      />
 
       {/* Back + settings — vertically centered on the side edges at the dividing-wall centerline
           (board.boardMarginTop + board.centerY in root-relative coordinates), rather than the top

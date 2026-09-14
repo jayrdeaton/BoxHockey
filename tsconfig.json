@@ -7,6 +7,7 @@
       "@/components/*": ["./src/components/*"],
       "@/constants/*": ["./src/constants/*"],
       "@/hooks/*": ["./src/hooks/*"],
+      "@/redux/*": ["./src/redux/*"],
       "@/types": ["./src/types/index.ts"],
       "@/utils/*": ["./src/utils/*"],
       // @shopify/react-native-skia has no "exports" map — a classic top-level "react-native"
