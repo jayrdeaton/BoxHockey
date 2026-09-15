@@ -4,7 +4,7 @@ import { CornerActionButtons, MenuOption, PressAwayOverlay, ReadyButton, SharedA
 import { DualZoneLayout, needsSharedNeutralZone, useDualZoneLayout } from '@tastic/split-screen'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { Platform, StyleSheet, View } from 'react-native'
 import Animated from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
@@ -68,10 +68,16 @@ const CONTROL_SCHEME_OPTIONS: MenuOption<ControlScheme>[] = [
   { value: 'flick', label: 'Flick', description: 'Swipe fast — power comes from speed', icon: 'gesture-swipe' }
 ]
 
-const TIPOFF_MODE_OPTIONS: MenuOption<TipoffMode>[] = [
+const ALL_TIPOFF_MODE_OPTIONS: MenuOption<TipoffMode>[] = [
   { value: 'coinFlip', label: 'Coin Flip', description: 'Random pick starts, loser gets the puck', icon: 'hand-coin-outline' },
-  { value: 'faceoff', label: 'Face-Off', description: 'Race the tap on every score', icon: 'hockey-puck' }
+  { value: 'faceoff', label: 'Face-Off', description: 'Race the tap on every score', icon: 'hockey-puck' },
+  { value: 'tripleTap', label: 'Triple Tap', description: 'Two taps, then swipe to launch', icon: 'gesture-double-tap' }
 ]
+// 'tripleTap' is touch/mobile only — no keyboard equivalent (see game.tsx), so it's hidden from the
+// picker entirely on web rather than offered and left unplayable there. Computed once at module
+// scope since Platform.OS never changes at runtime; also keeps handleRandomizeMatchSettings below
+// from ever landing on it on web, with no separate edit needed there.
+const TIPOFF_MODE_OPTIONS: MenuOption<TipoffMode>[] = Platform.OS === 'web' ? ALL_TIPOFF_MODE_OPTIONS.filter((o) => o.value !== 'tripleTap') : ALL_TIPOFF_MODE_OPTIONS
 
 const AI_DIFFICULTY_OPTIONS: MenuOption<AIDifficulty>[] = [
   { value: 'easy', label: AI_DIFFICULTY_LABELS.easy, icon: 'emoticon-happy-outline' },

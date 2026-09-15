@@ -114,7 +114,9 @@ describe('double-failure faceoff draws never get the accurate-shot margin', () =
       goalDoorHitCount: 0,
       lastGoalDoorSide: null,
       faceoff,
-      faceoffRound: 0
+      faceoffRound: 0,
+      tripleTap: null,
+      tripleTapRound: 0
     }
   }
 

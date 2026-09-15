@@ -58,6 +58,8 @@ function simulatingState(overrides: Partial<GameState> = {}): GameState {
     lastGoalDoorSide: null,
     faceoff: null,
     faceoffRound: 0,
+    tripleTap: null,
+    tripleTapRound: 0,
     ...overrides
   }
 }

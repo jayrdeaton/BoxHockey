@@ -2,7 +2,7 @@ import { AchievementDefinition as BaseAchievementDefinition, DayStreakState, Out
 
 export type Player = 1 | 2
 
-export type GamePhase = 'idle' | 'aiming' | 'striking' | 'simulating' | 'scored' | 'gameOver' | 'faceoff' | 'coinFlip'
+export type GamePhase = 'idle' | 'aiming' | 'striking' | 'simulating' | 'scored' | 'gameOver' | 'faceoff' | 'coinFlip' | 'tripleTap'
 
 export type BoardVariant = 'classic' | 'gauntlet' | 'gravity'
 
@@ -71,7 +71,17 @@ export interface Profile {
 // a normal, self-aimed shot too (this is a turn-based game, not soccer); the only thing that's
 // soccer-style is who gets the puck back after a GOAL — the conceding player, in their own zone
 // (see useGameState.ts's PHYSICS_STEP 'scored' branch and NEXT_ROUND).
-export type TipoffMode = 'coinFlip' | 'faceoff'
+//
+// 'tripleTap' is the third mode — modeled on the real box-hockey ritual of tapping sticks together
+// before going for the puck. Each player independently presses their own single zone (see
+// tripleTapZoneCenter in utils/board.ts) twice, then their THIRD press is a swipe/drag rather than
+// a tap — see TripleTapState. There is no shared countdown/beat and no timeout: the reducer just
+// waits for both players to finish their own tap-tap-swipe sequence, however long that takes. Once
+// both swipes land, the launch velocity is the plain vector SUM of both players' swipes (clamped
+// to MAX_SPEED, see combineAndClampVelocity in useGameState.ts) — a real "stick clash," not a
+// procedural knock toward either goal the way 'faceoff' computes one. Touch/mobile only — see
+// loadout.tsx, which hides this option on web.
+export type TipoffMode = 'coinFlip' | 'faceoff' | 'tripleTap'
 
 // Per-round puck deceleration tier — see FRICTION_LEVELS in constants/game.ts (the numeric
 // coefficient each level maps to) and stepPhysics in utils/physics.ts (where it's actually
@@ -326,6 +336,37 @@ export interface FaceoffState {
   result: { winner: Player; marginMs: number; reactionMs: number; forfeit: boolean } | null
 }
 
+// 'tripleTap' tip-off state, live only while phase === 'tripleTap' (null otherwise) — see
+// TipoffMode's own doc comment. Deliberately NOT shaped like FaceoffState: there's a single zone
+// per player (no hidden target, no wrong-zone/disqualification concept) and no shared countdown —
+// each player presses at their own pace, and the reducer waits, patiently, until both have a
+// captured swipe.
+export interface TripleTapState {
+  // 0/1/2 discrete presses toward each player's own zone — index 0 = P1, 1 = P2. Never reaches 3:
+  // the third press is categorically different (a captured drag vector, not a tap increment — see
+  // swipe below), so tapCount stops incrementing once it hits 2.
+  tapCount: [0 | 1 | 2, 0 | 1 | 2]
+  // Timestamp of each player's most recent press-worthy instant — their 1st tap, 2nd tap, or their
+  // 3rd press's touch-down — purely a visual ripple trigger for Board.tsx, mirroring
+  // FaceoffState.pressFlash exactly. Never read by the winner/combine logic below.
+  pressFlash: [number | null, number | null]
+  // Set once, the instant each player's OWN third press touches down (only meaningful once that
+  // player's own tapCount is already 2) — never overwritten once set. Supplies "who initiated
+  // their swipe first" for result.winner below; independent of pressFlash despite firing at the
+  // same instant.
+  swipeStartedAt: [number | null, number | null]
+  // Each player's own captured, individually-MAX_SPEED-bounded swipe vector — set once, on that
+  // player's third press's release. Never overwritten once set (idempotent, same discipline as
+  // FaceoffState.tapAt).
+  swipe: [{ vx: number; vy: number } | null, { vx: number; vy: number } | null]
+  // Set once BOTH swipe entries are non-null. winner is whichever player's swipeStartedAt is
+  // earlier — bookkeeping/currentPlayer hand-off ONLY (see TRIPLE_TAP_LAUNCH in useGameState.ts;
+  // same low-stakes "winner never gets a follow-up shot" meaning as FaceoffState.result.winner) —
+  // it never affects vx/vy, which is always the plain vector sum of both players' swipes,
+  // regardless of who was faster.
+  result: { winner: Player; vx: number; vy: number } | null
+}
+
 export interface GameState {
   phase: GamePhase
   currentPlayer: Player
@@ -360,6 +401,11 @@ export interface GameState {
   // to distinguish "a real new draw started" from "the same draw progressed" using object identity
   // alone.
   faceoffRound: number
+  tripleTap: TripleTapState | null
+  // Same "bump on a genuinely new draw" discipline as faceoffRound above — lets useTripleTap.ts's
+  // CPU-timer effect key on "a new draw started" rather than every sub-action's new object
+  // reference (each press, each swipe).
+  tripleTapRound: number
 }
 
 // ─── Stats & achievements ───────────────────────────────────────────────────

@@ -1,5 +1,6 @@
-import { FRICTION_LEVELS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/constants/game'
+import { FRICTION_LEVELS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, TRIPLE_TAP_MAX_DRAG_PIXELS } from '@/constants/game'
 import { BoardLayout, Player, PuckState } from '@/types'
+import { tripleTapZoneCenter } from '@/utils/board'
 import { stepPhysics } from '@/utils/physics'
 
 export type AIDifficulty = 'easy' | 'medium' | 'hard'
@@ -192,4 +193,43 @@ const FACEOFF_WRONG_ZONE_CHANCE: Record<AIDifficulty, number> = {
 
 export function rollFaceoffWrongZone(difficulty: AIDifficulty): boolean {
   return Math.random() < FACEOFF_WRONG_ZONE_CHANCE[difficulty]
+}
+
+// 'tripleTap' mode's CPU swipe planner — the CPU's own synthetic third-press drag, aimed roughly
+// from its own zone at the opponent's goal, difficulty-scaled angle jitter and power. Same jitter-
+// model spirit as computeFaceoffKnock's own angle/power split (utils/faceoff.ts), but flat per-
+// difficulty rather than margin/reaction-driven — there's no analogous "how contested" signal here
+// (see TipoffMode's own doc comment: the launch vector is always just the plain sum of both
+// players' swipes, so the CPU's own contribution just needs to be a plausible drag, not a
+// procedurally "correct" one). Returns a raw {dx,dy} drag — the SAME resolveTripleTapSwipeVelocity
+// math in useGameState.ts runs over this afterward, no shortcut.
+interface TripleTapSwipeTuning {
+  aimJitterDeg: number
+  powerMin: number // fraction of TRIPLE_TAP_MAX_DRAG_PIXELS
+  powerMax: number
+}
+const TRIPLE_TAP_SWIPE_TUNING: Record<AIDifficulty, TripleTapSwipeTuning> = {
+  easy: { aimJitterDeg: 30, powerMin: 0.35, powerMax: 0.75 },
+  medium: { aimJitterDeg: 16, powerMin: 0.5, powerMax: 0.9 },
+  hard: { aimJitterDeg: 6, powerMin: 0.7, powerMax: 1.0 }
+}
+
+export function planTripleTapSwipe(board: BoardLayout, cpuPlayer: Player, difficulty: AIDifficulty): { dx: number; dy: number } {
+  const tuning = TRIPLE_TAP_SWIPE_TUNING[difficulty]
+  const zone = tripleTapZoneCenter(board, cpuPlayer)
+  const targetY = cpuPlayer === 1 ? board.y : board.y + board.height
+  const goalCenterX = board.x + (board.goalLeft + board.goalRight) / 2
+  const baseAngle = Math.atan2(targetY - zone.y, goalCenterX - zone.x)
+  const noiseRad = ((Math.random() * 2 - 1) * tuning.aimJitterDeg * Math.PI) / 180
+  const angle = baseAngle + noiseRad
+  const magnitude = (tuning.powerMin + Math.random() * (tuning.powerMax - tuning.powerMin)) * TRIPLE_TAP_MAX_DRAG_PIXELS
+  return { dx: Math.cos(angle) * magnitude, dy: Math.sin(angle) * magnitude }
+}
+
+// Flat, not difficulty-tiered — how long the CPU's synthetic drag takes barely matters for feel,
+// only its final direction/power (planTripleTapSwipe above) does. Just enough to separate the
+// swipe's touch-down (TRIPLE_TAP_SWIPE_START) from its release (TRIPLE_TAP_SWIPE_END) in
+// useTripleTap.ts's timer chain.
+export function randomTripleTapDragDurationMs(): number {
+  return 80 + Math.random() * 100
 }

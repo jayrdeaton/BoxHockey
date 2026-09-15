@@ -1,7 +1,7 @@
 import { Platform } from 'react-native'
 import { EdgeInsets } from 'react-native-safe-area-context'
 
-import { BOARD_ASPECT_RATIO, DESKTOP_WEB_MIN_WIDTH, DIVIDER_HOLE_TO_PUCK_RADIUS, FACEOFF_ZONE_RADIUS_RATIO, GOAL_LINE_STROKE_WIDTH, GRAVITY_WELL_ATTRACT_STRENGTH, GRAVITY_WELL_CORNER_REPEL_STRENGTH, PUCK_SIZE_RATIOS, WALL_POST_RADIUS_RATIO, WALL_THICKNESS } from '@/constants/game'
+import { BOARD_ASPECT_RATIO, DESKTOP_WEB_MIN_WIDTH, DIVIDER_HOLE_TO_PUCK_RADIUS, FACEOFF_ZONE_RADIUS_RATIO, GOAL_LINE_STROKE_WIDTH, GRAVITY_WELL_ATTRACT_STRENGTH, GRAVITY_WELL_CORNER_REPEL_STRENGTH, PUCK_SIZE_RATIOS, TRIPLE_TAP_ZONE_RADIUS_RATIO, WALL_POST_RADIUS_RATIO, WALL_THICKNESS } from '@/constants/game'
 import { BoardLayout, BoardVariant, GoalPost, GravityWell, Obstacle, Player, PuckSizeLevel, WallPost } from '@/types'
 
 export const BOARD_VARIANT_LABELS: Record<BoardVariant, string> = {
@@ -420,4 +420,19 @@ export function faceoffZoneCenter(board: BoardLayout, player: Player, zoneIndex:
 
 export function faceoffZoneRadius(board: BoardLayout): number {
   return board.width * FACEOFF_ZONE_RADIUS_RATIO
+}
+
+// 'tripleTap' mode's single press/swipe zone per player (see TipoffMode's own doc comment) —
+// unlike faceoffZoneCenters' pair, there's no hidden target here, so one centered zone per player
+// (on the goal's own X, not offset left/right) is enough. Used for rendering only — input is
+// scoped by the half-screen gesture view in game.tsx, not a circular hit-test against this.
+export function tripleTapZoneCenter(board: BoardLayout, player: Player): { x: number; y: number } {
+  const goalCX = board.x + (board.goalLeft + board.goalRight) / 2
+  const offsetY = (board.height / 2) * board.faceoffOffsetYRatio
+  const cy = player === 1 ? board.y + board.height - offsetY : board.y + offsetY
+  return { x: goalCX, y: cy }
+}
+
+export function tripleTapZoneRadius(board: BoardLayout): number {
+  return board.width * TRIPLE_TAP_ZONE_RADIUS_RATIO
 }

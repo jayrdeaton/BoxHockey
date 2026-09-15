@@ -1,8 +1,8 @@
 import { useGameLoop } from '@tastic/core'
 import { useCallback, useReducer, useRef } from 'react'
 
-import { AIM_VELOCITY_SMOOTHING_ALPHA, CONTROL_SCHEME_SIGN, FACEOFF_GUESS_BONUS_MS, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/constants/game'
-import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, PuckState, TipoffMode } from '@/types'
+import { AIM_VELOCITY_SMOOTHING_ALPHA, CONTROL_SCHEME_SIGN, FACEOFF_GUESS_BONUS_MS, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, TRIPLE_TAP_MAX_DRAG_PIXELS } from '@/constants/game'
+import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, PuckState, TipoffMode, TripleTapState } from '@/types'
 import { centerPuck, faceoffZoneCenter } from '@/utils/board'
 import { computeAimVector, stepPhysics } from '@/utils/physics'
 
@@ -24,6 +24,10 @@ type Action =
   | { type: 'FACEOFF_TIMEOUT'; player: Player }
   | { type: 'FACEOFF_LAUNCH'; vx: number; vy: number }
   | { type: 'FACEOFF_RESTART' }
+  | { type: 'TRIPLE_TAP_PRESS'; player: Player; atMs: number }
+  | { type: 'TRIPLE_TAP_SWIPE_START'; player: Player; atMs: number }
+  | { type: 'TRIPLE_TAP_SWIPE_END'; player: Player; dx: number; dy: number }
+  | { type: 'TRIPLE_TAP_LAUNCH'; vx: number; vy: number }
 
 function otherPlayer(p: Player): Player {
   return p === 1 ? 2 : 1
@@ -63,13 +67,27 @@ function resolveStrikeVelocity(scheme: ControlScheme, dx: number, dy: number, vx
   return { vx: result.vx, vy: result.vy }
 }
 
+// 'tripleTap' mode's third-press swipe -> a per-player bounded velocity (see TipoffMode's own doc
+// comment in types/index.ts). Always distance-based, unsigned (sign=1, no pull/push inversion) —
+// the raw drag direction a player actually swipes IS the shot direction, no procedural bias toward
+// either goal the way computeFaceoffKnock's jitter model applies one. No MIN_SHOOT_DRAG-style
+// floor: even a near-zero release still counts as a captured (near-zero) swipe rather than a
+// cancel, since this mode waits patiently for exactly one swipe per player, not a re-triable drag.
+function resolveTripleTapSwipeVelocity(dx: number, dy: number): { vx: number; vy: number } {
+  const result = computeAimVector(dx, dy, TRIPLE_TAP_MAX_DRAG_PIXELS, MAX_SPEED)
+  return { vx: result.vx, vy: result.vy }
+}
+
 // Shared by APPLY_STRIKE (pull/push's windup handoff) and STRIKE's flick fast-path below — a real
 // slap shot/one-timer redirect is faster when the puck is already moving your way, not purely a
 // function of how hard you swung, so this always ADDS onto the puck's existing velocity rather
 // than overwriting it. Clamped to MAX_SPEED so a full-power swing onto an already-fast puck can't
 // quietly exceed the one speed ceiling the rest of the codebase assumes (substep budgeting, AI shot
 // planning).
-function combineAndClampVelocity(puckVx: number, puckVy: number, shotVx: number, shotVy: number): { vx: number; vy: number } {
+// Exported so it's directly unit-testable in isolation (see tripleTap.test.ts) — also the exact
+// combine step 'tripleTap' mode's TRIPLE_TAP_SWIPE_END case below reuses for summing both players'
+// swipe vectors into one launch velocity.
+export function combineAndClampVelocity(puckVx: number, puckVy: number, shotVx: number, shotVy: number): { vx: number; vy: number } {
   const combinedVx = puckVx + shotVx
   const combinedVy = puckVy + shotVy
   const combinedSpeed = Math.hypot(combinedVx, combinedVy)
@@ -116,19 +134,34 @@ function initialFaceoffState(zones: [0 | 1, 0 | 1], readyGuess: [0 | 1, 0 | 1]):
   }
 }
 
-function makeInitialState(board: BoardLayout, tipoffMode: TipoffMode, coinFlipWinner: Player, zoneIndex: 0 | 1, faceoffZones: [0 | 1, 0 | 1], faceoffReadyGuess: [0 | 1, 0 | 1]): GameState {
-  // 'faceoff' opens on the tip-off phase (a real draw). 'coinFlip' resolves coinFlipWinner/
-  // zoneIndex (both randomized by the caller, kept out of this otherwise-pure function) into a
-  // puck placed at one of that player's own rink faceoff dots (see faceoffZoneCenter in
-  // utils/board.ts) immediately — but opens on the 'coinFlip' phase rather than landing straight
-  // in 'idle', so Board.tsx's coin-flip ceremony (see its own doc comment) has a window to play
-  // out over the puck/winner that are already, quietly, decided. game.tsx's own timer
-  // (COIN_FLIP_TOTAL_MS) is what actually flips phase to 'idle' once that ceremony finishes (see
-  // COIN_FLIP_DONE below).
-  const puckPos = tipoffMode === 'faceoff' ? centerPuck(board) : faceoffZoneCenter(board, coinFlipWinner, zoneIndex)
+// No caller-supplied randomness needed (unlike initialFaceoffState) — 'tripleTap' has a single
+// zone per player, so there's nothing to randomize per draw.
+function initialTripleTapState(): TripleTapState {
   return {
-    phase: tipoffMode === 'faceoff' ? 'faceoff' : 'coinFlip',
-    currentPlayer: tipoffMode === 'faceoff' ? 1 : coinFlipWinner,
+    tapCount: [0, 0],
+    pressFlash: [null, null] as [number | null, number | null],
+    swipeStartedAt: [null, null] as [number | null, number | null],
+    swipe: [null, null],
+    result: null
+  }
+}
+
+function makeInitialState(board: BoardLayout, tipoffMode: TipoffMode, coinFlipWinner: Player, zoneIndex: 0 | 1, faceoffZones: [0 | 1, 0 | 1], faceoffReadyGuess: [0 | 1, 0 | 1]): GameState {
+  // 'faceoff'/'tripleTap' both open on their own tip-off phase (a real draw); the puck rests at
+  // dead center for either. 'coinFlip' resolves coinFlipWinner/zoneIndex (both randomized by the
+  // caller, kept out of this otherwise-pure function) into a puck placed at one of that player's
+  // own rink faceoff dots (see faceoffZoneCenter in utils/board.ts) immediately — but opens on the
+  // 'coinFlip' phase rather than landing straight in 'idle', so Board.tsx's coin-flip ceremony (see
+  // its own doc comment) has a window to play out over the puck/winner that are already, quietly,
+  // decided. game.tsx's own timer (COIN_FLIP_TOTAL_MS) is what actually flips phase to 'idle' once
+  // that ceremony finishes (see COIN_FLIP_DONE below).
+  const puckPos = tipoffMode === 'coinFlip' ? faceoffZoneCenter(board, coinFlipWinner, zoneIndex) : centerPuck(board)
+  return {
+    phase: tipoffMode,
+    // 'tripleTap' seeds an arbitrary player here (meaningless until TRIPLE_TAP_LAUNCH overwrites
+    // it, exactly like 'faceoff' mode's own pre-resolution currentPlayer) — 'faceoff' itself always
+    // starts on player 1 for the same reason.
+    currentPlayer: tipoffMode === 'coinFlip' ? coinFlipWinner : 1,
     scores: [0, 0],
     puck: { ...puckPos, vx: 0, vy: 0 },
     aim: null,
@@ -141,7 +174,9 @@ function makeInitialState(board: BoardLayout, tipoffMode: TipoffMode, coinFlipWi
     goalDoorHitCount: 0,
     lastGoalDoorSide: null,
     faceoff: tipoffMode === 'faceoff' ? initialFaceoffState(faceoffZones, faceoffReadyGuess) : null,
-    faceoffRound: 0
+    faceoffRound: 0,
+    tripleTap: tipoffMode === 'tripleTap' ? initialTripleTapState() : null,
+    tripleTapRound: 0
   }
 }
 
@@ -369,24 +404,26 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
       }
 
       case 'NEXT_ROUND': {
-        // 'faceoff' mode repeats the draw after every goal (real hockey rule): puck goes back to
-        // dead center for a fresh countdown. 'coinFlip' mode never repeats the flip itself — the
-        // goal that just happened already handed possession to the player who conceded it (see
-        // PHYSICS_STEP's 'scored' branch above) — but still places the puck at one of THAT
-        // player's own rink faceoff dots (action.zoneIndex, randomized by the caller) rather than
-        // dead center, so every round in this mode opens the same way: puck sitting at a zone, no
-        // separate announcement needed.
-        const puckPos = tipoffMode === 'faceoff' ? centerPuck(action.board) : faceoffZoneCenter(action.board, state.currentPlayer, action.zoneIndex)
+        // 'faceoff'/'tripleTap' both repeat their own draw after every goal (real hockey rule):
+        // puck goes back to dead center for a fresh draw. 'coinFlip' mode never repeats the flip
+        // itself — the goal that just happened already handed possession to the player who
+        // conceded it (see PHYSICS_STEP's 'scored' branch above) — but still places the puck at
+        // one of THAT player's own rink faceoff dots (action.zoneIndex, randomized by the caller)
+        // rather than dead center, so every round in that mode opens the same way: puck sitting at
+        // a zone, no separate announcement needed.
+        const puckPos = tipoffMode === 'coinFlip' ? faceoffZoneCenter(action.board, state.currentPlayer, action.zoneIndex) : centerPuck(action.board)
         return {
           ...state,
-          phase: tipoffMode === 'faceoff' ? 'faceoff' : 'idle',
+          phase: tipoffMode === 'coinFlip' ? 'idle' : tipoffMode,
           puck: { ...puckPos, vx: 0, vy: 0 },
           aim: null,
           lastScoredGoal: null,
           // Every post-goal draw gates on both players readying up too (see FaceoffState's doc
           // comment) — not just the game's first draw.
           faceoff: tipoffMode === 'faceoff' ? initialFaceoffState(action.faceoffZones, action.faceoffReadyGuess) : null,
-          faceoffRound: tipoffMode === 'faceoff' ? state.faceoffRound + 1 : state.faceoffRound
+          faceoffRound: tipoffMode === 'faceoff' ? state.faceoffRound + 1 : state.faceoffRound,
+          tripleTap: tipoffMode === 'tripleTap' ? initialTripleTapState() : null,
+          tripleTapRound: tipoffMode === 'tripleTap' ? state.tripleTapRound + 1 : state.tripleTapRound
         }
       }
 
@@ -584,6 +621,74 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
         if (state.phase !== 'faceoff' || !state.faceoff) return state
         return { ...state, faceoff: initialFaceoffState(state.faceoff.zones, state.faceoff.readyGuess), faceoffRound: state.faceoffRound + 1 }
 
+      // One of a player's own 2 required taps (see TripleTapState's own doc comment) — idempotent
+      // past tapCount 2 (a stray extra press once a player's already armed for their swipe is a
+      // no-op, not an error). No "wrong zone" concept here (unlike FACEOFF_TAP) — there's only one
+      // zone per player, so any press on it counts.
+      case 'TRIPLE_TAP_PRESS': {
+        if (state.phase !== 'tripleTap' || !state.tripleTap) return state
+        const tt = state.tripleTap
+        const idx = action.player - 1
+        if (tt.tapCount[idx] >= 2) return state
+        const tapCount: [0 | 1 | 2, 0 | 1 | 2] = [...tt.tapCount]
+        tapCount[idx] = (tapCount[idx] + 1) as 0 | 1 | 2
+        const pressFlash: [number | null, number | null] = [...tt.pressFlash]
+        pressFlash[idx] = action.atMs
+        return { ...state, tripleTap: { ...tt, tapCount, pressFlash } }
+      }
+
+      // The third press's touch-down — only valid once that player's own 2 taps are both in and
+      // they haven't already started this draw's swipe. Re-validated here against the reducer's
+      // own state, not trusted from the client's local snapshot alone (same discipline FACEOFF_TAP
+      // applies to its own zoneIndex). Supplies the timestamp TRIPLE_TAP_SWIPE_END below compares
+      // to decide `result.winner` — see TripleTapState.swipeStartedAt's own doc comment for why
+      // that comparison has to read stored timestamps, not dispatch arrival order: two players'
+      // gesture threads can deliver to this reducer out of true wall-clock order, same reasoning
+      // FACEOFF_TAP's own goAt comment gives for the race mode.
+      case 'TRIPLE_TAP_SWIPE_START': {
+        if (state.phase !== 'tripleTap' || !state.tripleTap) return state
+        const tt = state.tripleTap
+        const idx = action.player - 1
+        if (tt.tapCount[idx] !== 2 || tt.swipeStartedAt[idx] !== null) return state
+        const swipeStartedAt: [number | null, number | null] = [...tt.swipeStartedAt]
+        swipeStartedAt[idx] = action.atMs
+        const pressFlash: [number | null, number | null] = [...tt.pressFlash]
+        pressFlash[idx] = action.atMs
+        return { ...state, tripleTap: { ...tt, swipeStartedAt, pressFlash } }
+      }
+
+      // The third press's release — captures that player's own bounded swipe vector. If the other
+      // player's swipe isn't in yet, just store this one and keep waiting: no timeout, no forfeit
+      // (see TipoffMode's own doc comment) — the draw resolves the instant BOTH are present,
+      // whenever that happens to be. winner is whichever player's swipeStartedAt is earlier
+      // (ties favor the player dispatching THIS action, same <= convention FACEOFF_TAP's own race
+      // resolution uses) — bookkeeping only; vx/vy is always the plain sum of both swipes via
+      // combineAndClampVelocity, unaffected by who was faster.
+      case 'TRIPLE_TAP_SWIPE_END': {
+        if (state.phase !== 'tripleTap' || !state.tripleTap) return state
+        const tt = state.tripleTap
+        const idx = action.player - 1
+        const otherIdx = otherPlayer(action.player) - 1
+        if (tt.tapCount[idx] !== 2 || tt.swipe[idx] !== null || tt.swipeStartedAt[idx] === null) return state
+        const swipe: [{ vx: number; vy: number } | null, { vx: number; vy: number } | null] = [...tt.swipe]
+        swipe[idx] = resolveTripleTapSwipeVelocity(action.dx, action.dy)
+        const otherSwipe = swipe[otherIdx]
+        if (otherSwipe === null) return { ...state, tripleTap: { ...tt, swipe } }
+        const winner: Player = tt.swipeStartedAt[idx]! <= tt.swipeStartedAt[otherIdx]! ? action.player : otherPlayer(action.player)
+        const combined = combineAndClampVelocity(swipe[0]!.vx, swipe[0]!.vy, swipe[1]!.vx, swipe[1]!.vy)
+        return { ...state, tripleTap: { ...tt, swipe, result: { winner, vx: combined.vx, vy: combined.vy } } }
+      }
+
+      // Launches the combined swipe (see TRIPLE_TAP_SWIPE_END above) — same atomic resolve+phase+
+      // velocity shape as FACEOFF_LAUNCH. result.winner only decides currentPlayer bookkeeping
+      // (whoever initiated their swipe first — see TripleTapState's own doc comment); the winner
+      // gets no follow-up shot off of it, same unconditional next-turn-to-the-loser rule
+      // PHYSICS_STEP already enforces regardless of tipoffMode.
+      case 'TRIPLE_TAP_LAUNCH': {
+        if (state.phase !== 'tripleTap' || !state.tripleTap || !state.tripleTap.result) return state
+        return { ...state, phase: 'simulating', currentPlayer: state.tripleTap.result.winner, tripleTap: null, puck: { ...state.puck, vx: action.vx, vy: action.vy } }
+      }
+
       default:
         return state
     }
@@ -717,5 +822,21 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
     dispatch({ type: 'FACEOFF_RESTART' })
   }, [])
 
-  return { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, setInterceptTouch }
+  const tripleTapPress = useCallback((player: Player, atMs: number) => {
+    dispatch({ type: 'TRIPLE_TAP_PRESS', player, atMs })
+  }, [])
+
+  const tripleTapSwipeStart = useCallback((player: Player, atMs: number) => {
+    dispatch({ type: 'TRIPLE_TAP_SWIPE_START', player, atMs })
+  }, [])
+
+  const tripleTapSwipeEnd = useCallback((player: Player, dx: number, dy: number) => {
+    dispatch({ type: 'TRIPLE_TAP_SWIPE_END', player, dx, dy })
+  }, [])
+
+  const tripleTapLaunch = useCallback((vx: number, vy: number) => {
+    dispatch({ type: 'TRIPLE_TAP_LAUNCH', vx, vy })
+  }, [])
+
+  return { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch, setInterceptTouch }
 }

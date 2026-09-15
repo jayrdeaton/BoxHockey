@@ -104,7 +104,9 @@ const DUMMY_STATE: GameState = {
   goalDoorHitCount: 0,
   lastGoalDoorSide: null,
   faceoff: null,
-  faceoffRound: 0
+  faceoffRound: 0,
+  tripleTap: null,
+  tripleTapRound: 0
 }
 
 type Reducer = (state: GameState, action: Parameters<ReturnType<typeof makeReducer>>[1]) => GameState
