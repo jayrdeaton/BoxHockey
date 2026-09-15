@@ -65,6 +65,14 @@ export const MAX_STICK_PULLBACK_PIXELS = 160
 // puckRadius, which comfortably exceeds 12px at every puck size), so the visual affordance implied
 // a bigger safe-return zone than the actual threshold honored.
 export const MIN_SHOOT_DRAG = 28
+// 'flick' scheme ONLY. A flick has to be a short, decisive gesture — real box hockey doesn't let
+// you "guide" the puck by holding the stick against it. If a flick drag is still live this long
+// after AIM_START (see game.tsx's flickGestureRef/auto-commit effect), it auto-commits using the
+// peak velocity already captured and the live drag distance at that instant, exactly as if
+// released right then — a genuine release before this always wins and is unaffected. Per explicit
+// user feedback: this should never read as the shot being rejected/unresponsive, only as it having
+// already fired off the swipe's own early energy. First-pass value, not yet verified by feel.
+export const MAX_FLICK_GESTURE_MS = 200
 
 // Sign applied to a shot's raw drag/flick vector before computeAimVector — see ControlScheme in
 // types/index.ts. 'pull' fires opposite the drag (slingshot); 'push' and 'flick' both fire along it

@@ -363,9 +363,16 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
 
   // Kept as a shared value (not read directly as the plain `puckRadius` prop) so derived values
   // below (glowR's idle/aiming pulse) stay current even if the board is resized (screen rotation,
-  // etc.), hoisted up here so those derivations can use it too.
+  // etc.), hoisted up here so those derivations can use it too. Mirrored via useLayoutEffect, not
+  // assigned directly during render — Reanimated's strict mode flags writing to `.value` mid-render
+  // (it fired on every single frame this was live, since Board re-renders every physics tick during
+  // 'simulating'/'striking'), and useLayoutEffect corrects the value before paint just like
+  // strikeX/Y's own layout effect below, so there's no stale-frame flash from deferring to a plain
+  // useEffect instead.
   const puckRadiusSV = useSharedValue(puckRadius)
-  puckRadiusSV.value = puckRadius
+  useLayoutEffect(() => {
+    puckRadiusSV.value = puckRadius
+  }, [puckRadius]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Pulsing glow + ring (idle, or the interceptable window) ──────────────
   // One driver (idlePulseT) for both the ambient glow radius and the ring's own pulse, so they
@@ -699,10 +706,15 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
 
   // Highlight sweep — travels through the chevrons at a rate tied to live power, without
   // restarting/jumping every time power changes mid-drag (a fixed-duration withRepeat/withTiming
-  // can't smoothly re-rate; a per-frame accumulator can). chevronPowerSV is assigned directly
-  // during render, same convention as puckRadiusSV above.
+  // can't smoothly re-rate; a per-frame accumulator can). chevronPowerSV mirrors chevPower via a
+  // layout effect, same convention as puckRadiusSV above — NOT assigned directly during render
+  // (that used to be this file's own convention, but it's exactly what Reanimated's strict mode
+  // warns against; both this and puckRadiusSV were firing "Writing to `value` during component
+  // render" on every frame until this fix).
   const chevronPowerSV = useSharedValue(0)
-  chevronPowerSV.value = chevPower
+  useLayoutEffect(() => {
+    chevronPowerSV.value = chevPower
+  }, [chevPower]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const chevronSweepPhase = useSharedValue(0)
   const chevronFrame = useFrameCallback((info) => {
@@ -985,11 +997,15 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // paddle on the puck's departure side instead of its pulled-back approach side.
   const stickX = puck.x - liveDirX * stickOffset
   const stickY = puck.y - liveDirY * stickOffset
-  // Facing direction (paddle → puck) stays fixed for the whole swing below — neither stickX/Y nor
-  // puck.x/y change again once 'striking' begins (the gesture already ended, and the puck itself
-  // doesn't move until APPLY_STRIKE), so recomputing this every render is cheap and stable, unlike
-  // deriving it from the animating strikeX/Y themselves (which would degenerate as they approach
-  // the contact point below).
+  // Facing direction (paddle → puck) stays fixed for the whole swing below — stickX/Y is
+  // snapshotted once, at the instant 'striking' begins (see the useLayoutEffect below), so
+  // recomputing this every render is cheap and stable, unlike deriving it from the animating
+  // strikeX/Y themselves (which would degenerate as they approach the contact point below). The
+  // puck itself CAN keep moving during 'striking' now (a mid-slide pull/push intercept — see
+  // useGameState.ts's PHYSICS_STEP, which no longer freezes physics for this windup), so the swing
+  // still targets wherever the puck was AT THE MOMENT of release, not wherever it drifts to by the
+  // time contact lands — accepted, since intercept-eligible speeds are slow enough that the drift
+  // over one 130ms windup is visually negligible.
   const stickAngle = Math.atan2(puck.y - stickY, puck.x - stickX)
   const aimingPaddlePath = paddlePath(stickX, stickY, stickAngle, paddleFace, paddleThickness)
 

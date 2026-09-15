@@ -1,12 +1,12 @@
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { isSharedProfileStoreAvailable, loadSharedProfiles, Profile as BaseProfile, saveSharedProfiles } from '@tastic/profile'
-import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { AppState } from 'react-native'
+import { createProfileRecord, type Profile as BaseProfile, profilesActions, resolveInitialProfiles, useSharedProfilesSync } from '@tastic/profile'
+import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
 
+import { profileExtensionsActions } from '@/redux/profileExtensionsSlice'
+import { profileSelectionActions } from '@/redux/profileSelectionSlice'
+import { type AppDispatch, type RootState } from '@/redux/store'
 import { ControlScheme, Player, Profile } from '@/types'
-import { DEFAULT_LOCAL_PROFILES_STATE, isValidLocalProfilesState, LocalProfilesState, migrateLegacyProfilesState } from '@/utils/profilesValidation'
 
-const STORAGE_KEY = 'boxhockey.profiles'
 // Same group id BoxHockey and LightCycles both declare in app.json's ios.entitlements (and any
 // future @tastic game that wants into the same shared roster) — see @tastic/profile's own README
 // for why only the BASE identity fields travel through this, never controlScheme.
@@ -33,9 +33,10 @@ interface ProfilesContextValue {
   // reflects Player (no profile) for that seat rather than a dangling id until next reload.
   deleteProfile: (id: string) => void
   selectProfile: (seat: Player, profileId: string | null) => void
-  // False until the initial load effect below has fully resolved — see splashGate.ts's 'profiles'
-  // gate and _layout.tsx's GatedApp, which holds every screen reading `profiles`/`lastSelected` off
-  // until this flips true.
+  // True once the one-time initial reconciliation below (redux-persist's own already-rehydrated
+  // `profiles` against the shared App Group store) has completed — see ProfilesProvider's own doc.
+  // _layout.tsx's own GatedApp reads this directly to gate the 'profiles' splash key, same as it
+  // already does for useGameSettings()'s own `loaded`.
   loaded: boolean
 }
 
@@ -45,195 +46,109 @@ interface Props {
   children: ReactNode
 }
 
-function generateProfileId(): string {
-  return `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
 // Single source of truth for saved player profiles, mounted once in _layout.tsx — same
 // single-Provider rationale as useGameSettings.tsx (expo-router keeps prior screens mounted, so a
-// per-screen AsyncStorage-backed copy could go stale or clobber a concurrent update).
+// per-screen copy could go stale or clobber a concurrent update).
 //
-// Base identity fields (name/color/tag) are shared with every other @tastic game declaring the same
-// App Group entitlement (see SHARED_GROUP_ID and @tastic/profile's own loadSharedProfiles/
-// saveSharedProfiles) — create a profile in LightCycles, it shows up here too, and vice versa.
-// controlScheme is BoxHockey-specific (LightCycles' analogous field is keyScheme) and deliberately
-// does NOT travel through that shared store — it's kept entirely in this app's own local
-// `extensions` table (see LocalProfilesState in profilesValidation.ts), keyed by profile id, and
-// merged onto the shared base roster in the `profiles` getter below, falling back to
-// DEFAULT_CONTROL_SCHEME the first time a profile created on another app shows up here.
-// isSharedProfileStoreAvailable is false on Android/web and on any iOS build that hasn't run
-// `expo prebuild` since the entitlement was added — `local.localBase` (only ever read/written in
-// that case) keeps this screen fully usable there too, just without cross-app sharing.
+// Base identity fields (name/color/tag) now live in Redux (redux/store.ts's `profiles` key,
+// @tastic/profile's own profilesReducer) — persisted locally the same way every other slice is
+// (redux-persist), with the shared App Group roster layered on top as a separate, cross-app sync
+// target (see resolveInitialProfiles/useSharedProfilesSync below) — no separate hand-rolled
+// AsyncStorage fallback path needed for that case anymore. controlScheme is BoxHockey's own
+// per-profile extension field (LightCycles' analogous field is keyScheme) and deliberately does
+// NOT travel through the shared store — it lives entirely in its own redux/profileExtensionsSlice.ts,
+// keyed by profile id, and merged onto the shared base roster in the `profiles` value below, falling
+// back to DEFAULT_CONTROL_SCHEME the first time a profile created on another app shows up here.
+// `lastSelected` is its own small redux/profileSelectionSlice.ts — which profile seat 1/2 last
+// picked is naturally a per-app thing, never shared cross-app.
 export function ProfilesProvider({ children }: Props) {
-  const [local, setLocal] = useState<LocalProfilesState>(DEFAULT_LOCAL_PROFILES_STATE)
-  // null until the initial load below resolves — distinguishes "still loading" from "loaded, and
-  // genuinely empty," which matters for the one-time seed-from-local migration in that same effect.
-  const [sharedBase, setSharedBase] = useState<BaseProfile[] | null>(null)
-  // False until the initial load effect below has fully resolved — both the local AsyncStorage read
-  // AND (when isSharedProfileStoreAvailable) the shared-store read, not just the first of the two —
-  // see that effect's own two setLoaded(true) call sites, one per branch.
+  const baseProfiles = useSelector((state: RootState) => state.profiles)
+  const extensions = useSelector((state: RootState) => state.profileExtensions)
+  const lastSelected = useSelector((state: RootState) => state.profileSelection)
+  const dispatch = useDispatch<AppDispatch>()
   const [loaded, setLoaded] = useState(false)
-  // True for the duration of an in-flight saveSharedProfiles write — see persistBase and the
-  // AppState foreground-reload effect below, which skips a refresh while this is true rather than
-  // risk reading back a pre-write snapshot and reverting the change that's still landing.
-  const pendingWriteRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      let stored = DEFAULT_LOCAL_PROFILES_STATE
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY)
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          stored = isValidLocalProfilesState(parsed) ? parsed : (migrateLegacyProfilesState(parsed) ?? DEFAULT_LOCAL_PROFILES_STATE)
-        }
-      } catch {
-        // Corrupt/stale blob or unavailable storage — DEFAULT_LOCAL_PROFILES_STATE is a complete,
-        // silent fallback, same as useGameSettings.tsx.
-      }
+    // PersistGate (an ancestor — see components/Providers.tsx) already blocks this component from
+    // mounting until redux-persist has rehydrated, so `baseProfiles` here is already whatever this
+    // device last had locally — resolveInitialProfiles reconciles that against the shared App
+    // Group store (if available), seeding the shared store from it on a first sync, or preferring
+    // the shared roster once anything has been shared. A one-time reconciliation against the
+    // mount-time snapshot, deliberately not a resync whenever `baseProfiles` changes afterward (the
+    // empty deps array below is intentional, not a missed dependency — resolved's own setAll
+    // dispatch would otherwise re-trigger this effect).
+    resolveInitialProfiles(SHARED_GROUP_ID, baseProfiles).then((resolved) => {
       if (cancelled) return
-      setLocal(stored)
-
-      if (!isSharedProfileStoreAvailable) {
-        setSharedBase(stored.localBase)
-        setLoaded(true)
-        return
-      }
-      const shared = await loadSharedProfiles(SHARED_GROUP_ID)
-      if (cancelled) return
-      // First time this build has ever seen the shared store (a fresh install, or an existing
-      // install's first launch after this feature shipped): seed it from whatever this app already
-      // had saved locally, so an upgrading user's own profiles don't just vanish because nothing's
-      // been written to the shared side yet. Only when the shared roster is still completely empty
-      // — once ANYTHING has been shared (by this app or another), that always wins over a stale
-      // local snapshot, never merged with it (avoids resurrecting a profile deleted elsewhere).
-      const seeded = shared.length === 0 && stored.localBase.length > 0 ? stored.localBase : shared
-      if (seeded !== shared) saveSharedProfiles(SHARED_GROUP_ID, seeded).catch(() => {})
-      setSharedBase(seeded)
+      dispatch(profilesActions.setAll(resolved))
       setLoaded(true)
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // The shared store doesn't push — @tastic/profile's sharedProfileStore.ts is a plain
-  // UserDefaults(suiteName:) read/write with no cross-process change notification. Re-reading on
-  // foreground is what catches "created/edited a profile in the other app, then switched back to
-  // this one" — otherwise sharedBase only ever reflects what this app itself last wrote, until the
-  // next cold start. controlScheme lives entirely in local.extensions (untouched here), so this
-  // only ever needs to replace the base roster. Skipped while pendingWriteRef is still true:
-  // persistBase below never awaits its own saveSharedProfiles call, so backgrounding right after a
-  // create/edit/delete and foregrounding again before that write actually lands could otherwise read
-  // back a pre-write snapshot here and silently revert it. This only ever skips one redundant
-  // refresh — the next real foreground event, by which point the write has landed, reads correctly.
-  useEffect(() => {
-    if (!isSharedProfileStoreAvailable) return
-    let cancelled = false
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next !== 'active' || pendingWriteRef.current) return
-      loadSharedProfiles(SHARED_GROUP_ID).then((shared) => {
-        if (!cancelled) setSharedBase(shared)
-      })
     })
     return () => {
       cancelled = true
-      sub.remove()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const persistLocal = useCallback((next: LocalProfilesState) => {
-    setLocal(next)
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {})
-  }, [])
-
-  // Writes the base roster to whichever store is authoritative — the shared App Group roster when
-  // available, this app's own local `localBase` fallback otherwise — and always updates the
-  // in-memory sharedBase, which is the merge source for `profiles` below regardless of which
-  // backend it actually came from. `extraLocalPatch` lets a caller fold an `extensions`/
-  // `lastSelected` change into the SAME persistLocal call as the `localBase` write below, rather
-  // than issuing a second call that would spread the stale pre-update `local` closure and silently
-  // revert this one (both calls happen synchronously within one event handler, so `local` never
-  // reflects the first call's setLocal by the time the second one reads it). saveSharedProfiles
-  // itself never rejects (see @tastic/profile's own doc), so the trailing `.catch` below is just
-  // defensive; pendingWriteRef is what the AppState foreground-reload effect above actually checks.
-  const persistBase = useCallback(
-    (next: BaseProfile[], extraLocalPatch?: Partial<LocalProfilesState>) => {
-      setSharedBase(next)
-      if (isSharedProfileStoreAvailable) {
-        pendingWriteRef.current = true
-        saveSharedProfiles(SHARED_GROUP_ID, next)
-          .catch(() => {})
-          .finally(() => {
-            pendingWriteRef.current = false
-          })
-        if (extraLocalPatch) persistLocal({ ...local, ...extraLocalPatch })
-      } else {
-        persistLocal({ ...local, localBase: next, ...extraLocalPatch })
-      }
-    },
-    [local, persistLocal]
-  )
+  // Mirrors local writes out to the shared store (syncToShared, called from each CRUD function
+  // below) and picks up remote writes a sibling @tastic app made while this one was backgrounded
+  // (onRemoteChange) — see @tastic/profile's own doc for both. controlScheme never travels through
+  // this — a remote change only ever replaces the base roster, same as before this migration.
+  const { syncToShared } = useSharedProfilesSync({
+    groupId: SHARED_GROUP_ID,
+    onRemoteChange: useCallback((remote: BaseProfile[]) => dispatch(profilesActions.setAll(remote)), [dispatch])
+  })
 
   const createProfile = useCallback(
     (input: CreateProfileInput) => {
-      const now = Date.now()
-      const profile: Profile = { id: generateProfileId(), name: input.name, color: input.color, tag: input.tag, controlScheme: input.controlScheme, createdAt: now, updatedAt: now }
-      persistBase([...(sharedBase ?? []), { id: profile.id, name: profile.name, color: profile.color, tag: profile.tag, createdAt: now, updatedAt: now }], {
-        extensions: { ...local.extensions, [profile.id]: { controlScheme: input.controlScheme } }
-      })
-      return profile
+      const record = createProfileRecord(input)
+      dispatch(profilesActions.add(record))
+      syncToShared([...baseProfiles, record])
+      dispatch(profileExtensionsActions.set({ extension: { controlScheme: input.controlScheme }, id: record.id }))
+      return { ...record, controlScheme: input.controlScheme }
     },
-    [sharedBase, local, persistBase]
+    [baseProfiles, dispatch, syncToShared]
   )
 
   const updateProfile = useCallback(
     (id: string, patch: Partial<CreateProfileInput>) => {
-      // Routed to whichever store actually owns each field — name/color/tag to the (possibly
+      // Routed to whichever slice actually owns each field — name/color/tag to the (possibly
       // shared) base roster, controlScheme to this app's own local extension table. A single call
       // can touch both (see ProfilesManager's onSave, which always patches all three base fields
-      // at once) or just one (loadout.tsx's own control-scheme sync-back, patch-of-one).
+      // at once) or just one (loadout.tsx's own control-scheme sync-back, patch-of-one) — two
+      // independent dispatches in the same handler, not a stale-closure risk now that both live in
+      // Redux (see profileSelectionSlice.ts's identical reasoning).
       const { controlScheme, ...baseChanges } = patch
-      const controlSchemePatch: Partial<LocalProfilesState> | undefined = controlScheme !== undefined ? { extensions: { ...local.extensions, [id]: { controlScheme } } } : undefined
       if (Object.keys(baseChanges).length > 0) {
-        const base = sharedBase ?? []
-        persistBase(
-          base.map((p) => (p.id === id ? { ...p, ...baseChanges, updatedAt: Date.now() } : p)),
-          controlSchemePatch
-        )
-      } else if (controlSchemePatch) {
-        persistLocal({ ...local, ...controlSchemePatch })
+        dispatch(profilesActions.update({ id, patch: baseChanges }))
+        syncToShared(baseProfiles.map((p) => (p.id === id ? { ...p, ...baseChanges, updatedAt: Date.now() } : p)))
+      }
+      if (controlScheme !== undefined) {
+        dispatch(profileExtensionsActions.set({ extension: { controlScheme }, id }))
       }
     },
-    [sharedBase, local, persistBase, persistLocal]
+    [baseProfiles, dispatch, syncToShared]
   )
 
   const deleteProfile = useCallback(
     (id: string) => {
-      const extensions = { ...local.extensions }
-      delete extensions[id]
-      persistBase(
-        (sharedBase ?? []).filter((p) => p.id !== id),
-        {
-          extensions,
-          lastSelected: { 1: local.lastSelected[1] === id ? null : local.lastSelected[1], 2: local.lastSelected[2] === id ? null : local.lastSelected[2] }
-        }
-      )
+      dispatch(profilesActions.remove(id))
+      syncToShared(baseProfiles.filter((p) => p.id !== id))
+      dispatch(profileExtensionsActions.remove(id))
+      dispatch(profileSelectionActions.clearProfile(id))
     },
-    [sharedBase, local, persistBase]
+    [baseProfiles, dispatch, syncToShared]
   )
 
   const selectProfile = useCallback(
     (seat: Player, profileId: string | null) => {
-      persistLocal({ ...local, lastSelected: { ...local.lastSelected, [seat]: profileId } })
+      dispatch(profileSelectionActions.select({ profileId, seat }))
     },
-    [local, persistLocal]
+    [dispatch]
   )
 
-  const profiles: Profile[] = (sharedBase ?? []).map((p) => ({ ...p, controlScheme: local.extensions[p.id]?.controlScheme ?? DEFAULT_CONTROL_SCHEME }))
+  const profiles: Profile[] = baseProfiles.map((p) => ({ ...p, controlScheme: extensions[p.id]?.controlScheme ?? DEFAULT_CONTROL_SCHEME }))
 
-  return <ProfilesContext.Provider value={{ profiles, lastSelected: local.lastSelected, createProfile, updateProfile, deleteProfile, selectProfile, loaded }}>{children}</ProfilesContext.Provider>
+  return <ProfilesContext.Provider value={{ profiles, lastSelected, createProfile, updateProfile, deleteProfile, selectProfile, loaded }}>{children}</ProfilesContext.Provider>
 }
 
 export function useProfiles() {

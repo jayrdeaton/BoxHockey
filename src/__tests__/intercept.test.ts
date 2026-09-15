@@ -279,3 +279,97 @@ describe("APPLY_STRIKE combines the puck's own pre-strike velocity into the shot
     expect(Math.hypot(applied.puck.vx, applied.puck.vy)).toBeCloseTo(MAX_SPEED, 5)
   })
 })
+
+describe('STRIKE with a flick scheme applies directly, skipping the striking windup', () => {
+  const FLICK: Record<Player, ControlScheme> = { 1: 'flick', 2: 'flick' }
+
+  it("a fresh flick shot lands on phase:'simulating' immediately, with no pendingShot", () => {
+    const reducer = makeReducer(999, 'coinFlip', FRICTION_LEVELS.medium, FLICK, INTERCEPT_THRESHOLD)
+    const state = simulatingState({
+      phase: 'aiming',
+      puck: { x: 100, y: 100, vx: 0, vy: 0 },
+      aim: { startX: 100, startY: 100, currentX: 140, currentY: 100, vx: 0, vy: 0 }
+    })
+    const next = reducer(state, { type: 'STRIKE', dx: 40, dy: 0, vx: 500, vy: 0 })
+    expect(next.phase).toBe('simulating')
+    expect(next.pendingShot).toBeNull()
+    expect(next.aim).toBeNull()
+    expect(next.puck.vx).toBeGreaterThan(0) // sign is +1 for flick, same direction as the release velocity
+  })
+
+  it("a mid-slide flick intercept lands on phase:'simulating' immediately, combines onto the puck's real residual velocity, and flips currentPlayer", () => {
+    const reducer = makeReducer(999, 'coinFlip', FRICTION_LEVELS.medium, FLICK, INTERCEPT_THRESHOLD)
+    const state = simulatingState({
+      currentPlayer: 1,
+      puck: { x: 100, y: 100, vx: 0.5, vy: 0.2 },
+      interceptAim: { startX: 100, startY: 100, currentX: 140, currentY: 100, vx: 0, vy: 0 }
+    })
+    const next = reducer(state, { type: 'STRIKE', dx: 40, dy: 0, vx: 500, vy: 0 })
+    expect(next.phase).toBe('simulating')
+    expect(next.currentPlayer).toBe(2)
+    expect(next.interceptAim).toBeNull()
+    expect(next.aim).toBeNull()
+    expect(next.pendingShot).toBeNull()
+    // Additive, not overwritten — same slap-shot combine APPLY_STRIKE uses for pull/push.
+    expect(next.puck.vx).toBeGreaterThan(state.puck.vx)
+  })
+
+  it('a subsequent APPLY_STRIKE against a flick-produced state is a no-op — phase is already simulating, never striking', () => {
+    const reducer = makeReducer(999, 'coinFlip', FRICTION_LEVELS.medium, FLICK, INTERCEPT_THRESHOLD)
+    const state = simulatingState({
+      phase: 'aiming',
+      puck: { x: 100, y: 100, vx: 0, vy: 0 },
+      aim: { startX: 100, startY: 100, currentX: 140, currentY: 100, vx: 0, vy: 0 }
+    })
+    const struck = reducer(state, { type: 'STRIKE', dx: 40, dy: 0, vx: 500, vy: 0 })
+    const applied = reducer(struck, { type: 'APPLY_STRIKE' })
+    expect(applied).toBe(struck) // guarded on phase === 'striking', already false here — true no-op
+  })
+})
+
+describe("PHYSICS_STEP also runs during 'striking' (pull/push) instead of freezing the puck", () => {
+  it('the puck keeps integrating — position and velocity both change — while a pull/push strike is mid-windup', () => {
+    const reducer = makeReducer(999, 'coinFlip', FRICTION_LEVELS.medium, { 1: 'pull', 2: 'pull' }, INTERCEPT_THRESHOLD)
+    const state = simulatingState({
+      phase: 'striking',
+      puck: { x: board.centerX, y: board.centerY, vx: 0.5, vy: 0.3 },
+      pendingShot: { vx: 3, vy: -1 }
+    })
+    const next = reducer(state, { type: 'PHYSICS_STEP', board, dt: 1, interceptTouch: null })
+    // Position actually advanced from the puck's own pre-strike velocity — no longer frozen.
+    expect(next.puck.x).not.toBe(state.puck.x)
+    expect(next.puck.y).not.toBe(state.puck.y)
+    expect(next.phase).toBe('striking') // still mid-windup — PHYSICS_STEP alone doesn't end it
+    expect(next.pendingShot).toEqual({ vx: 3, vy: -1 }) // untouched until APPLY_STRIKE actually fires
+  })
+
+  it('a puck that decays under STOP_THRESHOLD mid-windup does not auto-flip the turn — it waits for the pending strike to land', () => {
+    const reducer = makeReducer(999, 'coinFlip', FRICTION_LEVELS.medium, { 1: 'pull', 2: 'pull' }, INTERCEPT_THRESHOLD)
+    const state = simulatingState({
+      currentPlayer: 1,
+      phase: 'striking',
+      puck: { x: board.centerX, y: board.centerY, vx: 0.05, vy: 0.05 },
+      pendingShot: { vx: 3, vy: -1 }
+    })
+    const next = reducer(state, { type: 'PHYSICS_STEP', board, dt: 1, interceptTouch: null })
+    expect(next.phase).toBe('striking') // NOT flipped to 'idle' — the swing is still pending
+    expect(next.currentPlayer).toBe(1) // unchanged
+    expect(next.pendingShot).toEqual({ vx: 3, vy: -1 })
+    // The pending swing still lands normally once it fires.
+    const applied = reducer(next, { type: 'APPLY_STRIKE' })
+    expect(applied.phase).toBe('simulating')
+  })
+
+  it('a goal scored purely from residual motion mid-windup discards the now-moot pendingShot', () => {
+    const reducer = makeReducer(999, 'coinFlip', FRICTION_LEVELS.medium, { 1: 'pull', 2: 'pull' }, INTERCEPT_THRESHOLD)
+    const state = simulatingState({
+      currentPlayer: 1,
+      phase: 'striking',
+      puck: { x: board.centerX, y: board.y + 5, vx: 0, vy: -40 },
+      pendingShot: { vx: 3, vy: -1 }
+    })
+    const next = reducer(state, { type: 'PHYSICS_STEP', board, dt: 1, interceptTouch: null })
+    expect(next.phase).toBe('scored')
+    expect(next.pendingShot).toBeNull()
+  })
+})

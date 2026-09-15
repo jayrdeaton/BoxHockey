@@ -3,7 +3,6 @@ import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
 import { useOrientationState, useRotation, useSettledWindowDimensions } from '@tastic/core'
 import { ConfirmDialog } from '@tastic/hud'
-import { router } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
@@ -15,12 +14,12 @@ import { type EdgeInsets, useSafeAreaInsets } from 'react-native-safe-area-conte
 import Board from '@/components/BoardHost'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { ACHIEVEMENT_TIER_COLORS } from '@/constants/achievements'
-import { COIN_FLIP_TOTAL_MS, DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, GOAL_LINE_STROKE_WIDTH, INTERCEPT_SPEED_THRESHOLDS, MIN_SHOOT_DRAG, SHOT_PREVIEW_LENGTH_RATIOS, STRIKE_DURATION_MS } from '@/constants/game'
+import { COIN_FLIP_TOTAL_MS, DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, GOAL_LINE_STROKE_WIDTH, INTERCEPT_SPEED_THRESHOLDS, MAX_FLICK_GESTURE_MS, MIN_SHOOT_DRAG, SHOT_PREVIEW_LENGTH_RATIOS, STRIKE_DURATION_MS } from '@/constants/game'
 import { useAIOpponent } from '@/hooks/useAIOpponent'
 import { useFaceoff } from '@/hooks/useFaceoff'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameSound } from '@/hooks/useGameSound'
-import { useGameState } from '@/hooks/useGameState'
+import { passesFlickShotGate, useGameState } from '@/hooks/useGameState'
 import { useGameStats } from '@/hooks/useGameStats'
 import { useProfiles } from '@/hooks/useProfiles'
 import { BoardLayout, GamePhase, GameSettings, Player } from '@/types'
@@ -61,7 +60,7 @@ export default function GameScreen() {
   // activeRoundSettings above) are only needed to hand off to MatchOverlays' own SettingsDialog
   // below — its Lock Orientation/Edge Guard toggles edit the persisted defaults, not this
   // already-underway round's own snapshot.
-  const { activeRoundSettings, settings, setSettings } = useGameSettings()
+  const { activeRoundSettings, settings, setSettings, setIsActivelyPlaying } = useGameSettings()
   const { recordMatchOutcome } = useGameStats()
   const { lastSelected } = useProfiles()
   const { success: showAchievementToast } = useToast()
@@ -162,6 +161,20 @@ export default function GameScreen() {
 
   const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, setInterceptTouch } = useGameState(board, scoreToWin, tipoffMode, friction, controlScheme, paused, interceptThreshold)
   const { phase, puck, aim, interceptAim, currentPlayer, scores, bounceCount, lastScoredGoal, wellEnterCount, lastWellPolarity, goalDoorHitCount, lastGoalDoorSide, faceoff } = state
+
+  // Mirrors "an actual live shot attempt (aiming/striking/simulating), not paused" up to
+  // useGameSettings.tsx's own useEdgeGestureGuard call rather than calling that hook directly here:
+  // it stays mounted once at the provider (same as every other cross-cutting settings concern in
+  // this app), and this is just the one signal it has no other way to read. Unlocked between shots
+  // (idle/scored/faceoff/coinFlip/gameOver) and whenever a dialog is open (paused) — back/settings
+  // stay unconditionally visible here (unlike Snake/LightCycles; see this screen's own back/
+  // settings chips below), so there's no button-visibility signal to key off instead. Reset to
+  // false on unmount too, so leaving this screen mid-shot by any path can't leave Edge Guard stuck on.
+  const isLiveShot = phase === 'aiming' || phase === 'striking' || phase === 'simulating'
+  useEffect(() => {
+    setIsActivelyPlaying(isLiveShot && !paused)
+    return () => setIsActivelyPlaying(false)
+  }, [isLiveShot, paused, setIsActivelyPlaying])
 
   useAIOpponent(state, board, aiPlayer, aiDifficulty, friction, controlScheme, paused, interceptThreshold, { tryAimStart, aimUpdate, shoot })
   useFaceoff(state, board, aiPlayer, aiDifficulty, paused, { faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart })
@@ -328,6 +341,36 @@ export default function GameScreen() {
     }
   }, [aimActive, inCancelZone])
 
+  // ─── Flick auto-commit: a swipe has to be a short, decisive gesture ────────
+  // Written by stableAimStart/stableAimUpdate below on every raw gesture event (never the
+  // reducer's own EMA-smoothed display velocity), cleared by stableShoot/stableAimCancel the
+  // instant a real release/cancel resolves the gesture. A plain ref, not reducer state — deliberately
+  // outside useGameState, since useAIOpponent drives CPU shots by calling useGameState's own
+  // callbacks directly, bypassing these stable* wrappers entirely; putting the tracking here means a
+  // CPU-controlled flick seat never populates this ref, so the cap below can never apply to CPU
+  // pacing without needing its own extra guard.
+  const flickGestureRef = useRef<{ startX: number; startY: number; currentX: number; currentY: number; peakVx: number; peakVy: number } | null>(null)
+
+  // If a flick drag (fresh aim OR a mid-slide intercept — either can be flick) is still live this
+  // long after touch-down, its own already-captured peak energy commits as the shot right now,
+  // rather than waiting on a release that may never come "in time" — see MAX_FLICK_GESTURE_MS's own
+  // comment in constants/game.ts. A real release before this always wins: stableShoot/
+  // stableAimCancel clear flickGestureRef the instant either fires, so this timer's own callback
+  // just no-ops if it does. Keyed on aimActive (not phase directly) so it arms once per gesture and
+  // covers both cases the same way.
+  useEffect(() => {
+    if (!aimActive || controlScheme[aimingPlayer] !== 'flick') return
+    const t = setTimeout(() => {
+      const g = flickGestureRef.current
+      if (!g) return // a real release/cancel already resolved this gesture
+      const dx = g.currentX - g.startX
+      const dy = g.currentY - g.startY
+      if (!passesFlickShotGate(Math.hypot(dx, dy), Math.hypot(g.peakVx, g.peakVy))) return // too weak — the drag just keeps going, untouched
+      shoot(dx, dy, g.peakVx, g.peakVy) // raw `shoot`, not `stableShoot` — these are already canonical-space values
+    }, MAX_FLICK_GESTURE_MS)
+    return () => clearTimeout(t)
+  }, [aimActive, aimingPlayer, controlScheme, shoot])
+
   const firstWellRender = useRef(true)
   useEffect(() => {
     if (firstWellRender.current) {
@@ -424,6 +467,7 @@ export default function GameScreen() {
       const [px, py] = toCanonicalPoint(x, y)
       const started = tryAimStart(px, py)
       if (started) {
+        flickGestureRef.current = { startX: px, startY: py, currentX: px, currentY: py, peakVx: 0, peakVy: 0 }
         vibrationRef.current.short()
         soundRef.current.playSelect()
       }
@@ -448,6 +492,19 @@ export default function GameScreen() {
       // way px/py above does would be wrong (a vector has no origin to reflect around); rotating a
       // vector 180° instead just negates both components, so upside-down only flips its sign.
       const [pvx, pvy] = isUpsideDown ? [-vx, -vy] : [vx, vy]
+      // Tracks the live drag and its peak instantaneous speed for the flick auto-commit timer above
+      // (flickGestureRef) — raw, canonical-space values, same ones a real release would use. Runs
+      // for both a fresh aim and a mid-slide intercept alike; a no-op once flickGestureRef has
+      // already been cleared by a real release/cancel.
+      if (flickGestureRef.current) {
+        const g = flickGestureRef.current
+        g.currentX = px
+        g.currentY = py
+        if (Math.hypot(pvx, pvy) > Math.hypot(g.peakVx, g.peakVy)) {
+          g.peakVx = pvx
+          g.peakVy = pvy
+        }
+      }
       if (phase === 'simulating') {
         setInterceptTouch(px, py, pvx, pvy)
         return
@@ -461,11 +518,13 @@ export default function GameScreen() {
       // tx/ty here is e.translationX/Y (a displacement VECTOR from the drag's own start point, not
       // an absolute position) — same negate-not-reflect treatment as vx/vy, see stableAimUpdate above.
       const [ptx, pty, pvx, pvy] = isUpsideDown ? [-tx, -ty, -vx, -vy] : [tx, ty, vx, vy]
+      flickGestureRef.current = null // a real release always wins over the auto-commit timer above
       shoot(ptx, pty, pvx, pvy)
     },
     [shoot, isUpsideDown]
   )
   const stableAimCancel = useCallback(() => {
+    flickGestureRef.current = null
     aimCancel()
   }, [aimCancel])
 
@@ -600,12 +659,15 @@ export default function GameScreen() {
         .onStart((e) => {
           runOnJS(stableAimStart)(e.x, e.y)
         })
+        // eslint-disable-next-line react-hooks/refs -- stableAimUpdate reads/writes flickGestureRef; this is a gesture event handler, never invoked during render
         .onChange((e) => {
           runOnJS(stableAimUpdate)(e.x, e.y, e.velocityX, e.velocityY)
         })
+        // eslint-disable-next-line react-hooks/refs -- stableShoot writes flickGestureRef; this is a gesture event handler, never invoked during render
         .onEnd((e) => {
           runOnJS(stableShoot)(e.translationX, e.translationY, e.velocityX, e.velocityY)
         })
+        // eslint-disable-next-line react-hooks/refs -- stableAimCancel writes flickGestureRef; this is a gesture event handler, never invoked during render
         .onFinalize(() => {
           runOnJS(stableAimCancel)()
         })
@@ -886,7 +948,7 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
             <Button mode='contained' onPress={onResetGame} style={styles.overlayButton} buttonColor={playerColor[loser]} textColor={playerOnColor[loser]}>
               Play Again
             </Button>
-            <Button mode='contained' onPress={() => router.back()} style={styles.overlayButton} buttonColor={playerColor[winner]} textColor={playerOnColor[winner]}>
+            <Button mode='contained' onPress={safeBack} style={styles.overlayButton} buttonColor={playerColor[winner]} textColor={playerOnColor[winner]}>
               Loadout
             </Button>
           </View>

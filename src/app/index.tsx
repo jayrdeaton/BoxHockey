@@ -1,7 +1,6 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton } from '@rific/feedback-press'
-import { rotateInsets, useRotation } from '@tastic/core'
-import { FakeLandscapeView } from '@tastic/split-screen'
+import { FakeLandscapeView, rotateInsets, useRotation } from '@tastic/core'
 import { router } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { StyleSheet, View } from 'react-native'

@@ -24,9 +24,14 @@ import { SplashGate } from '@/utils/splashGate'
 // RotationAwareStatusBar. Hides the OS status bar whenever content elsewhere is visually rotated
 // (see @tastic/split-screen's FakeLandscapeView, now used by /index and /loadout) — a portrait-drawn
 // OS status bar reads wrong sitting over rotated content. /game hides it unconditionally regardless
-// (see its own <StatusBar hidden />), so this only actually matters on /index and /loadout.
+// (see its own <StatusBar hidden />), so this only actually matters on /index and /loadout. Reads
+// settings.lockOrientation the same way index.tsx's useRotation and loadout.tsx's
+// useOrientationState do, so this bar's hidden/shown state always matches whatever rotation the
+// visible content is actually locked to — passing nothing here would track live tilt unconditionally
+// and could diverge from content that's deliberately ignoring it with Lock Orientation on.
 function RotationAwareStatusBar() {
-  const { orientationMode, p1OnRight, upsideDown } = useOrientationState()
+  const { settings } = useGameSettings()
+  const { orientationMode, p1OnRight, upsideDown } = useOrientationState(settings.lockOrientation)
   const rotation = getViewRotation(orientationMode, p1OnRight, upsideDown)
   return <StatusBar hidden={rotation !== 0} />
 }

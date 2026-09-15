@@ -18,6 +18,12 @@ interface GameSettingsContextValue {
   // storage) — see splashGate.ts's 'settings' gate and _layout.tsx's GatedApp, which holds every
   // screen reading `settings` (index.tsx does so immediately on mount) off until this flips true.
   loaded: boolean
+  // Held only in memory, never persisted, same as activeRoundSettings above — game.tsx's own
+  // report of whether a shot is actually live right now, read by this provider's own
+  // useEdgeGestureGuard call below. See that call's own doc for why it lives here rather than in
+  // game.tsx directly.
+  isActivelyPlaying: boolean
+  setIsActivelyPlaying: (value: boolean) => void
 }
 
 const GameSettingsContext = createContext<GameSettingsContextValue | null>(null)
@@ -65,19 +71,22 @@ export function GameSettingsProvider({ children }: Props) {
     })
   }, [])
 
-  // Drives @tastic/edge-guard's native UserDefaults mirror on every change — including the
-  // initial-load effect above resolving a stored value — since AsyncStorage (this state's real
-  // store) and UserDefaults (what the guard's native swizzle reads) are otherwise two independent
-  // stores that only this keeps in sync.
-  useEdgeGestureGuard(settings.deferBottomEdgeGestures)
-
   // Held only in memory, never persisted — /game reads this once at mount (see game.tsx) to lock
   // in the round it's about to play, so a settings-dialog edit made mid-round can't retroactively
   // change a round already underway.
   const [activeRoundSettings, setActiveRoundSettings] = useState<GameSettings | null>(null)
   const commitRoundSettings = useCallback((next: GameSettings) => setActiveRoundSettings(next), [])
 
-  return <GameSettingsContext.Provider value={{ settings, setSettings, activeRoundSettings, commitRoundSettings, loaded }}>{children}</GameSettingsContext.Provider>
+  // Also held only in memory, never persisted — see its own doc on GameSettingsContextValue above.
+  const [isActivelyPlaying, setIsActivelyPlaying] = useState(false)
+
+  // Mounted once, permanently, here at the provider — not scoped to game.tsx. Combining the
+  // persisted setting with game.tsx's own live isActivelyPlaying report, in the one place this
+  // hook is ever called, is what keeps Edge Guard both a real opt-in AND scoped to actual gameplay,
+  // without needing the hook itself mounted/unmounted per screen.
+  useEdgeGestureGuard(settings.deferBottomEdgeGestures && isActivelyPlaying)
+
+  return <GameSettingsContext.Provider value={{ settings, setSettings, activeRoundSettings, commitRoundSettings, loaded, isActivelyPlaying, setIsActivelyPlaying }}>{children}</GameSettingsContext.Provider>
 }
 
 export function useGameSettings() {
