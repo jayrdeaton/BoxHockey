@@ -354,3 +354,14 @@ export const COIN_FLIP_MIN_SCALE_X = 0.08
 // be an instant jump-cut as panels reflow or swap sides. Short and symmetric on purpose: this is
 // masking a reflow that already happened at the OS's own pace, not a deliberate reveal.
 export const LOADOUT_PANEL_SWAP_FADE_MS = 180
+
+// Player 1/2's own default color identity — seeds BOTH the app's default theme triad (see
+// redux/store.ts, which feeds these straight into @rific/auto-paper's createThemeReducer as
+// primary/secondary, tertiary derived via getThirdColor) and the fallback guest/CPU colors a fresh
+// install starts with (see redux/seatColorsSlice.ts), so a fresh install's live theme and its
+// remembered "next time" colors always agree with each other. Lives here rather than in
+// components/Theme.tsx (where this used to be defined) specifically so redux/store.ts can import
+// it without a store.ts -> Theme.tsx -> store.ts import cycle (Theme.tsx now reads live theme
+// state back out of the store via useSelector).
+export const DEFAULT_P1_COLOR = '#f44336'
+export const DEFAULT_P2_COLOR = '#2196f3'

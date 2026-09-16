@@ -1,8 +1,9 @@
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { getRgb, getThirdColor, Provider as AutoPaperProvider, ThemeSettings } from '@rific/auto-paper'
+import { Provider as AutoPaperProvider, themeActions, ThemeSettings } from '@rific/auto-paper'
 import * as SplashScreen from 'expo-splash-screen'
-import { ReactNode, useCallback, useEffect, useState } from 'react'
+import { ReactNode, useCallback } from 'react'
+import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 
+import { type RootState } from '@/redux/store'
 import { useSplashReady } from '@/utils/splashGate'
 
 SplashScreen.preventAutoHideAsync()
@@ -10,91 +11,30 @@ SplashScreen.preventAutoHideAsync()
 // splash view is just yanked off screen the instant every gate reports ready.
 SplashScreen.setOptions({ fade: true, duration: 400 })
 
-const APPEARANCE_STORAGE_KEY = 'boxhockey.appearance'
-// Cold-boot default before any seat-aware screen has mounted, and — from then on — the persisted
-// fallback loadout.tsx uses for a human seat with no profile selected ("guest"). Reused for both
-// instead of a redundant third key: a fresh boot has no seats yet, so "the last color a guest saw"
-// is exactly the right default for it too. See loadout.tsx's own guest-color effect/handlers.
-const GUEST_COLORS_STORAGE_KEY = 'boxhockey.playerColors'
-// Independent of the guest slot above so a CPU opponent's color and a human guest's color don't
-// fight over one remembered value — see loadout.tsx's own CPU-color effect/handlers. CPU only ever
-// occupies player 2 (see utils/gameMode.ts's humanPlayersFor), so this is a single color, not a pair.
-const CPU_COLOR_STORAGE_KEY = 'boxhockey.cpuColor'
-
-export const DEFAULT_P1_COLOR = '#f44336'
-export const DEFAULT_P2_COLOR = '#2196f3'
-
-function triadFor(p1: string, p2: string) {
-  return { primary: p1, secondary: p2, tertiary: getThirdColor(p1, p2) }
-}
-
-function isValidHex(value: unknown): value is string {
-  return typeof value === 'string' && getRgb(value) !== null
-}
-
-export async function loadGuestColors(): Promise<{ p1: string; p2: string }> {
-  const stored = await AsyncStorage.getItem(GUEST_COLORS_STORAGE_KEY)
-  let p1 = DEFAULT_P1_COLOR
-  let p2 = DEFAULT_P2_COLOR
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored)
-      if (isValidHex(parsed.p1)) p1 = parsed.p1
-      if (isValidHex(parsed.p2)) p2 = parsed.p2
-    } catch {
-      // Corrupt/stale blob — fall back to defaults above.
-    }
-  }
-  return { p1, p2 }
-}
-
-export function saveGuestColors(colors: { p1: string; p2: string }) {
-  void AsyncStorage.setItem(GUEST_COLORS_STORAGE_KEY, JSON.stringify(colors))
-}
-
-export async function loadCpuColor(): Promise<string> {
-  const stored = await AsyncStorage.getItem(CPU_COLOR_STORAGE_KEY)
-  return isValidHex(stored) ? stored : DEFAULT_P2_COLOR
-}
-
-export function saveCpuColor(color: string) {
-  void AsyncStorage.setItem(CPU_COLOR_STORAGE_KEY, color)
-}
-
 interface Props {
   children: ReactNode
 }
 
 export function Theme({ children }: Props) {
-  const [settings, setSettings] = useState<Partial<ThemeSettings> | null>(null)
+  // redux/store.ts's own `theme` slice (createThemeReducer, seeded with this app's real default
+  // P1/P2 colors — see constants/game.ts) replaces this component's old per-field AsyncStorage
+  // load/save entirely. PersistGate (mounted in Providers.tsx, an ancestor of this component —
+  // Theme is rendered as its child in _layout.tsx) already blocks rendering until redux-persist has
+  // rehydrated, so by the time this mounts `settings` is already the real persisted (or, on a fresh
+  // install, default) triad — no async gate/loading state needed here the way the old AsyncStorage
+  // version required.
+  const settings = useSelector((state: RootState) => state.theme, shallowEqual)
+  const dispatch = useDispatch()
 
-  useEffect(() => {
-    Promise.all([AsyncStorage.getItem(APPEARANCE_STORAGE_KEY), loadGuestColors()]).then(([storedAppearance, guest]) => {
-      const appearance = storedAppearance === 'light' || storedAppearance === 'dark' || storedAppearance === 'system' ? storedAppearance : 'dark'
-      setSettings({ appearance, color: triadFor(guest.p1, guest.p2) })
-    })
-  }, [])
+  useSplashReady('theme', true)
 
-  // Loaded settings gate mounting AutoPaperProvider entirely (rather than mounting it immediately
-  // with defaults and patching `initialValue` once the read resolves): AutoPaperProvider's own
-  // `settings` state is a lazy useState(() => ...) that only reads `initialValue` on its very first
-  // mount, so a changed `initialValue` prop on a later render is silently ignored — persistence
-  // would appear to work (this component's own state updates) while the live theme never actually
-  // picks it up. Splash stays up for this window regardless (see useSplashReady below), so gating
-  // costs nothing visually.
-  useSplashReady('theme', settings !== null)
-
-  // Only persists appearance — AutoPaperProvider owns the live settings after mount, and calling
-  // setSettings here too would update this parent component while the provider (a child) is
-  // rendering. Color used to be persisted unconditionally here too, on every theme change; now
-  // loadout.tsx owns that itself (saveGuestColors/saveCpuColor above), since which slot a color
-  // change should land in — or whether it should persist at all — depends on that seat's own
-  // profile/guest/CPU status, something this generic theme-level callback has no way to know.
-  const onChange = useCallback((next: ThemeSettings) => {
-    void AsyncStorage.setItem(APPEARANCE_STORAGE_KEY, next.appearance)
-  }, [])
-
-  if (!settings) return null
+  // Persists the FULL settings object now (appearance included), not just appearance — color used
+  // to be excluded here and persisted separately by loadout.tsx's own saveGuestColors/saveCpuColor
+  // AsyncStorage calls; now that both live in the same `theme` Redux slice, one unconditional
+  // dispatch covers all of it. loadout.tsx's own useThemeSettings().set(...) calls (unchanged by
+  // this) are what drive the LIVE color moment to moment; this onChange is only what makes whatever
+  // that resolves to durable across a relaunch.
+  const onChange = useCallback((next: ThemeSettings) => dispatch(themeActions.initialize(next)), [dispatch])
 
   return (
     <AutoPaperProvider initialValue={settings} onChange={onChange}>

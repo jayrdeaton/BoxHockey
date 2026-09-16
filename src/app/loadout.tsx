@@ -7,14 +7,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import Animated from 'react-native-reanimated'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useDispatch, useSelector } from 'react-redux'
 
 import { LOADOUT_SHARED_CONTROLS_IDS, LoadoutSharedControls } from '@/components/LoadoutSharedControls'
 import { PlayerSetupPanel } from '@/components/PlayerSetupPanel'
 import { SettingsDialog } from '@/components/SettingsDialog'
-import { loadCpuColor, loadGuestColors, saveCpuColor, saveGuestColors } from '@/components/Theme'
 import { LOADOUT_PANEL_SWAP_FADE_MS } from '@/constants/game'
 import { useGameSettings } from '@/hooks/useGameSettings'
 import { useProfiles } from '@/hooks/useProfiles'
+import { seatColorsActions } from '@/redux/seatColorsSlice'
+import type { RootState } from '@/redux/store'
 import { BoardVariant, ControlScheme, FrictionLevel, InterceptSpeed, Player, Profile, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
 import { AI_DIFFICULTY_LABELS, AIDifficulty } from '@/utils/aiOpponent'
 import { BOARD_VARIANT_LABELS } from '@/utils/board'
@@ -133,27 +135,18 @@ export default function LoadoutScreen() {
   const p1Color = themeColors.primary
   const p2Color = themeColors.secondary
 
+  const dispatch = useDispatch()
   // A seat's live color comes from one of three independently-remembered places depending on what's
   // currently in that seat — a selected profile's own saved color, a CPU opponent's own remembered
   // color, or (human, no profile) a guest's own remembered color — never one shared slot the way
   // this used to work, which let a profile's live color drift from its saved one and made a CPU's
   // color fight a guest's over a single remembered value. Only guestColors/cpuColor are persisted
-  // here; a profile's own saved color is never written back to (see the profile-color effect below
-  // for why, and app/profiles.tsx's own ProfilesManager, the only place that's actually edited).
-  // Both start null until their one-time AsyncStorage read below resolves.
-  const [guestColors, setGuestColors] = useState<{ p1: string; p2: string } | null>(null)
-  const [cpuColor, setCpuColor] = useState<string | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([loadGuestColors(), loadCpuColor()]).then(([guest, cpu]) => {
-      if (cancelled) return
-      setGuestColors(guest)
-      setCpuColor(cpu)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  // here (the `seatColors` Redux slice — see redux/seatColorsSlice.ts — rehydrated by the time this
+  // screen mounts, same PersistGate argument as Theme.tsx's own read of `state.theme`); a profile's
+  // own saved color is never written back to (see the profile-color effect below for why, and
+  // app/profiles.tsx's own ProfilesManager, the only place that's actually edited).
+  const guestColors = useSelector((state: RootState) => state.seatColors.lastGuestColor)
+  const cpuColor = useSelector((state: RootState) => state.seatColors.lastCpuColor)
 
   const p1Profile = profiles.find((p) => p.id === lastSelected[1]) ?? null
   const p2Profile = p2IsHuman ? (profiles.find((p) => p.id === lastSelected[2]) ?? null) : null
@@ -197,8 +190,8 @@ export default function LoadoutScreen() {
 
   // Keeps each seat's live theme color matching what it's actually supposed to be right now.
   // Mount-time and reactive only (lastSelected changing from something *outside* this screen's own
-  // pickers — e.g. deleting the currently-selected profile from Manage — and the guest/CPU/profiles
-  // reads themselves resolving) — a fresh tap-select is instead applied immediately by
+  // pickers — e.g. deleting the currently-selected profile from Manage — and the profiles roster
+  // itself resolving) — a fresh tap-select is instead applied immediately by
   // handleP1ProfileSelect/handleP2ProfileSelect below, which both know the newly-picked profile
   // directly and don't need to wait on lastSelected to round-trip back through here. Deliberately
   // does NOT run on every render (profiles is a brand new array from useProfiles() on every one of
@@ -206,9 +199,8 @@ export default function LoadoutScreen() {
   // "profiles finished loading" signal instead) and does NOT reapply a profile's color over a
   // transient override just because some unrelated dependency here changed (see overrideRef above).
   useEffect(() => {
-    if (!guestColors || cpuColor === null) return
-    const nextP1 = p1Profile ? (overrideRef.current[1] ? p1Color : p1Profile.color) : guestColors.p1
-    const nextP2 = p2Profile ? (overrideRef.current[2] ? p2Color : p2Profile.color) : p2IsHuman ? guestColors.p2 : cpuColor
+    const nextP1 = p1Profile ? (overrideRef.current[1] ? p1Color : p1Profile.color) : guestColors[1]
+    const nextP2 = p2Profile ? (overrideRef.current[2] ? p2Color : p2Profile.color) : p2IsHuman ? guestColors[2] : cpuColor
     if (nextP1.toLowerCase() === p1Color.toLowerCase() && nextP2.toLowerCase() === p2Color.toLowerCase()) return
     setThemeColor({ color: { primary: nextP1, secondary: nextP2, tertiary: getThirdColor(nextP1, nextP2) } })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -235,11 +227,10 @@ export default function LoadoutScreen() {
       overrideRef.current[2] = false
       const guest = guestColorsRef.current
       const cpu = cpuColorRef.current
-      if (!guest || cpu === null) return
       const p1Prof = p1ProfileRef.current
       const p2Prof = p2ProfileRef.current
-      const nextP1 = p1Prof ? p1Prof.color : guest.p1
-      const nextP2 = p2Prof ? p2Prof.color : p2IsHuman ? guest.p2 : cpu
+      const nextP1 = p1Prof ? p1Prof.color : guest[1]
+      const nextP2 = p2Prof ? p2Prof.color : p2IsHuman ? guest[2] : cpu
       setThemeColor({ color: { primary: nextP1, secondary: nextP2, tertiary: getThirdColor(nextP1, nextP2) } })
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [lastSelected[1], lastSelected[2], p2IsHuman, setThemeColor])
@@ -255,16 +246,12 @@ export default function LoadoutScreen() {
         return
       }
       if (seat === 2 && !p2IsHuman) {
-        setCpuColor(hex)
-        saveCpuColor(hex)
+        dispatch(seatColorsActions.setLastCpuColor(hex))
         return
       }
-      if (!guestColors) return
-      const next = seat === 1 ? { ...guestColors, p1: hex } : { ...guestColors, p2: hex }
-      setGuestColors(next)
-      saveGuestColors(next)
+      dispatch(seatColorsActions.setLastGuestColor({ seat, color: hex }))
     },
-    [p1Profile, p2Profile, p2IsHuman, guestColors]
+    [p1Profile, p2Profile, p2IsHuman, dispatch]
   )
 
   // Picking the other slot's exact current color swaps the two instead of no-op'ing — only
@@ -303,7 +290,7 @@ export default function LoadoutScreen() {
     (profile: Profile | null) => {
       overrideRef.current[1] = false
       selectProfile(1, profile?.id ?? null)
-      const hex = profile ? profile.color : guestColors?.p1
+      const hex = profile ? profile.color : guestColors[1]
       if (hex) setThemeColor({ color: { primary: hex, secondary: p2Color, tertiary: getThirdColor(hex, p2Color) } })
     },
     [selectProfile, guestColors, p2Color, setThemeColor]
@@ -312,7 +299,7 @@ export default function LoadoutScreen() {
     (profile: Profile | null) => {
       overrideRef.current[2] = false
       selectProfile(2, profile?.id ?? null)
-      const hex = profile ? profile.color : guestColors?.p2
+      const hex = profile ? profile.color : guestColors[2]
       if (hex) setThemeColor({ color: { primary: p1Color, secondary: hex, tertiary: getThirdColor(p1Color, hex) } })
     },
     [selectProfile, guestColors, p1Color, setThemeColor]

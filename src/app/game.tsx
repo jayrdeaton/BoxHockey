@@ -782,36 +782,71 @@ export default function GameScreen() {
   // Same disjoint bottom/top-half split as p1TapGesture/p2TapGesture above (P1 = bottom, P2 = top —
   // see that pair's own comment), rendered on separate views at the identical position rather than
   // composed onto the same gesture object, since only one of the two tip-off modes is ever
-  // 'enabled' at once. Gesture.Pan(), not Gesture.Tap() — this mode's third press is a real drag,
-  // and there's only one zone per player (no hidden target, so no position hit-test is needed at
-  // all: unlike stableFaceoffTouch, these never read e.absoluteX/Y). `.onBegin` (touch-down) feeds
-  // the "who started their swipe first" timestamp; `.onEnd` (release) feeds either a plain press
-  // (taps 1-2) or the real swipe vector (tap 3) — see stableTripleTapSwipeStart/
-  // stableTripleTapPressOrSwipeEnd above for how that's decided.
-  const p1TripleTapGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .maxPointers(1)
-        .minDistance(0)
-        // eslint-disable-next-line react-hooks/refs -- stableTripleTapSwipeStart reads a ref; see panGesture's .onStart comment above
-        .onBegin(() => runOnJS(stableTripleTapSwipeStart)(1))
-        // eslint-disable-next-line react-hooks/refs -- stableTripleTapPressOrSwipeEnd reads a ref; see panGesture's .onStart comment above
-        .onEnd((e) => runOnJS(stableTripleTapPressOrSwipeEnd)(1, e.translationX, e.translationY))
-        .enabled(phase === 'tripleTap'),
-    [stableTripleTapSwipeStart, stableTripleTapPressOrSwipeEnd, phase]
-  )
-  const p2TripleTapGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .maxPointers(1)
-        .minDistance(0)
-        // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
-        .onBegin(() => runOnJS(stableTripleTapSwipeStart)(2))
-        // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
-        .onEnd((e) => runOnJS(stableTripleTapPressOrSwipeEnd)(2, e.translationX, e.translationY))
-        .enabled(phase === 'tripleTap'),
-    [stableTripleTapSwipeStart, stableTripleTapPressOrSwipeEnd, phase]
-  )
+  // 'enabled' at once. There's only one zone per player (no hidden target, so no position hit-test
+  // is needed at all: unlike stableFaceoffTouch, these never read e.absoluteX/Y).
+  //
+  // Gesture.Race(Tap, Pan), not a bare Pan — a genuine UIPanGestureRecognizer (what Gesture.Pan()
+  // wraps) fundamentally detects MOVEMENT; a true near-zero-movement tap doesn't reliably activate
+  // it at all (confirmed empirically: onEnd simply never fired for a stationary touch, .minDistance
+  // (0) notwithstanding — that only lowers how much movement is REQUIRED to activate, it doesn't
+  // make a movement-detecting recognizer fire for NO movement). Presses 1-2 are ordinary taps, so
+  // they need a real Gesture.Tap() to catch them; the 3rd press is a real drag, which Pan still
+  // handles. Racing the two lets whichever one actually matches the physical gesture win: a quick,
+  // near-stationary touch resolves as Tap (Pan's own distance requirement never activates in time to
+  // preempt it), a real drag resolves as Pan (Tap fails once movement/duration exceeds its own
+  // thresholds). Both gestures' onBegin call stableTripleTapSwipeStart unconditionally — safe (and
+  // necessary) since that callback's own tapCount===2 guard makes it a no-op for presses 1-2
+  // regardless of which recognizer's onBegin fires first, and it's what guarantees swipeStartedAt is
+  // set before EITHER recognizer's onEnd can dispatch a TRIPLE_TAP_SWIPE_END for the 3rd press, even
+  // on the rare case where a fast/short 3rd press resolves via Tap rather than Pan.
+  //
+  // p1TripleTapKey/p2TripleTapKey: a player's own tapCount, threaded onto the GestureDetector's own
+  // JSX `key` below — forces React to fully unmount and remount the detector (tearing down and
+  // recreating the underlying native recognizers from scratch) after every press, rather than
+  // reusing the same long-lived recognizer instance across multiple, separate, discrete touch
+  // sequences. Confirmed empirically necessary: without this, only a zone's FIRST tap of a draw
+  // ever registered — the second (and any later) tap on the same still-mounted recognizer was
+  // silently dropped, on both the Tap and Pan sides of the race alike, and on both real taps and
+  // real swipes. The faceoff mode's own zones never hit this, since each of THEIR zones only ever
+  // needs exactly one successful tap per draw, never a second one on an already-used recognizer.
+  const p1TripleTapKey = tripleTap?.tapCount[0] ?? 0
+  const p2TripleTapKey = tripleTap?.tapCount[1] ?? 0
+  const p1TripleTapGesture = useMemo(() => {
+    const tripleTapEnabled = phase === 'tripleTap'
+    const tap = Gesture.Tap()
+      // eslint-disable-next-line react-hooks/refs -- stableTripleTapSwipeStart reads a ref; see panGesture's .onStart comment above
+      .onBegin(() => runOnJS(stableTripleTapSwipeStart)(1))
+      // eslint-disable-next-line react-hooks/refs -- stableTripleTapPressOrSwipeEnd reads a ref; see panGesture's .onStart comment above
+      .onEnd(() => runOnJS(stableTripleTapPressOrSwipeEnd)(1, 0, 0))
+      .enabled(tripleTapEnabled)
+    const pan = Gesture.Pan()
+      .maxPointers(1)
+      .minDistance(0)
+      // eslint-disable-next-line react-hooks/refs -- see tap's own comment above
+      .onBegin(() => runOnJS(stableTripleTapSwipeStart)(1))
+      // eslint-disable-next-line react-hooks/refs -- see tap's own comment above
+      .onEnd((e) => runOnJS(stableTripleTapPressOrSwipeEnd)(1, e.translationX, e.translationY))
+      .enabled(tripleTapEnabled)
+    return Gesture.Race(tap, pan)
+  }, [stableTripleTapSwipeStart, stableTripleTapPressOrSwipeEnd, phase])
+  const p2TripleTapGesture = useMemo(() => {
+    const tripleTapEnabled = phase === 'tripleTap'
+    const tap = Gesture.Tap()
+      // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
+      .onBegin(() => runOnJS(stableTripleTapSwipeStart)(2))
+      // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
+      .onEnd(() => runOnJS(stableTripleTapPressOrSwipeEnd)(2, 0, 0))
+      .enabled(tripleTapEnabled)
+    const pan = Gesture.Pan()
+      .maxPointers(1)
+      .minDistance(0)
+      // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
+      .onBegin(() => runOnJS(stableTripleTapSwipeStart)(2))
+      // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
+      .onEnd((e) => runOnJS(stableTripleTapPressOrSwipeEnd)(2, e.translationX, e.translationY))
+      .enabled(tripleTapEnabled)
+    return Gesture.Race(tap, pan)
+  }, [stableTripleTapSwipeStart, stableTripleTapPressOrSwipeEnd, phase])
 
   // Coin flip's own "go" tap — spans the whole board (no zones, no player-attribution, unlike the
   // faceoff pair above), and disables itself the instant it's used so this same tap can't
@@ -890,11 +925,12 @@ export default function GameScreen() {
         </GestureDetector>
 
         {/* Triple-tap zones — same bottom/top-half positions as the faceoff pair above (see
-            p1TripleTapGesture's own comment), only ever pointer-active during 'tripleTap'. */}
-        <GestureDetector gesture={p1TripleTapGesture}>
+            p1TripleTapGesture's own comment), only ever pointer-active during 'tripleTap'. `key`
+            forces a full remount (see p1TripleTapKey's own comment) after every press. */}
+        <GestureDetector key={`p1-${p1TripleTapKey}`} gesture={p1TripleTapGesture}>
           <View style={isUpsideDown ? styles.faceoffZoneTop : styles.faceoffZoneBottom} pointerEvents={phase === 'tripleTap' ? 'auto' : 'none'} />
         </GestureDetector>
-        <GestureDetector gesture={p2TripleTapGesture}>
+        <GestureDetector key={`p2-${p2TripleTapKey}`} gesture={p2TripleTapGesture}>
           <View style={isUpsideDown ? styles.faceoffZoneBottom : styles.faceoffZoneTop} pointerEvents={phase === 'tripleTap' ? 'auto' : 'none'} />
         </GestureDetector>
 
@@ -1040,7 +1076,7 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
               Play Again
             </Button>
             <Button mode='contained' onPress={safeBack} style={styles.overlayButton} buttonColor={playerColor[winner]} textColor={playerOnColor[winner]}>
-              Loadout
+              Quit
             </Button>
           </View>
         </View>
