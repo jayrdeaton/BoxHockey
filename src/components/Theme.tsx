@@ -1,10 +1,10 @@
-import { Provider as AutoPaperProvider, themeActions, ThemeSettings } from '@rific/auto-paper'
+import { Provider as AutoPaperProvider, themeActions, ThemeSettings, useThemeBridgeProps } from '@rific/auto-paper'
 import * as SplashScreen from 'expo-splash-screen'
 import { ReactNode, useCallback } from 'react'
 import { shallowEqual, useDispatch, useSelector } from 'react-redux'
 
 import { type RootState } from '@/redux/store'
-import { useSplashReady } from '@/utils/splashGate'
+import { markSplashReady } from '@/utils/splashGate'
 
 SplashScreen.preventAutoHideAsync()
 // iOS defaults `fade` to false (Android always fades regardless of this flag), so without this the
@@ -26,7 +26,18 @@ export function Theme({ children }: Props) {
   const settings = useSelector((state: RootState) => state.theme, shallowEqual)
   const dispatch = useDispatch()
 
-  useSplashReady('theme', true)
+  // A one-shot callback, not a boolean, so there's nothing for useSplashReady to watch — PersistGate
+  // (an ancestor, see Providers.tsx) already blocks this component from mounting until redux-persist
+  // has rehydrated, so `settings` above is already the real persisted value the instant Theme mounts.
+  // That's necessary but not sufficient, though: AutoPaperProvider itself renders null internally
+  // until it's actually computed a theme object from that settings value (see its own source), which
+  // is a separate, later step from Theme just mounting with valid settings in hand. Marking this gate
+  // ready unconditionally at mount — as this file used to — could let the splash screen lift while
+  // AutoPaperProvider was still rendering null underneath it, same class of bug this app's own
+  // splash-gate audit found elsewhere. This instead marks the 'theme' gate (see
+  // src/utils/splashGate.ts) only once AutoPaperProvider itself reports a real theme, matching every
+  // sibling app's own Theme.tsx.
+  const onReady = useCallback(() => markSplashReady('theme'), [])
 
   // Persists the FULL settings object now (appearance included), not just appearance — color used
   // to be excluded here and persisted separately by loadout.tsx's own saveGuestColors/saveCpuColor
@@ -36,9 +47,7 @@ export function Theme({ children }: Props) {
   // that resolves to durable across a relaunch.
   const onChange = useCallback((next: ThemeSettings) => dispatch(themeActions.initialize(next)), [dispatch])
 
-  return (
-    <AutoPaperProvider initialValue={settings} onChange={onChange}>
-      {children}
-    </AutoPaperProvider>
-  )
+  const bridgeProps = useThemeBridgeProps({ initialValue: settings, onChange, onReady })
+
+  return <AutoPaperProvider {...bridgeProps}>{children}</AutoPaperProvider>
 }

@@ -1,3 +1,4 @@
+import { getStaggeredWordDuration, StaggeredWord } from '@tastic/hud'
 import { useEffect } from 'react'
 import { StyleSheet, View } from 'react-native'
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated'
@@ -16,9 +17,7 @@ const WORD_TOP = 'BOX'
 const WORD_BOTTOM = 'HOCKEY'
 const TOTAL_LETTERS = WORD_TOP.length + WORD_BOTTOM.length
 
-const STAGGER_MS = 45
-const LETTER_DURATION_MS = 320
-const TOTAL_STAGGER_MS = (TOTAL_LETTERS - 1) * STAGGER_MS + LETTER_DURATION_MS
+const TOTAL_STAGGER_MS = getStaggeredWordDuration(TOTAL_LETTERS)
 
 // The goal-line accent (and the puck that drops onto it) stay hidden until the wordmark has mostly
 // landed — one "power on" beat once the letters settle, rather than motion competing with letters
@@ -35,37 +34,6 @@ const PUCK_DROP_MS = 220
 const PUCK_DROP_OFFSET = -18
 const BOUNCE_DURATION_MS = 550
 const BOUNCE_HEIGHT = 8
-
-function AnimatedLetter({ char, index, color, reducedMotion }: { char: string; index: number; color: string; reducedMotion: boolean }) {
-  const progress = useSharedValue(reducedMotion ? 1 : 0)
-
-  useEffect(() => {
-    if (reducedMotion) return
-    progress.value = withDelay(index * STAGGER_MS, withTiming(1, { duration: LETTER_DURATION_MS, easing: Easing.out(Easing.back(1.5)) }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reducedMotion])
-
-  const style = useAnimatedStyle(() => ({
-    opacity: progress.value,
-    transform: [{ translateY: (1 - progress.value) * 12 }, { scale: 0.85 + progress.value * 0.15 }]
-  }))
-
-  return (
-    <Animated.Text allowFontScaling={false} style={[styles.letter, { color }, style]}>
-      {char}
-    </Animated.Text>
-  )
-}
-
-function Word({ text, startIndex, color, reducedMotion }: { text: string; startIndex: number; color: string; reducedMotion: boolean }) {
-  return (
-    <View style={styles.word}>
-      {text.split('').map((char, i) => (
-        <AnimatedLetter key={i} char={char} index={startIndex + i} color={color} reducedMotion={reducedMotion} />
-      ))}
-    </View>
-  )
-}
 
 // Bespoke hero for this game (as opposed to LightCycles' light-trail wordmark): two staggered
 // lines of letters, then a goal-line accent — two colored bars sliding in from each side to meet
@@ -104,8 +72,8 @@ export function HeroTitle({ color, p1Color, p2Color }: HeroTitleProps) {
 
   return (
     <View style={styles.wrapper}>
-      <Word text={WORD_TOP} startIndex={0} color={color} reducedMotion={reducedMotion} />
-      <Word text={WORD_BOTTOM} startIndex={WORD_TOP.length} color={color} reducedMotion={reducedMotion} />
+      <StaggeredWord word={WORD_TOP} startIndex={0} color={color} fontFamily={MONO_FONT} fontSize={40} lineHeight={48} letterSpacing={4} reducedMotion={reducedMotion} />
+      <StaggeredWord word={WORD_BOTTOM} startIndex={WORD_TOP.length} color={color} fontFamily={MONO_FONT} fontSize={40} lineHeight={48} letterSpacing={4} reducedMotion={reducedMotion} />
 
       <View style={styles.lineRow}>
         <Animated.View style={[styles.bar, styles.barLeft, { backgroundColor: p1Color }, leftBarStyle]} />
@@ -130,13 +98,6 @@ const styles = StyleSheet.create({
   barRight: {
     transformOrigin: 'left center'
   },
-  letter: {
-    fontFamily: MONO_FONT,
-    fontSize: 40,
-    fontWeight: 'bold',
-    letterSpacing: 4,
-    lineHeight: 48
-  },
   lineRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -150,9 +111,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     height: 16,
     width: 16
-  },
-  word: {
-    flexDirection: 'row'
   },
   wrapper: {
     alignItems: 'center'

@@ -32,8 +32,9 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
   // effect's own closure was created, so it needs a way to read live tapAt rather than a stale
   // snapshot from when the countdown started.
   const stateRef = useRef(state)
-  // eslint-disable-next-line react-hooks/refs -- mirrored every render (see comment above) so the timeout-check timer below reads live tapAt
-  stateRef.current = state
+  useEffect(() => {
+    stateRef.current = state
+  })
 
   // True only on the game's first draw, before both players have signaled ready (see
   // FaceoffState's doc comment in types/index.ts) — a primitive boolean rather than the whole

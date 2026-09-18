@@ -1,4 +1,4 @@
-import { useAchievements } from '@tastic/achievements'
+import { mapUnlocksBySeat, useAchievements } from '@tastic/achievements'
 import { createContext, ReactNode, useCallback, useContext, useMemo } from 'react'
 
 import { ACHIEVEMENT_CATALOG } from '@/constants/achievements'
@@ -62,15 +62,7 @@ export function GameStatsProvider({ children }: Props) {
 
       // The package keys per-profile unlocks by profile id; this app thinks in seats, so translate
       // back through the same profileIds map that produced them.
-      const profiles: Partial<Record<Player, AchievementDefinition[]>> = {}
-      if (context.profileIds) {
-        for (const seat of [1, 2] as Player[]) {
-          const profileId = context.profileIds[seat]
-          if (!profileId) continue
-          const unlocked = result.profiles[profileId]
-          if (unlocked && unlocked.length > 0) profiles[seat] = unlocked
-        }
-      }
+      const profiles = mapUnlocksBySeat([1, 2] as Player[], context.profileIds, result.profiles)
 
       return { device: result.device, profiles }
     },

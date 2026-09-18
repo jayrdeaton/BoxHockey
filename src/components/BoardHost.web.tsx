@@ -1,6 +1,5 @@
+import { loadSkiaWeb } from '@tastic/hud'
 import { lazy, Suspense } from 'react'
-
-import { loadSkiaWeb } from '@/utils/loadSkiaWeb'
 
 import { BoardProps } from './Board'
 

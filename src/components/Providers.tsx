@@ -1,4 +1,4 @@
-import { FeedbackPressProvider, hapticActions, type HapticSettings, soundActions, type SoundSettings } from '@rific/feedback-press'
+import { FeedbackPressProvider, hapticActions, type HapticSettings, soundActions, type SoundSettings, useFeedbackBridgeProps } from '@rific/feedback-press'
 import { useAudioPool } from '@rific/feedback-press/audio'
 import { ReactNode, useCallback } from 'react'
 import * as RNPaper from 'react-native-paper'
@@ -34,8 +34,10 @@ const FeedbackBridge = ({ children }: Props) => {
   useSplashReady('haptics', true)
   useSplashReady('sound', true)
 
+  const bridgeProps = useFeedbackBridgeProps({ initialValue: haptic, onChange, soundInitialValue: sound, onSoundChange, sound: { selection: playSelection, notification: playNotification } })
+
   return (
-    <FeedbackPressProvider initialValue={haptic} onChange={onChange} soundInitialValue={sound} onSoundChange={onSoundChange} paper={RNPaper} sound={{ selection: playSelection, notification: playNotification }}>
+    <FeedbackPressProvider {...bridgeProps} paper={RNPaper}>
       {children}
     </FeedbackPressProvider>
   )

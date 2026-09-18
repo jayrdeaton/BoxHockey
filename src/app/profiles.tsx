@@ -1,9 +1,7 @@
-import { defaultColors, useAutoPaperTheme } from '@rific/auto-paper'
-import { IconButton } from '@rific/feedback-press'
-import { ProfilesManager, ProfilesManagerHandle } from '@tastic/profile'
-import { useRef } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { defaultColors } from '@rific/auto-paper'
+import { ProfilesScreen } from '@tastic/profile'
 
+import { useGameStats } from '@/hooks/useGameStats'
 import { useProfiles } from '@/hooks/useProfiles'
 import { ControlScheme } from '@/types'
 import { safeBack } from '@/utils/navigation'
@@ -19,34 +17,31 @@ const NEW_PROFILE_CONTROL_SCHEME: ControlScheme = 'flick'
 
 // A real routed screen — reachable only from P1's dropdown (see ProfilePicker's own doc for why P2
 // can't host this: its zone is 180°-rotated in face-to-face mode, and the OS keyboard doesn't rotate
-// with it). Reads useProfiles() directly rather than taking it as props from loadout.tsx — there's
-// nothing left for that screen to thread through once this is its own destination instead of
-// conditionally-rendered state living on the loadout itself. Mirrors LightCycles' identically-shaped
-// app/profiles.tsx, minus its own stats cleanup (BoxHockey has no per-profile stats to remove).
-export default function ProfilesScreen() {
-  const { dark } = useAutoPaperTheme()
-  const bg = dark ? '#000000' : '#FFFFFF'
-  const fg = dark ? '#FFFFFF' : '#000000'
+// with it). Reads useProfiles()/useGameStats() directly rather than taking them as props from
+// loadout.tsx — there's nothing left for that screen to thread through once this is its own
+// destination instead of conditionally-rendered state living on the loadout itself. Mirrors
+// LightCycles' identically-shaped app/profiles.tsx, including its stats cleanup on delete — this app
+// does have its own per-profile stats bucket (useGameStats' removeProfileStats), the same as
+// LightCycles, so the earlier "BoxHockey has no per-profile stats to remove" note here was stale.
+// The container View, back button, and theme-derived bg/fg all now live inside @tastic/profile's own
+// ProfilesScreen — this only supplies what's genuinely app-specific: the extra controlScheme field
+// this app's own createProfile needs beyond ProfileEditPatch's base name/color/tag shape.
+export default function Profiles() {
   const { profiles, createProfile, updateProfile, deleteProfile } = useProfiles()
-  // See LightCycles' identical comment in app/profiles.tsx for why this ref/handler pair is needed
-  // — expo-router web keeps a popped screen mounted-but-hidden, so ProfilesManager's own
-  // unmount-flush fallback never fires here without it.
-  const managerRef = useRef<ProfilesManagerHandle>(null)
-
-  const handleBack = () => {
-    managerRef.current?.commitPendingEdit()
-    safeBack()
-  }
+  // Only for wiring onDelete below — nothing else on this screen touches stats directly.
+  const { removeProfileStats } = useGameStats()
 
   return (
-    <View style={[styles.container, { backgroundColor: bg }]}>
-      <ProfilesManager ref={managerRef} profiles={profiles} defaultColor={defaultColors[0].value} onCreate={(patch) => createProfile({ ...patch, controlScheme: NEW_PROFILE_CONTROL_SCHEME })} onSave={(id, patch) => updateProfile(id, patch)} onDelete={(id) => deleteProfile(id)} headerLeft={<IconButton icon='arrow-left' iconColor={fg} size={24} onPress={handleBack} accessibilityLabel='Back' />} />
-    </View>
+    <ProfilesScreen
+      profiles={profiles}
+      defaultColor={defaultColors[0].value}
+      onCreate={(patch) => createProfile({ ...patch, controlScheme: NEW_PROFILE_CONTROL_SCHEME })}
+      onSave={(id, patch) => updateProfile(id, patch)}
+      onDelete={(id) => {
+        deleteProfile(id)
+        removeProfileStats(id)
+      }}
+      onBack={safeBack}
+    />
   )
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1
-  }
-})

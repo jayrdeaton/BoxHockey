@@ -9,20 +9,7 @@
       "@/hooks/*": ["./src/hooks/*"],
       "@/redux/*": ["./src/redux/*"],
       "@/types": ["./src/types/index.ts"],
-      "@/utils/*": ["./src/utils/*"],
-      // @shopify/react-native-skia has no "exports" map — a classic top-level "react-native"
-      // field points bare imports at raw, untranspiled src/index.ts, which customConditions:
-      // ["react-native"] (inherited from the shared preset, matching Metro's real resolution)
-      // correctly follows. That pulls the package's own web/WithSkiaWeb.tsx into the typecheck
-      // program, and it has a genuine unused `React` import upstream (present in the latest
-      // published version too, not just 2.6.2) that fails under this preset's noUnusedLocals.
-      // Redirecting this package (and its own directly-imported .../src/web deep path, used by
-      // src/utils/loadSkiaWeb.web.ts to lazy-load the CanvasKit WASM runtime) to their compiled
-      // .d.ts counterparts for typecheck purposes avoids that without weakening customConditions
-      // (which other real deps' exports-map "react-native" conditions still need) or
-      // noUnusedLocals (which is doing its job everywhere else).
-      "@shopify/react-native-skia": ["./node_modules/@shopify/react-native-skia/lib/typescript/src/index.d.ts"],
-      "@shopify/react-native-skia/src/web": ["./node_modules/@shopify/react-native-skia/lib/typescript/src/web/index.d.ts"]
+      "@/utils/*": ["./src/utils/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"]

@@ -30,8 +30,9 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
   // e.g. game.tsx's faceoffRef) so the intercept effect below can read the FRESHEST puck position
   // at each scheduled step, not a stale one captured back when eligibility first fired.
   const puckRef = useRef(state.puck)
-  // eslint-disable-next-line react-hooks/refs -- mirrored every render (see comment above) so the intercept effect below reads the freshest puck
-  puckRef.current = state.puck
+  useEffect(() => {
+    puckRef.current = state.puck
+  })
 
   // `paused` (settings/quit-confirm dialog open — see game.tsx) is only checked here, before
   // anything below has dispatched — safe to gate the whole chain on it at this single point

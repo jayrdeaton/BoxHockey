@@ -1,8 +1,9 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
+import { broadcastDeviceUnlocks } from '@tastic/achievements'
 import { useOrientationState, useRotation, useSettledWindowDimensions } from '@tastic/core'
-import { ConfirmDialog } from '@tastic/hud'
+import { ConfirmDialog, useQuitConfirmation } from '@tastic/hud'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
@@ -23,7 +24,7 @@ import { passesFlickShotGate, useGameState } from '@/hooks/useGameState'
 import { useGameStats } from '@/hooks/useGameStats'
 import { useProfiles } from '@/hooks/useProfiles'
 import { useTripleTap } from '@/hooks/useTripleTap'
-import { BoardLayout, GamePhase, GameSettings, Player } from '@/types'
+import { AchievementDefinition, BoardLayout, GamePhase, GameSettings, Player } from '@/types'
 import { computeBoardLayout, faceoffZoneCenter, faceoffZoneCenters, faceoffZoneRadius } from '@/utils/board'
 import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
 import { safeBack } from '@/utils/navigation'
@@ -155,10 +156,15 @@ export default function GameScreen() {
   // useGameState/useAIOpponent/useFaceoff below, so `paused` exists in time to thread into all
   // three (each halts its own timers/RAF loop while true — see their own comments).
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // Only asked once there's a real score to lose — 0-0 exits immediately, since there's nothing
-  // yet for a confirmation to protect (mirrors LightCycles' identical quit-confirmation gate).
-  const [confirmBackVisible, setConfirmBackVisible] = useState(false)
-  const paused = settingsOpen || confirmBackVisible
+  // useQuitConfirmation reads hasProgress lazily (only inside a real requestBack() call, via its
+  // own ref-mirrored getter — see that hook's own doc) rather than taking a plain boolean, which is
+  // exactly what makes this safe to call before `scores` exists yet: `scores` comes from
+  // useGameState's returned state, which itself needs `paused` (derived from confirmVisible) as an
+  // INPUT, so a plain-boolean argument computed from `scores` here would be a real circular render
+  // dependency. Only asked once there's a real score to lose — 0-0 exits immediately, since there's
+  // nothing yet for a confirmation to protect (mirrors LightCycles' identical quit-confirmation gate).
+  const { confirmVisible, requestBack, cancelBack } = useQuitConfirmation(() => scores[0] > 0 || scores[1] > 0, safeBack)
+  const paused = settingsOpen || confirmVisible
 
   const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch, setInterceptTouch } = useGameState(board, scoreToWin, tipoffMode, friction, controlScheme, paused, interceptThreshold)
   const { phase, puck, aim, interceptAim, currentPlayer, scores, bounceCount, lastScoredGoal, wellEnterCount, lastWellPolarity, goalDoorHitCount, lastGoalDoorSide, faceoff, tripleTap } = state
@@ -206,8 +212,9 @@ export default function GameScreen() {
 
   const vibration = useVibration()
   const vibrationRef = useRef(vibration)
-  // eslint-disable-next-line react-hooks/refs -- mirrored every render so stable callbacks below can read it without needing it in their own deps
-  vibrationRef.current = vibration
+  useEffect(() => {
+    vibrationRef.current = vibration
+  })
 
   // Gameplay SFX — mirrors the haptics below one-for-one (see useGameSound): each event fires its
   // soundRef.current.playX() beside the matching vibrationRef.current.x(), so sound and haptic
@@ -224,13 +231,9 @@ export default function GameScreen() {
   const playGoal = useGameSound(require('../../assets/sounds/goal.wav'))
   const playWin = useGameSound(require('../../assets/sounds/win.wav'))
   const soundRef = useRef({ playSelect, playBounce, playWellAttract, playWellRepel, playFaceoffTick, playFaceoffGo, playFaceoffResolved, playGoal, playWin })
-  // eslint-disable-next-line react-hooks/refs -- see vibrationRef's own comment above
-  soundRef.current = { playSelect, playBounce, playWellAttract, playWellRepel, playFaceoffTick, playFaceoffGo, playFaceoffResolved, playGoal, playWin }
-
-  const onBackPress = useCallback(() => {
-    if (scores[0] > 0 || scores[1] > 0) setConfirmBackVisible(true)
-    else safeBack()
-  }, [scores])
+  useEffect(() => {
+    soundRef.current = { playSelect, playBounce, playWellAttract, playWellRepel, playFaceoffTick, playFaceoffGo, playFaceoffResolved, playGoal, playWin }
+  })
 
   // colors needed here (not just Board.tsx, which derives its own copy) for the web key hints'
   // text color — see FACEOFF_KEY_HINTS rendering below.
@@ -425,6 +428,11 @@ export default function GameScreen() {
     }
   }, [scores])
 
+  // Two-player (pass-and-play) only — seat -> that seat's own newly-unlocked achievements this
+  // match, read by MatchOverlays' Game Over card below to badge each seat correctly (see the
+  // gameOver effect below for why this replaces showAchievementToast for that mode specifically).
+  const [seatUnlocks, setSeatUnlocks] = useState<Partial<Record<Player, AchievementDefinition[]>>>({})
+
   // Victory fanfare — fires once, the instant the game actually ends, distinct from the goal sound
   // above which fires on every score including the winning one.
   const prevPhaseRef = useRef(phase)
@@ -437,13 +445,27 @@ export default function GameScreen() {
       const matchWinner: Player = scores[0] >= scoreToWin ? 1 : 2
       const profileIds = { 1: lastSelected[1] ?? undefined, 2: aiPlayer === null ? (lastSelected[2] ?? undefined) : undefined }
       const result = recordMatchOutcome({ winner: matchWinner, scores: [scores[0], scores[1]] }, { gameMode: roundSettings.gameMode, aiDifficulty, boardVariant: layout, profileIds })
-      // One toast per newly-unlocked achievement, in its own tier color and icon. vsCpu has a
-      // single human perspective, so seat 1's own profile unlocks join the same toasts; in
-      // pass-and-play every unlock is still surfaced here, since neither seat owns the toast area.
-      const seatUnlocks = aiPlayer === null ? [...(result.profiles[1] ?? []), ...(result.profiles[2] ?? [])] : (result.profiles[1] ?? [])
-      ;[...result.device, ...seatUnlocks].forEach((achievement) => {
-        showAchievementToast(achievement.title, 'Achievement unlocked', undefined, { color: ACHIEVEMENT_TIER_COLORS[achievement.tier], icon: achievement.icon })
-      })
+      if (aiPlayer === null) {
+        // Genuine two-seat pass-and-play — showAchievementToast below is a single, screen-fixed
+        // @rific/toaster call with no rotation of its own, so it only ever reads right-side-up for
+        // whichever seat happens to be physically upside-up right now. A player seated opposite
+        // (seat 2 sits rotated 180° from seat 1 — see isUpsideDown above) would see it upside-down
+        // even though it's their own achievement. Broadcasting into seatUnlocks instead lets the
+        // Game Over card below (which already carries its own cardRotationStyle) show each seat's
+        // own unlocks once the match settles. Device-wide achievements have no per-seat owner, but
+        // both seats are human here, so they're broadcast into both seats' own entries rather than
+        // dropped or arbitrarily attributed to one side.
+        const broadcast = broadcastDeviceUnlocks([1, 2] as Player[], result.profiles, result.device)
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- a real one-shot transition guarded by prevPhaseRef above, not a render loop; the sibling vsCpu branch below fires showAchievementToast (which does the same thing inside @rific/toaster) unconditionally in this same effect
+        setSeatUnlocks(broadcast)
+      } else {
+        // vsCpu only ever has one human perspective (seat 1; seat 2 is the CPU) to address, so the
+        // shared, screen-fixed toast is fine here — one per newly-unlocked achievement, in its own
+        // tier color and icon, its own profile unlocks joining the device-wide ones as before.
+        ;[...result.device, ...(result.profiles[1] ?? [])].forEach((achievement) => {
+          showAchievementToast(achievement.title, 'Achievement unlocked', undefined, { color: ACHIEVEMENT_TIER_COLORS[achievement.tier], icon: achievement.icon })
+        })
+      }
     }
     // Reset the tap-to-flip gate the instant a fresh coin-flip draw begins (game start, or a new
     // game via Game Over's "Play Again") — see coinFlipStarted/stableCoinFlipTap below. This is the
@@ -551,8 +573,9 @@ export default function GameScreen() {
   // fires — the moment a real tap is most likely to land — silently dropping it. Keeping these
   // callbacks stable across a draw is what keeps the gesture handler itself stable.
   const faceoffRef = useRef(faceoff)
-  // eslint-disable-next-line react-hooks/refs -- mirrored every render (see comment above) so stableFaceoffTouch/Ready read live faceoff state
-  faceoffRef.current = faceoff
+  useEffect(() => {
+    faceoffRef.current = faceoff
+  })
 
   // Ready-check (game's first draw only — see FaceoffState's doc comment): any touch/key on a
   // player's own side counts, no need to hit a specific circle — there's nothing to aim at yet,
@@ -622,8 +645,9 @@ export default function GameScreen() {
   // each swipe), and closing over it would tear down/remount p1TripleTapGesture/p2TripleTapGesture
   // below on every one of them.
   const tripleTapRef = useRef(tripleTap)
-  // eslint-disable-next-line react-hooks/refs -- mirrored every render (see comment above) so the stable callbacks below read live tripleTap state
-  tripleTapRef.current = tripleTap
+  useEffect(() => {
+    tripleTapRef.current = tripleTap
+  })
 
   // The third press's touch-down — only meaningful once that player's own 2 taps are already in
   // and they haven't already started this draw's swipe (both re-checked against live state, not
@@ -973,7 +997,7 @@ export default function GameScreen() {
       {/* Back + settings chips moved into MatchOverlays below (see its own comment) — they need the
       same live rotation-in-place treatment as its dialogs, which only that component's isolated
       tilt subscription provides. */}
-      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} onResetGame={() => resetGame(board)} confirmBackVisible={confirmBackVisible} onQuitCancel={() => setConfirmBackVisible(false)} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={onBackPress} />
+      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} seatUnlocks={seatUnlocks} onResetGame={() => resetGame(board)} confirmVisible={confirmVisible} cancelBack={cancelBack} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={requestBack} />
     </View>
   )
 }
@@ -988,9 +1012,14 @@ interface MatchOverlaysProps {
   cardBg: string
   cardBorder: string
   fgMuted: string
+  // Pass-and-play's own achievement unlocks for the match that just ended (see GameScreen's own
+  // seatUnlocks doc comment) — always {} for vsCpu, which keeps using showAchievementToast instead.
+  // Rendered in the Game Over card below rather than a toast, since that card already rotates with
+  // the device's own live physical hold.
+  seatUnlocks: Partial<Record<Player, AchievementDefinition[]>>
   onResetGame: () => void
-  confirmBackVisible: boolean
-  onQuitCancel: () => void
+  confirmVisible: boolean
+  cancelBack: () => void
   settingsOpen: boolean
   onSettingsDismiss: () => void
   // Opens the settings dialog — lives here, not just onSettingsDismiss, now that the chip button
@@ -1022,7 +1051,7 @@ interface MatchOverlaysProps {
 // rotate their own content in place via `rotation` rather than reflowing layout (unlike /index and
 // /loadout's FakeLandscapeView) — the fixed zones have to keep the exact shape TouchInputLayer's
 // unrotated hit-zones already use.
-function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, onResetGame, confirmBackVisible, onQuitCancel, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
+function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, seatUnlocks, onResetGame, confirmVisible, cancelBack, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
   const rotation = useRotation()
   const cardRotationStyle = rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }
   // The 180° upsideDown case also swaps which edge each chip sits on — a pure in-place spin isn't
@@ -1072,6 +1101,28 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
               <Text style={{ color: fgMuted }}> – </Text>
               <Text style={{ color: playerColor[2] }}>{scores[1]}</Text>
             </Text>
+            {/* Pass-and-play-only achievement badges — see seatUnlocks' own doc comment in
+                GameScreen for why these land here instead of the shared showAchievementToast vsCpu
+                still uses (seatUnlocks stays {} there, so this never renders for that mode). One
+                row per achievement, same tier color/icon convention as that toast — this card
+                already carries a single shared cardRotationStyle, so there's no per-seat avatar to
+                tell rows apart, just the flat list both seats already see once the match settles. */}
+            {(seatUnlocks[1]?.length ?? 0) + (seatUnlocks[2]?.length ?? 0) > 0 && (
+              <View style={styles.achievementList}>
+                {([1, 2] as Player[]).flatMap((player) =>
+                  (seatUnlocks[player] ?? []).map((achievement) => (
+                    <View key={`${player}-${achievement.id}`} style={styles.achievementRow}>
+                      <View style={[styles.achievementIconBadge, { backgroundColor: ACHIEVEMENT_TIER_COLORS[achievement.tier] }]}>
+                        <Icon source={achievement.icon} size={12} color='#000000' />
+                      </View>
+                      <Text style={[styles.achievementRowLabel, { color: fg }]} numberOfLines={1}>
+                        {achievement.title}
+                      </Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            )}
             <Button mode='contained' onPress={onResetGame} style={styles.overlayButton} buttonColor={playerColor[loser]} textColor={playerOnColor[loser]}>
               Play Again
             </Button>
@@ -1092,7 +1143,7 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
           secondary-accent Quit button and MONO_FONT styling for the shared component's primary
           accent and default font — an approved trade-off, not an oversight. */}
       <ConfirmDialog
-        visible={confirmBackVisible}
+        visible={confirmVisible}
         title='Quit Match?'
         message={
           <>
@@ -1106,7 +1157,7 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
         icon='alert-circle-outline'
         destructive={false}
         onConfirm={safeBack}
-        onCancel={onQuitCancel}
+        onCancel={cancelBack}
         rotation={rotation}
       />
 
@@ -1151,6 +1202,26 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
 }
 
 const styles = StyleSheet.create({
+  achievementIconBadge: {
+    alignItems: 'center',
+    borderRadius: 9,
+    height: 18,
+    justifyContent: 'center',
+    width: 18
+  },
+  achievementList: {
+    gap: 6
+  },
+  achievementRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6
+  },
+  achievementRowLabel: {
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: '700'
+  },
   // top/height come from the JSX (board.y/board.height, not a fixed value here) — see the render
   // comment above for why this has to be the board's own field span, not root's full height.
   backButton: { justifyContent: 'center', position: 'absolute' },

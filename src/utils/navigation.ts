@@ -1,11 +1,11 @@
+import { configureNavigation, safeBack } from '@rific/core'
 import { router } from 'expo-router'
 
-// router.back() throws a "The action 'GO_BACK' was not handled" error toast whenever this screen
-// has no actual history to pop to — reached directly (a deep link, a refreshed page, or this
-// tab's very first navigation) rather than pushed from another screen within the app. Falls back
-// to the title screen, always a valid destination, instead of leaving the user stuck looking at
-// an error toast with a back button that does nothing.
-export function safeBack() {
-  if (router.canGoBack()) router.back()
-  else router.replace('/')
-}
+// safeBack's own implementation (router.canGoBack() ? router.back() : router.replace(fallbackPath))
+// now lives in @rific/core, shared across the fleet — this just injects expo-router's `router` once
+// at module load (the fallback path defaults to '/', already correct for this app's own root route)
+// and re-exports safeBack unchanged, so every existing call site (`safeBack()`, `onBack={safeBack}`,
+// `onHome={safeBack}`, `onConfirm={safeBack}`) keeps working with zero changes.
+configureNavigation({ router })
+
+export { safeBack }

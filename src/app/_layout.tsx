@@ -1,9 +1,9 @@
+import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Toaster, ToastProvider } from '@rific/toaster'
-import { getViewRotation, OrientationProvider, useOrientationState } from '@tastic/core'
+import { OrientationProvider, RotationAwareStatusBar, SettingsAndProfilesGate, useThemedRootBackground } from '@tastic/core'
 import * as Haptics from 'expo-haptics'
 import { Stack } from 'expo-router'
 import { DeviceMotion } from 'expo-sensors'
-import { StatusBar } from 'expo-status-bar'
 import { ReactNode } from 'react'
 import { StyleSheet } from 'react-native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
@@ -18,23 +18,6 @@ import { GameSettingsProvider, useGameSettings } from '@/hooks/useGameSettings'
 import { GameStatsProvider } from '@/hooks/useGameStats'
 import { ProfilesProvider, useProfiles } from '@/hooks/useProfiles'
 import { SplashGate } from '@/utils/splashGate'
-
-// Isolated from RootLayout itself so this live tilt subscription's re-renders stay scoped to just
-// this one bar, not the whole app tree — mirrors LightCycles' identically-shaped
-// RotationAwareStatusBar. Hides the OS status bar whenever content elsewhere is visually rotated
-// (see @tastic/split-screen's FakeLandscapeView, now used by /index and /loadout) — a portrait-drawn
-// OS status bar reads wrong sitting over rotated content. /game hides it unconditionally regardless
-// (see its own <StatusBar hidden />), so this only actually matters on /index and /loadout. Reads
-// settings.lockOrientation the same way index.tsx's useRotation and loadout.tsx's
-// useOrientationState do, so this bar's hidden/shown state always matches whatever rotation the
-// visible content is actually locked to — passing nothing here would track live tilt unconditionally
-// and could diverge from content that's deliberately ignoring it with Lock Orientation on.
-function RotationAwareStatusBar() {
-  const { settings } = useGameSettings()
-  const { orientationMode, p1OnRight, upsideDown } = useOrientationState(settings.lockOrientation)
-  const rotation = getViewRotation(orientationMode, p1OnRight, upsideDown)
-  return <StatusBar hidden={rotation !== 0} />
-}
 
 // Sits below both GameSettingsProvider and ProfilesProvider (so it can call their own hooks) and
 // above everything that actually reads them — index.tsx reads settings.lockOrientation immediately
@@ -53,11 +36,43 @@ function GatedApp({ children }: { children: ReactNode }) {
   const { loaded: settingsLoaded } = useGameSettings()
   const { loaded: profilesLoaded } = useProfiles()
   return (
-    <SplashGate gate='settings' ready={settingsLoaded}>
-      <SplashGate gate='profiles' ready={profilesLoaded}>
-        {children}
-      </SplashGate>
-    </SplashGate>
+    <SettingsAndProfilesGate Gate={SplashGate} settingsLoaded={settingsLoaded} profilesLoaded={profilesLoaded}>
+      {children}
+    </SettingsAndProfilesGate>
+  )
+}
+
+// RootLayout itself sits ABOVE GameSettingsProvider (it's the one that renders it), so it can't call
+// useGameSettings() to read settings.lockOrientation for <RotationAwareStatusBar>'s own `locked`
+// prop. This component exists purely to sit far enough down the tree to read it — same role the old
+// local RotationAwareStatusBar function used to serve — while otherwise rendering exactly the same
+// JSX RootLayout used to inline directly.
+function AppContent() {
+  const { settings } = useGameSettings()
+  const { dark } = useAutoPaperTheme()
+  return (
+    // @tastic/core never imports expo-sensors itself — a real top-level import there would force
+    // every consumer of the package (even one with zero interest in tilt tracking) to have
+    // expo-sensors installed, or Metro fails to resolve it. This app wants live tilt tracking, so it
+    // does its own real import and hands the resolved module in — same injection convention as
+    // @rific/auto-paper's <Provider reanimated={...}>/<Provider expoBlur={...}>. Omitting this prop
+    // degrades gracefully (orientation just never resolves past its default guess, logged once in
+    // dev), it doesn't throw.
+    <OrientationProvider deviceMotion={DeviceMotion}>
+      <ToastProvider haptics={Haptics} paper={RNPaper}>
+        {/* useThemedRootBackground also keeps the root window's own OS-level background (a separate
+        layer from contentStyle here, the screen-level backing) synced to the live theme — see its
+        own doc comment in @tastic/core for why both are needed together. */}
+        <Stack screenOptions={useThemedRootBackground(dark, false)} />
+        {/* historyButton/clearButton off — this app has no history modal use case for them to open,
+        and a stray control row above the toast stack for a feature that goes nowhere is worse than
+        just not offering it. limit is already the package's own default (3); pinned explicitly so
+        it stays 3 regardless of what that default does in a future toaster version. */}
+        <Toaster historyButton={null} clearButton={null} limit={3} />
+        <UpdateDialog />
+        <RotationAwareStatusBar locked={settings.lockOrientation} />
+      </ToastProvider>
+    </OrientationProvider>
   )
 }
 
@@ -72,22 +87,7 @@ export default function RootLayout() {
                 <ProfilesProvider>
                   <GameStatsProvider>
                     <GatedApp>
-                      {/* @tastic/core never imports expo-sensors itself — a real top-level import
-                      there would force every consumer of the package (even one with zero interest
-                      in tilt tracking) to have expo-sensors installed, or Metro fails to resolve
-                      it. This app wants live tilt tracking, so it does its own real import and
-                      hands the resolved module in — same injection convention as @rific/auto-paper's
-                      <Provider reanimated={...}>/<Provider expoBlur={...}>. Omitting this prop
-                      degrades gracefully (orientation just never resolves past its default guess,
-                      logged once in dev), it doesn't throw. */}
-                      <OrientationProvider deviceMotion={DeviceMotion}>
-                        <ToastProvider haptics={Haptics} paper={RNPaper}>
-                          <Stack screenOptions={{ headerShown: false, gestureEnabled: false }} />
-                          <Toaster />
-                          <UpdateDialog />
-                          <RotationAwareStatusBar />
-                        </ToastProvider>
-                      </OrientationProvider>
+                      <AppContent />
                     </GatedApp>
                   </GameStatsProvider>
                 </ProfilesProvider>

@@ -35,8 +35,9 @@ export function useTripleTap(state: GameState, board: BoardLayout, aiPlayer: Pla
   // chance to fire — exactly the class of bug faceoffRef/tripleTapRef/boardRef elsewhere in this
   // app exist to avoid. Read via ref instead, kept out of that effect's own dependency array.
   const boardRef = useRef(board)
-  // eslint-disable-next-line react-hooks/refs -- mirrored every render (see comment above) so the CPU timer below reads the live board without needing it as a dependency
-  boardRef.current = board
+  useEffect(() => {
+    boardRef.current = board
+  })
 
   // ─── CPU tap/swipe simulation ──────────────────────────────────────────────────────────────
   // Keyed on tripleTapRound (not `state.tripleTap` itself, which is a new object on every

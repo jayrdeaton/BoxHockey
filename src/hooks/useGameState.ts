@@ -1,5 +1,5 @@
 import { useGameLoop } from '@tastic/core'
-import { useCallback, useReducer, useRef } from 'react'
+import { useCallback, useEffect, useReducer, useRef } from 'react'
 
 import { AIM_VELOCITY_SMOOTHING_ALPHA, CONTROL_SCHEME_SIGN, FACEOFF_GUESS_BONUS_MS, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, TRIPLE_TAP_MAX_DRAG_PIXELS } from '@/constants/game'
 import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, PuckState, TipoffMode, TripleTapState } from '@/types'
@@ -700,8 +700,9 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
   // latest settings-derived reducer, without needing to recreate useReducer itself (which would
   // reset `state` back to its initializer whenever any of these settings changed).
   const reducerRef = useRef(makeReducer(scoreToWin, tipoffMode, friction, controlScheme, interceptThreshold))
-  // eslint-disable-next-line react-hooks/refs -- see comment above
-  reducerRef.current = makeReducer(scoreToWin, tipoffMode, friction, controlScheme, interceptThreshold)
+  useEffect(() => {
+    reducerRef.current = makeReducer(scoreToWin, tipoffMode, friction, controlScheme, interceptThreshold)
+  })
 
   const [state, dispatch] = useReducer(
     // eslint-disable-next-line react-hooks/refs -- see reducerRef's own comment above; only ever invoked from dispatch, never during render
@@ -711,8 +712,9 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
   )
 
   const boardRef = useRef(board)
-  // eslint-disable-next-line react-hooks/refs -- mirrored every render so the physics rAF loop below always reads the current board layout
-  boardRef.current = board
+  useEffect(() => {
+    boardRef.current = board
+  })
 
   // Latest known finger position during a mid-slide intercept drag (see GameState.interceptAim) —
   // written directly by setInterceptTouch below on EVERY raw gesture update (a plain ref write,

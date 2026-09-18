@@ -1,7 +1,7 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
-import { ACHIEVEMENT_TIER_COLORS, unlockedKey } from '@tastic/achievements'
+import { getAchievementCatalogRows } from '@tastic/achievements'
 import { FakeLandscapeView, rotateInsets, useRotation } from '@tastic/core'
-import { AchievementRow, BaseStatsScreen, LOCKED_BADGE_COLOR, StatRow, StatSection, usePopoverHost } from '@tastic/hud'
+import { AchievementCatalogSection, ActivityStatSection, BaseStatsScreen, StatRow, StatSection, usePopoverHost } from '@tastic/hud'
 import { ProfileChip, ProfilePicker } from '@tastic/profile'
 import { useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -15,22 +15,6 @@ import { useProfiles } from '@/hooks/useProfiles'
 import { safeBack } from '@/utils/navigation'
 import { getOverallTotals, getProfileRankings, getProfileStatsView, ProfileRanking } from '@/utils/statsEngine'
 import { DEFAULT_PROFILE_STATS } from '@/utils/statsValidation'
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000
-
-// Calendar-day difference, not raw elapsed time, so an achievement unlocked at 11pm reads as "1 day
-// ago" once the date rolls over rather than 24 hours later. Stays local: @tastic/hud's
-// AchievementRow takes a precomputed label, since date conventions vary per app.
-function startOfDay(date: Date): number {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-}
-
-function unlockedLabel(unlockedAt: number): string {
-  const days = Math.round((startOfDay(new Date()) - startOfDay(new Date(unlockedAt))) / MS_PER_DAY)
-  if (days <= 0) return 'Unlocked today'
-  if (days === 1) return 'Unlocked 1 day ago'
-  return `Unlocked ${days} days ago`
-}
 
 interface ProfileRankingRowProps {
   ranking: ProfileRanking
@@ -163,27 +147,9 @@ export default function AchievementsScreen() {
           </StatSection>
         )}
 
-        <StatSection label='ACTIVITY'>
-          <StatRow label='Days Played' value={String(statsView.distinctDaysPlayed)} />
-          <StatRow label='Day Streak' value={String(statsView.currentDayStreak)} />
-          <StatRow label='Best Day Streak' value={String(statsView.bestDayStreak)} />
-        </StatSection>
+        <ActivityStatSection stats={statsView} />
 
-        <Text variant='labelMedium' style={[styles.listLabel, { color: fgMuted, fontFamily: MONO_FONT }]}>
-          ALL ACHIEVEMENTS
-        </Text>
-        {ACHIEVEMENT_CATALOG.map((achievement) => {
-          // scope:'device' always evaluates against the real device stats and its bare-id key,
-          // regardless of which tab is active; everything else follows the selected view. On "All
-          // Profiles" both branches collapse to the same thing.
-          const scope = achievement.scope ?? 'profile'
-          const evalStats = scope === 'device' ? stats : statsView
-          const key = unlockedKey(achievement.id, scope === 'device' ? null : effectiveProfileId)
-          const unlockedAt = unlockedAchievements[key]
-          const progress = unlockedAt === undefined ? achievement.progress?.(evalStats) : undefined
-          const tierColor = ACHIEVEMENT_TIER_COLORS[achievement.tier]
-          return <AchievementRow key={achievement.id} icon={achievement.icon} title={achievement.title} description={achievement.description} badgeColor={unlockedAt !== undefined ? tierColor : LOCKED_BADGE_COLOR} checkColor={tierColor} unlockedLabel={unlockedAt !== undefined ? unlockedLabel(unlockedAt) : undefined} progress={progress} deviceMarker={effectiveProfileId !== null && scope === 'device'} />
-        })}
+        <AchievementCatalogSection rows={getAchievementCatalogRows(ACHIEVEMENT_CATALOG, stats, statsView, unlockedAchievements, effectiveProfileId)} />
       </BaseStatsScreen>
     </FakeLandscapeView>
   )
@@ -192,10 +158,6 @@ export default function AchievementsScreen() {
 const styles = StyleSheet.create({
   boldText: {
     fontWeight: 'bold'
-  },
-  listLabel: {
-    letterSpacing: 2,
-    marginTop: 8
   },
   loadingContainer: {
     alignItems: 'center',
