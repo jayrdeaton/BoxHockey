@@ -61,7 +61,16 @@ const rootReducer = combineReducers({
 
 const persistConfig = {
   key: 'root',
-  storage: AsyncStorage
+  storage: AsyncStorage,
+  // redux-persist defaults `timeout` to 5000ms: a failsafe setTimeout scheduled on every PERSIST
+  // dispatch to force-resolve rehydrate if storage never responds. It's never cleared once
+  // rehydrate resolves normally (only guarded by an internal `_sealed` flag), so it sits as a
+  // pending timer for up to 5s after every store creation — under Jest that's a real open handle
+  // ("A worker process has failed to exit gracefully"), confirmed via `jest --detectOpenHandles`
+  // pointing straight at persistReducer.js's setTimeout. Disabling it (falsy timeout skips the
+  // setTimeout call entirely) is redux-persist's own documented way to opt out; AsyncStorage reads
+  // failing to ever resolve at all isn't a failure mode worth a 5s failsafe for.
+  timeout: 0
 }
 
 const persistedReducer = persistReducer(persistConfig, rootReducer)
