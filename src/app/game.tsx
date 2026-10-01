@@ -3,7 +3,7 @@ import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
 import { broadcastDeviceUnlocks } from '@tastic/achievements'
 import { useOrientationState, useRotation, useSettledWindowDimensions } from '@tastic/core'
-import { ConfirmDialog, useQuitConfirmation } from '@tastic/hud'
+import { AchievementUnlockList, type AchievementUnlockOwner, ConfirmDialog, useQuitConfirmation } from '@tastic/hud'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
@@ -45,6 +45,8 @@ function otherPlayer(p: Player): Player {
   return p === 1 ? 2 : 1
 }
 
+const SEATS: readonly Player[] = [1, 2]
+
 export default function GameScreen() {
   // The board itself always stays visually fixed 'faceToFace' — never wrapped in
   // @tastic/split-screen's FakeLandscapeView the way /index and /loadout are, regardless of the
@@ -64,8 +66,8 @@ export default function GameScreen() {
   // already-underway round's own snapshot.
   const { activeRoundSettings, settings, setSettings, setIsActivelyPlaying } = useGameSettings()
   const { recordMatchOutcome } = useGameStats()
-  const { lastSelected } = useProfiles()
-  const { success: showAchievementToast } = useToast()
+  const { lastSelected, profiles } = useProfiles()
+  const { clear: clearToasts, success: showAchievementToast } = useToast()
   const roundSettings = activeRoundSettings ?? DEFAULT_SETTINGS
   const scoreToWin = roundSettings.scoreToWin
   const layout = roundSettings.boardVariant
@@ -183,6 +185,13 @@ export default function GameScreen() {
     return () => setIsActivelyPlaying(false)
   }, [isLiveShot, paused, setIsActivelyPlaying])
 
+  // No toast may stay on screen during live play — only between rounds or at game over. Unlock
+  // toasts fire at game over and last 7s, so a quick restart would otherwise carry them into the
+  // next shot.
+  useEffect(() => {
+    if (isLiveShot) clearToasts()
+  }, [isLiveShot, clearToasts])
+
   useAIOpponent(state, board, aiPlayer, aiDifficulty, friction, controlScheme, paused, interceptThreshold, { tryAimStart, aimUpdate, shoot })
   useFaceoff(state, board, aiPlayer, aiDifficulty, paused, { faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart })
   useTripleTap(state, board, aiPlayer, aiDifficulty, paused, { tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch })
@@ -258,6 +267,12 @@ export default function GameScreen() {
   // given player's number/name reads in their own color everywhere on this screen, not just on
   // the board itself.
   const playerColor: Record<Player, string> = { 1: themeColors.primary, 2: themeColors.secondary }
+  // Marks each seat's rows in the Game Over card's achievement list: the seat's profile if one is
+  // selected, else a plain avatar in that player's color.
+  const achievementOwners: Record<Player, AchievementUnlockOwner> = {
+    1: { profile: profiles.find((p) => p.id === lastSelected[1]), color: playerColor[1] },
+    2: { profile: profiles.find((p) => p.id === lastSelected[2]), color: playerColor[2] }
+  }
   const playerOnColor: Record<Player, string> = { 1: themeColors.onPrimary, 2: themeColors.onSecondary }
   const winner: Player = scores[0] >= scoreToWin ? 1 : 2
   const loser: Player = winner === 1 ? 2 : 1
@@ -997,7 +1012,7 @@ export default function GameScreen() {
       {/* Back + settings chips moved into MatchOverlays below (see its own comment) — they need the
       same live rotation-in-place treatment as its dialogs, which only that component's isolated
       tilt subscription provides. */}
-      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} seatUnlocks={seatUnlocks} onResetGame={() => resetGame(board)} confirmVisible={confirmVisible} cancelBack={cancelBack} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={requestBack} />
+      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} seatUnlocks={seatUnlocks} achievementOwners={achievementOwners} onResetGame={() => resetGame(board)} confirmVisible={confirmVisible} cancelBack={cancelBack} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={requestBack} />
     </View>
   )
 }
@@ -1017,6 +1032,7 @@ interface MatchOverlaysProps {
   // Rendered in the Game Over card below rather than a toast, since that card already rotates with
   // the device's own live physical hold.
   seatUnlocks: Partial<Record<Player, AchievementDefinition[]>>
+  achievementOwners: Record<Player, AchievementUnlockOwner>
   onResetGame: () => void
   confirmVisible: boolean
   cancelBack: () => void
@@ -1051,7 +1067,7 @@ interface MatchOverlaysProps {
 // rotate their own content in place via `rotation` rather than reflowing layout (unlike /index and
 // /loadout's FakeLandscapeView) — the fixed zones have to keep the exact shape TouchInputLayer's
 // unrotated hit-zones already use.
-function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, seatUnlocks, onResetGame, confirmVisible, cancelBack, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
+function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, seatUnlocks, achievementOwners, onResetGame, confirmVisible, cancelBack, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
   const rotation = useRotation()
   const cardRotationStyle = rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }
   // The 180° upsideDown case also swaps which edge each chip sits on — a pure in-place spin isn't
@@ -1101,28 +1117,12 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
               <Text style={{ color: fgMuted }}> – </Text>
               <Text style={{ color: playerColor[2] }}>{scores[1]}</Text>
             </Text>
-            {/* Pass-and-play-only achievement badges — see seatUnlocks' own doc comment in
-                GameScreen for why these land here instead of the shared showAchievementToast vsCpu
-                still uses (seatUnlocks stays {} there, so this never renders for that mode). One
-                row per achievement, same tier color/icon convention as that toast — this card
-                already carries a single shared cardRotationStyle, so there's no per-seat avatar to
-                tell rows apart, just the flat list both seats already see once the match settles. */}
-            {(seatUnlocks[1]?.length ?? 0) + (seatUnlocks[2]?.length ?? 0) > 0 && (
-              <View style={styles.achievementList}>
-                {([1, 2] as Player[]).flatMap((player) =>
-                  (seatUnlocks[player] ?? []).map((achievement) => (
-                    <View key={`${player}-${achievement.id}`} style={styles.achievementRow}>
-                      <View style={[styles.achievementIconBadge, { backgroundColor: ACHIEVEMENT_TIER_COLORS[achievement.tier] }]}>
-                        <Icon source={achievement.icon} size={12} color='#000000' />
-                      </View>
-                      <Text style={[styles.achievementRowLabel, { color: fg }]} numberOfLines={1}>
-                        {achievement.title}
-                      </Text>
-                    </View>
-                  ))
-                )}
-              </View>
-            )}
+            {/* Pass-and-play-only achievement rows — see seatUnlocks' own doc comment in GameScreen
+                for why these land here instead of the shared showAchievementToast vsCpu still uses
+                (seatUnlocks stays {} there, so this never renders for that mode). This card
+                already carries a single shared cardRotationStyle, so each row's owner avatar is
+                what tells the two seats' rows apart. */}
+            {<AchievementUnlockList unlocks={seatUnlocks} seats={SEATS} owners={achievementOwners} tierColors={ACHIEVEMENT_TIER_COLORS} fg={fg} />}
             <Button mode='contained' onPress={onResetGame} style={styles.overlayButton} buttonColor={playerColor[loser]} textColor={playerOnColor[loser]}>
               Play Again
             </Button>
@@ -1202,26 +1202,6 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
 }
 
 const styles = StyleSheet.create({
-  achievementIconBadge: {
-    alignItems: 'center',
-    borderRadius: 9,
-    height: 18,
-    justifyContent: 'center',
-    width: 18
-  },
-  achievementList: {
-    gap: 6
-  },
-  achievementRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6
-  },
-  achievementRowLabel: {
-    flexShrink: 1,
-    fontSize: 12,
-    fontWeight: '700'
-  },
   // top/height come from the JSX (board.y/board.height, not a fixed value here) — see the render
   // comment above for why this has to be the board's own field span, not root's full height.
   backButton: { justifyContent: 'center', position: 'absolute' },

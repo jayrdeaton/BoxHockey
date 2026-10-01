@@ -11,6 +11,7 @@ import * as RNPaper from 'react-native-paper'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
 import { Fonts } from '@/components/Fonts'
+import { GuideHost } from '@/components/GuideHost'
 import { Providers } from '@/components/Providers'
 import { Theme } from '@/components/Theme'
 import { UpdateDialog } from '@/components/UpdateDialog'
@@ -60,10 +61,17 @@ function AppContent() {
     // dev), it doesn't throw.
     <OrientationProvider deviceMotion={DeviceMotion}>
       <ToastProvider haptics={Haptics} paper={RNPaper}>
-        {/* useThemedRootBackground also keeps the root window's own OS-level background (a separate
-        layer from contentStyle here, the screen-level backing) synced to the live theme — see its
-        own doc comment in @tastic/core for why both are needed together. */}
-        <Stack screenOptions={useThemedRootBackground(dark, false)} />
+        {/* Wraps the stack (rather than sitting beside it like UpdateDialog) because Home's
+        useAutoShowGuide() and the Settings dialog's "How to Play" row reach it through context (see
+        GuideHost's own doc). Must stay inside ToastProvider/OrientationProvider (and GatedApp, so the
+        cards are built from the real persisted settings): the card renders through a Portal and
+        reads the live tilt. */}
+        <GuideHost>
+          {/* useThemedRootBackground also keeps the root window's own OS-level background (a separate
+          layer from contentStyle here, the screen-level backing) synced to the live theme — see its
+          own doc comment in @tastic/core for why both are needed together. */}
+          <Stack screenOptions={useThemedRootBackground(dark, false)} />
+        </GuideHost>
         {/* historyButton/clearButton off — this app has no history modal use case for them to open,
         and a stray control row above the toast stack for a feature that goes nowhere is worse than
         just not offering it. limit is already the package's own default (3); pinned explicitly so

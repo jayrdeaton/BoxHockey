@@ -1,6 +1,7 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton } from '@rific/feedback-press'
 import { FakeLandscapeView, rotateInsets, useRotation } from '@tastic/core'
+import { useAutoShowGuide } from '@tastic/hud/guide'
 import { router } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -22,6 +23,10 @@ export default function HomeScreen() {
   const rotation = useRotation(settings.lockOrientation)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // First launch only (and once per session): opens the how-to-play cards over this screen. Called
+  // here and nowhere else so it can never fire over a live match or a two-seat loadout. Home is the
+  // one screen with a single reader, before any seating. See GuideHost / @tastic/hud/guide.
+  useAutoShowGuide()
   const { colors, dark } = useAutoPaperTheme()
   // react-native-safe-area-context always reports insets relative to the device's own fixed
   // physical frame (the OS thinks the interface is still portrait-locked and never rotates, so it
@@ -69,7 +74,7 @@ export default function HomeScreen() {
         </View>
       </FakeLandscapeView>
 
-      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} rotation={rotation} settings={settings} setSettings={setSettings} />
+      <SettingsDialog visible={settingsOpen} onDismiss={() => setSettingsOpen(false)} rotation={rotation} settings={settings} setSettings={setSettings} showHowToPlay />
     </View>
   )
 }

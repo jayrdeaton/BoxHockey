@@ -1,6 +1,7 @@
 import { useUpdateErrorToast } from '@rific/toaster'
 import { ViewRotation } from '@tastic/core'
 import { BaseSettingsDialog } from '@tastic/hud'
+import { useGuide } from '@tastic/hud/guide'
 
 import { release } from '@/constants/release'
 import { GameSettings } from '@/types'
@@ -20,14 +21,19 @@ export interface SettingsDialogProps {
   // settings/setSettings in scope for other reasons, so this is no new plumbing for any of them.
   settings: GameSettings
   setSettings: (update: Partial<GameSettings>) => void
+  // Shows the "How to Play" row that replays the intro. Off by default: the in-game (/game) dialog
+  // leaves it out, since opening a full-screen guide over a live match (settings there already
+  // pauses play) is disruptive. Home and the loadout, where nothing is running, turn it on.
+  showHowToPlay?: boolean
 }
 
 // Thin adapter over @tastic/hud's shared settings shell — BoxHockey's own GameSettings (lock
 // orientation, edge guard) is the only thing that varies here; everything else (sound, haptics,
 // appearance, update checking) is identical across every app using BaseSettingsDialog and lives
 // entirely inside that package now.
-export function SettingsDialog({ visible, onDismiss, rotation = 0, settings, setSettings }: SettingsDialogProps) {
+export function SettingsDialog({ visible, onDismiss, rotation = 0, settings, setSettings, showHowToPlay = false }: SettingsDialogProps) {
   const onUpdateError = useUpdateErrorToast()
+  const { open: openGuide } = useGuide()
 
-  return <BaseSettingsDialog visible={visible} onDismiss={onDismiss} rotation={rotation} version={release.otaVersion} lockOrientation={settings.lockOrientation} onLockOrientationChange={(value) => setSettings({ lockOrientation: value })} deferBottomEdgeGestures={settings.deferBottomEdgeGestures} onDeferBottomEdgeGestures={(value) => setSettings({ deferBottomEdgeGestures: value })} onUpdateError={onUpdateError} />
+  return <BaseSettingsDialog visible={visible} onDismiss={onDismiss} rotation={rotation} version={release.otaVersion} lockOrientation={settings.lockOrientation} onLockOrientationChange={(value) => setSettings({ lockOrientation: value })} deferBottomEdgeGestures={settings.deferBottomEdgeGestures} onDeferBottomEdgeGestures={(value) => setSettings({ deferBottomEdgeGestures: value })} onUpdateError={onUpdateError} onShowHowToPlay={showHowToPlay ? openGuide : undefined} />
 }
