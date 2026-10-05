@@ -45,7 +45,7 @@
     "@tastic/hud": "^0.13.0",
     "@tastic/input": "^0.3.0",
     "@tastic/physics": "^0.3.0",
-    "@tastic/profile": "^0.7.0",
+    "@tastic/profile": "^0.10.0",
     "@tastic/split-screen": "^0.5.1",
     "@tastic/sprites": "^0.2.0",
     "expo": "~57.0.26",
