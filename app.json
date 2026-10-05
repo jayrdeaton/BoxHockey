@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "BoxHockey",
-    "slug": "box-hockey",
+    "slug": "BoxHockey",
     "version": "1.0.0",
     "scheme": "boxhockey",
     "description": "A digital BoxHockey game",
@@ -14,7 +14,7 @@
     "updates": {
       "fallbackToCacheTimeout": 0,
       "checkAutomatically": "ON_LOAD",
-      "url": "https://u.expo.dev/240d10a3-e3dd-41cc-88b5-b75c61aa087c"
+      "url": "https://u.expo.dev/f4670ecf-ee93-4812-bf48-d27b020a2510"
     },
     "runtimeVersion": {
       "policy": "fingerprint"
@@ -78,7 +78,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "240d10a3-e3dd-41cc-88b5-b75c61aa087c"
+        "projectId": "f4670ecf-ee93-4812-bf48-d27b020a2510"
       }
     },
     "owner": "jayrdeaton"
