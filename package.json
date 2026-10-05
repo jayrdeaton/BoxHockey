@@ -38,7 +38,7 @@
     "@rific/splash-gate": "^0.2.2",
     "@rific/toaster": "^0.7.2",
     "@rific/updater": "^0.6.0",
-    "@shopify/react-native-skia": "^2.10.0",
+    "@shopify/react-native-skia": "2.6.2",
     "@tastic/achievements": "^0.2.0",
     "@tastic/core": "^0.10.1",
     "@tastic/edge-guard": "^0.1.4",
@@ -99,12 +99,5 @@
     "prettier": "^3.8.3",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.60.0"
-  },
-  "expo": {
-    "install": {
-      "exclude": [
-        "@shopify/react-native-skia"
-      ]
-    }
   }
 }
