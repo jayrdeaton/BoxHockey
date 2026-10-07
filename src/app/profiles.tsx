@@ -12,7 +12,7 @@ import { safeBack } from '@/utils/navigation'
 // their own profile's color later regardless. Mirrors LightCycles' identical NEW_PROFILE pattern
 // (that sibling app has no controlScheme concept of its own, so the specific value doesn't need to
 // match — just the "give a fresh profile a sensible default" shape). Matches
-// gameSettingsValidation.ts's own DEFAULT_SETTINGS.controlScheme, the app-wide default philosophy.
+// redux/settingsSlice.ts's DEFAULT_SETTINGS.controlScheme, the app-wide default philosophy.
 const NEW_PROFILE_CONTROL_SCHEME: ControlScheme = 'flick'
 
 // A real routed screen — reachable only from P1's dropdown (see ProfilePicker's own doc for why P2

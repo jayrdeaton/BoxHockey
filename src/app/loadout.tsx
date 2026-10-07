@@ -13,15 +13,16 @@ import { useDispatch, useSelector } from 'react-redux'
 import { LOADOUT_SHARED_CONTROLS_IDS, LoadoutSharedControls } from '@/components/LoadoutSharedControls'
 import { SettingsDialog } from '@/components/SettingsDialog'
 import { LOADOUT_PANEL_SWAP_FADE_MS } from '@/constants/game'
-import { useGameSettings } from '@/hooks/useGameSettings'
 import { useProfiles } from '@/hooks/useProfiles'
+import { useSettings } from '@/hooks/useSettings'
+import { liveplayActions } from '@/redux/liveplaySlice'
 import { seatColorsActions } from '@/redux/seatColorsSlice'
+import { DEFAULT_SETTINGS } from '@/redux/settingsSlice'
 import type { AppDispatch, RootState } from '@/redux/store'
 import { BoardVariant, ControlScheme, FrictionLevel, InterceptSpeed, Player, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/types'
 import { AI_DIFFICULTY_LABELS, AIDifficulty } from '@/utils/aiOpponent'
 import { BOARD_VARIANT_LABELS } from '@/utils/board'
 import { humanPlayersFor, parseGameMode } from '@/utils/gameMode'
-import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
 import { safeBack } from '@/utils/navigation'
 
 const BOARD_VARIANT_DESCRIPTIONS: Record<BoardVariant, string> = {
@@ -92,7 +93,7 @@ function pickRandom<T>(options: readonly { value: T }[]): T {
 }
 
 export default function LoadoutScreen() {
-  // Read only from this screen's own route param, never from useGameSettings().settings.gameMode
+  // Read only from this screen's own route param, never from useSettings().settings.gameMode
   // — the settings hook's AsyncStorage read is async, and racing it here could momentarily show
   // the wrong number of player panels.
   const params = useLocalSearchParams<{ mode: string }>()
@@ -102,7 +103,7 @@ export default function LoadoutScreen() {
   // early: the guest/CPU color plumbing below needs it before the panels themselves do.
   const p2IsHuman = humanPlayers.includes(2)
 
-  const { settings, setSettings, commitRoundSettings } = useGameSettings()
+  const { settings, setSettings } = useSettings()
   const { profiles, lastSelected, updateProfile, selectProfile } = useProfiles()
   // orientationMode just follows the device's current physical tilt (see @tastic/core's
   // useOrientationState), CPU games included — how you're holding the phone right now decides the
@@ -379,14 +380,22 @@ export default function LoadoutScreen() {
     }, [])
   )
 
+  // Read through a ref rather than listed as a dependency of the effect below: this screen stays
+  // mounted (and still all Ready) under /game, so a settings change made there (toggling Lock
+  // Orientation or Edge Guard in /game's Settings dialog, or the lock recording its angle) would
+  // otherwise re-run that effect and push a second /game.
+  const settingsRef = useRef(settings)
+  useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
+
   useEffect(() => {
     if (!humanPlayers.every((p) => ready[p])) return
-    // `gameMode` here, not `settings.gameMode` — same race the comment above guards against: this
-    // screen's own route param is the trustworthy value, not the settings hook's own (possibly
-    // still-loading) copy.
-    commitRoundSettings({ ...settings, gameMode })
+    // `gameMode` (this screen's own route param), not settings.gameMode: the route param is the mode
+    // this loadout was opened for.
+    dispatch(liveplayActions.setActiveRoundSettings({ ...settingsRef.current, gameMode }))
     router.push('/game')
-  }, [ready, humanPlayers, settings, gameMode, commitRoundSettings])
+  }, [ready, humanPlayers, gameMode, dispatch])
 
   const bg = dark ? '#000000' : '#FFFFFF'
   const fg = dark ? '#FFFFFF' : '#000000'

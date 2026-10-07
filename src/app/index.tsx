@@ -9,11 +9,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { HeroTitle } from '@/components/HeroTitle'
 import { SettingsDialog } from '@/components/SettingsDialog'
-import { useGameSettings } from '@/hooks/useGameSettings'
+import { useSettings } from '@/hooks/useSettings'
 import { GameMode } from '@/types'
 
 export default function HomeScreen() {
-  const { settings, setSettings } = useGameSettings()
+  const { settings, setSettings } = useSettings()
   // Follows the device's current physical tilt (see @tastic/core's useOrientationState, which
   // useRotation reads internally), so the title screen rotates along with everywhere else as soon
   // as the phone is turned. Lock Orientation (see SettingsDialog) pins it app-wide by freezing the

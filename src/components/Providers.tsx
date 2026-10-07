@@ -1,5 +1,6 @@
 import { FeedbackPressProvider, hapticActions, type HapticSettings, soundActions, type SoundSettings, useFeedbackBridgeProps } from '@rific/feedback-press'
 import { useAudioPool } from '@rific/feedback-press/audio'
+import { useEdgeGestureGuard } from '@tastic/edge-guard'
 import { ReactNode, useCallback } from 'react'
 import * as RNPaper from 'react-native-paper'
 import { Provider as ReduxProvider, useDispatch, useSelector } from 'react-redux'
@@ -43,11 +44,24 @@ const FeedbackBridge = ({ children }: Props) => {
   )
 }
 
+// The one place @tastic/edge-guard's hook is called, mounted once for the app's lifetime rather than
+// per screen. settings.deferBottomEdgeGestures is the player's opt-in; liveplay.activelyPlaying is
+// /game's report that a live round is in progress right now (see liveplaySlice.ts). Combining them
+// here keeps Edge Guard both opt-in and scoped to actual play.
+const EdgeGuardBridge = ({ children }: Props) => {
+  const deferBottomEdgeGestures = useSelector((state: RootState) => state.settings.deferBottomEdgeGestures)
+  const activelyPlaying = useSelector((state: RootState) => state.liveplay.activelyPlaying)
+  useEdgeGestureGuard(deferBottomEdgeGestures && activelyPlaying)
+  return <>{children}</>
+}
+
 export function Providers({ children }: Props) {
   return (
     <ReduxProvider store={store}>
       <PersistGate persistor={persistor}>
-        <FeedbackBridge>{children}</FeedbackBridge>
+        <EdgeGuardBridge>
+          <FeedbackBridge>{children}</FeedbackBridge>
+        </EdgeGuardBridge>
       </PersistGate>
     </ReduxProvider>
   )

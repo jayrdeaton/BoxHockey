@@ -2,8 +2,8 @@ import { render } from '@testing-library/react-native'
 import { View } from 'react-native'
 
 import { getGuideSteps } from '@/constants/guideSteps'
+import { DEFAULT_SETTINGS } from '@/redux/settingsSlice'
 import type { ControlScheme, GameMode, Player, TipoffMode } from '@/types'
-import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
 
 // SwipeHint's own rendering is @tastic/hud's to test (it needs Reanimated's useReducedMotion, which
 // this app's Reanimated mock doesn't stub). A plain View stands in for it, so the app-local art

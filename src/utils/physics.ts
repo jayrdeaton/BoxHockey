@@ -10,7 +10,7 @@ export interface PhysicsResult extends PuckState {
   bounced: boolean
   enteredWell: 'attract' | 'repel' | null
   // Set only when this step's bounce was against the invisible one-way door at the goal mouth —
-  // see the "GameSettings.rink only: a one-way door" collision block below. That door is what
+  // see the "Settings.rink only: a one-way door" collision block below. That door is what
   // stops a puck already behind the line from passing back OUT through the same gap it would
   // otherwise score through; visually that gap (between the posts, where the static goal-line
   // <Line>s deliberately stop) looks open, so this is the collision a player actually needs a cue
@@ -158,7 +158,7 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
   if (centerInGoalX && y + r < board.y && !wasBehindTop) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
   if (centerInGoalX && y - r > board.y + board.height && !wasBehindBottom) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
 
-  // GameSettings.rink only (board.cornerRadius === 0 when it's off, so this is always null then): near
+  // Settings.rink only (board.cornerRadius === 0 when it's off, so this is always null then): near
   // one of the 4 rounded outer corners, a single concave arc check replaces BOTH the flat
   // top/bottom and left/right wall checks below for this frame — this is also what opens the
   // wraparound path behind the goal, since within a corner's quadrant the flat front-wall check
@@ -221,7 +221,7 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
       }
     }
 
-    // The TRUE outer boundary — board.y/board.height when GameSettings.rink is off
+    // The TRUE outer boundary — board.y/board.height when Settings.rink is off
     // (behindGoalDepth === 0 there), or behindGoalDepth further back when it's on. Either way the
     // gap in this flat wall is governed by centerInGoalX (the same center-only threshold the score
     // check and the goalpost check above use) rather than a wider, full-body-clearance opening: the
@@ -270,13 +270,13 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
 
   // wasBehindTop/wasBehindBottom (hoisted above, alongside the early clean-score return) are what
   // guard the score check below against a puck reaching the goal from BEHIND (wrapped around via a
-  // corner, only reachable when GameSettings.rink is on) — that must never score, that's where the
+  // corner, only reachable when Settings.rink is on) — that must never score, that's where the
   // net is, even though nothing is physically rendered there. Only a FRESH crossing (wasn't already
   // fully behind a moment ago) counts. With rink off this is a no-op: the only way to ever get y0
   // already past the line there is by having already scored the instant it happened, so a live puck
   // can never start a step already in that state.
 
-  // GameSettings.rink only: a one-way door at the goal mouth. Open front-to-back — entering (whether it
+  // Settings.rink only: a one-way door at the goal mouth. Open front-to-back — entering (whether it
   // scores on a fresh crossing or continues past into the pocket) is always unobstructed — but
   // solid back-to-front within the goal's own x-range specifically: a puck that's already behind
   // the line and drifts into the goal's x-range (e.g. wandering over from the wider pocket via a
@@ -493,7 +493,7 @@ export function computeTrajectory(startX: number, startY: number, dragDx: number
       }
 
       // Mirrors stepPhysics' rounded-corner handling exactly (see boardCornerQuadrant's own doc
-      // comment) — null/no-op whenever GameSettings.rink is off.
+      // comment) — null/no-op whenever Settings.rink is off.
       const corner = boardCornerQuadrant(x, y, board)
       if (corner) {
         const col = circleVsRoundedCorner(x, y, r, corner.arcCenterX, corner.arcCenterY, board.cornerRadius)

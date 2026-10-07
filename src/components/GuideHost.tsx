@@ -5,7 +5,7 @@ import { useDispatch, useSelector } from 'react-redux'
 
 import { GUIDE_VERSION } from '@/constants/guide'
 import { getGuideSteps } from '@/constants/guideSteps'
-import { useGameSettings } from '@/hooks/useGameSettings'
+import { useSettings } from '@/hooks/useSettings'
 import { guideActions, selectGuideVersionSeen } from '@/redux/guideSlice'
 import type { RootState } from '@/redux/store'
 
@@ -28,7 +28,7 @@ interface Props {
 // The cards follow the live settings (the mode, each seat's shooting style, the tip-off, the goal target), so a
 // replay after a player changes any of them in the loadout still describes the next match exactly.
 export function GuideHost({ children }: Props) {
-  const { settings } = useGameSettings()
+  const { settings } = useSettings()
   const rotation = useRotation()
   const touch = useIsTouchPrimaryDevice()
   const seenVersion = useSelector((state: RootState) => selectGuideVersionSeen(state))

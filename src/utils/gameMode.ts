@@ -7,7 +7,7 @@ export function parseGameMode(value: string | undefined): GameMode {
 }
 
 // CPU always plays player 2 (see useAIOpponent) — the human is player 1 whenever gameMode is
-// 'vsCpu'. Takes just the gameMode field (not the full GameSettings) so /loadout can call this
+// 'vsCpu'. Takes just the gameMode field (not the full Settings) so /loadout can call this
 // before it has assembled a complete settings object of its own.
 export function humanPlayersFor(gameMode: GameMode): Player[] {
   return gameMode === 'vsCpu' ? [1] : [1, 2]

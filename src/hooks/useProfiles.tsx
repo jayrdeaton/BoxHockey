@@ -11,7 +11,7 @@ import { ControlScheme, Player, Profile } from '@/types'
 // future @tastic game that wants into the same shared roster) — see @tastic/profile's own README
 // for why only the BASE identity fields travel through this, never controlScheme.
 const SHARED_GROUP_ID = 'group.com.infinitetoken.tastic'
-// Matches GameSettings.controlScheme's own default (see gameSettingsValidation.ts's
+// Matches Settings.controlScheme's own default (see redux/settingsSlice.ts's
 // DEFAULT_SETTINGS) — what a profile that's never had one set locally on THIS app falls back to.
 // That's exactly the state of any profile created on another @tastic app (LightCycles has no
 // concept of controlScheme at all) the very first time it's selected here.
@@ -36,7 +36,7 @@ interface ProfilesContextValue {
   // True once the one-time initial reconciliation below (redux-persist's own already-rehydrated
   // `profiles` against the shared App Group store) has completed — see ProfilesProvider's own doc.
   // _layout.tsx's own GatedApp reads this directly to gate the 'profiles' splash key, same as it
-  // already does for useGameSettings()'s own `loaded`.
+  // already does for useSettings()'s own `loaded`.
   loaded: boolean
 }
 
@@ -47,7 +47,7 @@ interface Props {
 }
 
 // Single source of truth for saved player profiles, mounted once in _layout.tsx — same
-// single-Provider rationale as useGameSettings.tsx (expo-router keeps prior screens mounted, so a
+// single-Provider rationale as useGameStats.tsx (expo-router keeps prior screens mounted, so a
 // per-screen copy could go stale or clobber a concurrent update).
 //
 // Base identity fields (name/color/tag) now live in Redux (redux/store.ts's `profiles` key,

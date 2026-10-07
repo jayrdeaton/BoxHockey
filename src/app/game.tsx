@@ -11,6 +11,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Icon, Text } from 'react-native-paper'
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { type EdgeInsets, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useDispatch, useSelector } from 'react-redux'
 
 import Board from '@/components/BoardHost'
 import { SettingsDialog } from '@/components/SettingsDialog'
@@ -18,15 +19,17 @@ import { ACHIEVEMENT_TIER_COLORS } from '@/constants/achievements'
 import { COIN_FLIP_TOTAL_MS, DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, GOAL_LINE_STROKE_WIDTH, INTERCEPT_SPEED_THRESHOLDS, MAX_FLICK_GESTURE_MS, MIN_SHOOT_DRAG, SHOT_PREVIEW_LENGTH_RATIOS, STRIKE_DURATION_MS } from '@/constants/game'
 import { useAIOpponent } from '@/hooks/useAIOpponent'
 import { useFaceoff } from '@/hooks/useFaceoff'
-import { useGameSettings } from '@/hooks/useGameSettings'
 import { useGameSound } from '@/hooks/useGameSound'
 import { passesFlickShotGate, useGameState } from '@/hooks/useGameState'
 import { useGameStats } from '@/hooks/useGameStats'
 import { useProfiles } from '@/hooks/useProfiles'
+import { useSettings } from '@/hooks/useSettings'
 import { useTripleTap } from '@/hooks/useTripleTap'
-import { AchievementDefinition, BoardLayout, GamePhase, GameSettings, Player } from '@/types'
+import { liveplayActions } from '@/redux/liveplaySlice'
+import { DEFAULT_SETTINGS } from '@/redux/settingsSlice'
+import type { AppDispatch, RootState } from '@/redux/store'
+import { AchievementDefinition, BoardLayout, GamePhase, Player, Settings } from '@/types'
 import { computeBoardLayout, faceoffZoneCenter, faceoffZoneCenters, faceoffZoneRadius } from '@/utils/board'
-import { DEFAULT_SETTINGS } from '@/utils/gameSettingsValidation'
 import { safeBack } from '@/utils/navigation'
 
 const MONO_FONT = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' })
@@ -56,7 +59,7 @@ export default function GameScreen() {
   // tilt is still tracked (see MatchOverlays below), just isolated to a sibling of the board/gesture
   // tree so a live accelerometer reading never cascades a re-render into it — that rotation only
   // ever reaches the dialogs floating on top, so they stay legible however the phone is held.
-  // Committed once by /loadout when every human player readied up (see commitRoundSettings) —
+  // Committed once by /loadout when every human player readied up (liveplay.activeRoundSettings, see liveplaySlice.ts) —
   // falls back to defaults for a direct/deep link to this screen, which never went through
   // /loadout to commit anything. orientationMode is a /loadout-only layout setting (see
   // types/index.ts) and never reaches here.
@@ -64,7 +67,9 @@ export default function GameScreen() {
   // activeRoundSettings above) are only needed to hand off to MatchOverlays' own SettingsDialog
   // below — its Lock Orientation/Edge Guard toggles edit the persisted defaults, not this
   // already-underway round's own snapshot.
-  const { activeRoundSettings, settings, setSettings, setIsActivelyPlaying } = useGameSettings()
+  const { settings, setSettings } = useSettings()
+  const activeRoundSettings = useSelector((state: RootState) => state.liveplay.activeRoundSettings)
+  const dispatch = useDispatch<AppDispatch>()
   const { recordMatchOutcome } = useGameStats()
   const { lastSelected, profiles } = useProfiles()
   const { clear: clearToasts, success: showAchievementToast } = useToast()
@@ -119,7 +124,7 @@ export default function GameScreen() {
   // insets, so it fills edge-to-edge with no internal gap to mis-flip) and instead reserve BOTH
   // insets externally and symmetrically, via marginTop AND marginBottom on boardArea below — neither
   // of which ever rotates, so both stay pinned to their own real physical edge regardless.
-  // One accepted narrower side effect: GameSettings.rink's own "pocket reaches all the way to the
+  // One accepted narrower side effect: Settings.rink's own "pocket reaches all the way to the
   // screen edge" enhancement (see computeBoardLayout's behindGoalDepth/topBorrow/bottomBorrow) reads
   // its own reach from these SAME insets — zeroing them for this case also disables that reach,
   // falling back to the plain physics-minimum pocket depth instead. Narrow and cosmetic (rink AND
@@ -175,18 +180,20 @@ export default function GameScreen() {
   const { phase, puck, aim, interceptAim, currentPlayer, scores, bounceCount, lastScoredGoal, wellEnterCount, lastWellPolarity, goalDoorHitCount, lastGoalDoorSide, faceoff, tripleTap } = state
 
   // Mirrors "an actual live shot attempt (aiming/striking/simulating), not paused" up to
-  // useGameSettings.tsx's own useEdgeGestureGuard call rather than calling that hook directly here:
-  // it stays mounted once at the provider (same as every other cross-cutting settings concern in
-  // this app), and this is just the one signal it has no other way to read. Unlocked between shots
+  // liveplay.activelyPlaying for Providers.tsx's EdgeGuardBridge rather than calling
+  // useEdgeGestureGuard directly here: it stays mounted once for the app's lifetime, and this is
+  // just the one signal it has no other way to read. Unlocked between shots
   // (idle/scored/faceoff/coinFlip/gameOver) and whenever a dialog is open (paused) — back/settings
   // stay unconditionally visible here (unlike Snake/LightCycles; see this screen's own back/
   // settings chips below), so there's no button-visibility signal to key off instead. Reset to
   // false on unmount too, so leaving this screen mid-shot by any path can't leave Edge Guard stuck on.
   const isLiveShot = phase === 'aiming' || phase === 'striking' || phase === 'simulating'
   useEffect(() => {
-    setIsActivelyPlaying(isLiveShot && !paused)
-    return () => setIsActivelyPlaying(false)
-  }, [isLiveShot, paused, setIsActivelyPlaying])
+    dispatch(liveplayActions.setActivelyPlaying(isLiveShot && !paused))
+    return () => {
+      dispatch(liveplayActions.setActivelyPlaying(false))
+    }
+  }, [isLiveShot, paused, dispatch])
 
   // No toast may stay on screen during live play — only between rounds or at game over. Unlock
   // toasts fire at game over and last 7s, so a quick restart would otherwise carry them into the
@@ -1044,11 +1051,11 @@ interface MatchOverlaysProps {
   // Opens the settings dialog — lives here, not just onSettingsDismiss, now that the chip button
   // that triggers it (see the chip JSX below) is rendered here too, alongside the dialog itself.
   onSettingsOpen: () => void
-  // The persisted "next round" defaults — passed through from GameScreen's own useGameSettings()
+  // The persisted "next round" defaults — passed through from GameScreen's own useSettings()
   // for its own SettingsDialog below (its Lock Orientation/Edge Guard toggles edit these, not the
   // round's own locked-in activeRoundSettings).
-  settings: GameSettings
-  setSettings: (update: Partial<GameSettings>) => void
+  settings: Settings
+  setSettings: (update: Partial<Settings>) => void
   // GameScreen's own board layout/insets — needed here only for the back/settings chips' position
   // (see their own comment below), not for anything this component already renders.
   board: BoardLayout

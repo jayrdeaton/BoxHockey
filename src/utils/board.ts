@@ -288,7 +288,7 @@ export function computeBoardLayout(screenWidth: number, screenHeight: number, in
   const goalLeft = (width - goalWidth) / 2
   const goalRight = goalLeft + goalWidth
 
-  // GameSettings.rink only: extends the TRUE collision boundary behind each goal (rounded corners
+  // Settings.rink only: extends the TRUE collision boundary behind each goal (rounded corners
   // + a behind-the-net pocket — see physics.ts's boardCornerQuadrant/circleVsRoundedCorner) while
   // keeping x/y/width/height below meaning exactly what they mean when rink is off: the
   // front-line-to-front-line playing rectangle that faceoffZoneCenters, aiOpponent.ts's targeting,
@@ -334,7 +334,7 @@ export function computeBoardLayout(screenWidth: number, screenHeight: number, in
   // default.
   const faceoffOffsetYRatio = variant === 'gauntlet' ? 0.3 : 0.42
 
-  // GameSettings.rink only (0 when it's off, since behindGoalDepth is 0 there): rather than shrink
+  // Settings.rink only (0 when it's off, since behindGoalDepth is 0 there): rather than shrink
   // the front-line field by the full behindGoalDepth at both ends, borrow from the safe-area
   // insets first — that space (status bar/notch at top, home indicator at bottom) is otherwise
   // just empty background today. Capped at insets.top/insets.bottom themselves (can't borrow more

@@ -1,6 +1,6 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Toaster, ToastProvider } from '@rific/toaster'
-import { OrientationProvider, RotationAwareStatusBar, SettingsAndProfilesGate, useThemedRootBackground } from '@tastic/core'
+import { OrientationProvider, RotationAwareStatusBar, useThemedRootBackground } from '@tastic/core'
 import * as Haptics from 'expo-haptics'
 import { Stack } from 'expo-router'
 import { DeviceMotion } from 'expo-sensors'
@@ -15,9 +15,9 @@ import { GuideHost } from '@/components/GuideHost'
 import { Providers } from '@/components/Providers'
 import { Theme } from '@/components/Theme'
 import { UpdateDialog } from '@/components/UpdateDialog'
-import { GameSettingsProvider, useGameSettings } from '@/hooks/useGameSettings'
 import { GameStatsProvider } from '@/hooks/useGameStats'
 import { ProfilesProvider, useProfiles } from '@/hooks/useProfiles'
+import { useSettings } from '@/hooks/useSettings'
 import { SplashGate } from '@/utils/splashGate'
 
 // This file is identical across the fleet's games (AirHockey, BoxHockey, LightCycles, Pong). Change
@@ -35,9 +35,9 @@ function AppStack() {
 }
 
 // Wires the persisted Lock Orientation setting into @tastic/core's OrientationProvider. Its own
-// component because RootLayout renders GameSettingsProvider and so can't call useGameSettings()
-// itself; mounted inside GatedApp, so settings have loaded and lockInitialValue carries the saved
-// lock from the very first render.
+// component because RootLayout renders the Redux store (inside Providers) and so can't call
+// useSettings() itself. Providers' PersistGate holds rendering until the store has rehydrated, so
+// lockInitialValue carries the saved lock from the very first render.
 //
 // freezeWhileLocked makes the lock app-wide: while settings.lockOrientation is on, the ONE shared
 // orientation reading freezes for every consumer (every screen, the in-game board, hud dialogs, the
@@ -53,7 +53,7 @@ function AppStack() {
 // in because @tastic/core never imports expo-sensors itself (apps without tilt tracking would
 // otherwise need it installed just to bundle).
 function OrientationBridge({ children }: { children: ReactNode }) {
-  const { settings, setSettings } = useGameSettings()
+  const { settings, setSettings } = useSettings()
   return (
     <OrientationProvider deviceMotion={DeviceMotion} freezeWhileLocked lockInitialValue={{ locked: settings.lockOrientation, rotation: settings.lockedRotation }} onLockChange={(next) => setSettings({ lockOrientation: next.locked, lockedRotation: next.rotation })}>
       {children}
@@ -61,19 +61,17 @@ function OrientationBridge({ children }: { children: ReactNode }) {
   )
 }
 
-// GameSettingsProvider and ProfilesProvider start from defaults and only patch in their AsyncStorage
-// values once the reads resolve, so a screen mounting before then would read (and could persist) the
-// wrong values. This gate holds everything nested inside it until both have loaded, while the
-// providers themselves (and GameStatsProvider) sit above it and start their loads immediately, in
-// parallel. useGameSettings()/useProfiles() are app-local hooks the shared SettingsAndProfilesGate
-// can't call itself, so this supplies their `loaded` flags plus the app's own bound SplashGate.
+// ProfilesProvider reconciles the local roster with the shared App Group one before `loaded` flips,
+// so a screen mounting earlier would read (and could persist) the wrong profiles. This holds
+// everything nested inside it, and the splash screen, until that's done, while ProfilesProvider and
+// GameStatsProvider sit above it and start loading immediately, in parallel. Settings need no gate:
+// they live in the Redux store, which Providers' PersistGate already holds until rehydrated.
 function GatedApp({ children }: { children: ReactNode }) {
-  const { loaded: settingsLoaded } = useGameSettings()
-  const { loaded: profilesLoaded } = useProfiles()
+  const { loaded } = useProfiles()
   return (
-    <SettingsAndProfilesGate Gate={SplashGate} settingsLoaded={settingsLoaded} profilesLoaded={profilesLoaded}>
+    <SplashGate gate='profiles' ready={loaded}>
       {children}
-    </SettingsAndProfilesGate>
+    </SplashGate>
   )
 }
 
@@ -84,34 +82,33 @@ export default function RootLayout() {
         <Fonts>
           <Providers>
             <Theme>
-              <GameSettingsProvider>
-                <ProfilesProvider>
-                  <GameStatsProvider>
-                    <GatedApp>
-                      <OrientationBridge>
-                        <ToastProvider haptics={Haptics} paper={RNPaper}>
-                          {/* Wraps the stack (rather than sitting beside it like UpdateDialog) because
-                          Home's useAutoShowGuide() and the Settings dialog's "How to Play" row reach
-                          it through context (see GuideHost). Inside ToastProvider and
-                          OrientationBridge because the card renders through a Portal and rotates with
-                          the shared reading, and inside the gate because it reads loaded settings. */}
-                          <GuideHost>
-                            <AppStack />
-                          </GuideHost>
-                          {/* Hides the OS status bar whenever the content is rotated off portrait. No
-                          `locked` prop: OrientationBridge already freezes the reading it follows. */}
-                          <RotationAwareStatusBar />
-                          {/* historyButton/clearButton off: no game has a toast history to open, and a
-                          control row for it above the toast stack would go nowhere. limit pins the
-                          package's current default (3) so a future toaster release can't change it. */}
-                          <Toaster historyButton={null} clearButton={null} limit={3} />
-                          <UpdateDialog />
-                        </ToastProvider>
-                      </OrientationBridge>
-                    </GatedApp>
-                  </GameStatsProvider>
-                </ProfilesProvider>
-              </GameSettingsProvider>
+              <ProfilesProvider>
+                <GameStatsProvider>
+                  <GatedApp>
+                    <OrientationBridge>
+                      <ToastProvider haptics={Haptics} paper={RNPaper}>
+                        {/* Wraps the stack (rather than sitting beside it like UpdateDialog) because
+                        Home's useAutoShowGuide() and the Settings dialog's "How to Play" row reach
+                        it through context (see GuideHost). Inside ToastProvider and
+                        OrientationBridge because the card renders through a Portal and rotates with
+                        the shared reading, and inside the gate so it mounts together with Home rather
+                        than before it. */}
+                        <GuideHost>
+                          <AppStack />
+                        </GuideHost>
+                        {/* Hides the OS status bar whenever the content is rotated off portrait. No
+                        `locked` prop: OrientationBridge already freezes the reading it follows. */}
+                        <RotationAwareStatusBar />
+                        {/* historyButton/clearButton off: no game has a toast history to open, and a
+                        control row for it above the toast stack would go nowhere. limit pins the
+                        package's current default (3) so a future toaster release can't change it. */}
+                        <Toaster historyButton={null} clearButton={null} limit={3} />
+                        <UpdateDialog />
+                      </ToastProvider>
+                    </OrientationBridge>
+                  </GatedApp>
+                </GameStatsProvider>
+              </ProfilesProvider>
             </Theme>
           </Providers>
         </Fonts>

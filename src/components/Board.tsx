@@ -322,7 +322,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // the true y=0 boundary — the goal line/posts drawn centered on it, or a puck legitimately
   // still mid-crossing when it scores (stepPhysics requires its whole body clear the line first,
   // see the puck-render comment below) — gets its outward half silently clipped by the canvas's
-  // own bounds. Only needed when GameSettings.rink is off: `boardArea`'s marginTop in game.tsx
+  // own bounds. Only needed when Settings.rink is off: `boardArea`'s marginTop in game.tsx
   // reserves insets.top as a hard boundary with zero slack above it in that case (unlike the
   // bottom edge, which already has generous accidental slack — `boardArea`/`container` are both
   // `flex: 1` with no matching bottom inset reservation, so the canvas already extends well past
@@ -1329,7 +1329,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             goal opening (matching the perimeter walls' own gap below) so the line itself marks
             exactly where the goal's edges are, staying at y/y+height always so it lines up with
             the posts exactly like before. Color is the only thing that changes: each player's own
-            color when GameSettings.rink is on (a painted line in front of an open pocket — see
+            color when Settings.rink is on (a painted line in front of an open pocket — see
             rinkPerimeterPath's own comment on why nothing else is drawn there), or plain wallColor
             when rink is off (board.behindGoalDepth is exactly 0 then — see computeBoardLayout),
             since with no pocket behind it this line IS the solid boundary a puck stops dead at,

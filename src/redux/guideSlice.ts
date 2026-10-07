@@ -33,7 +33,7 @@ export default slice.reducer
 // wrote storage of their own.
 //
 // Literal strings, not today's constants: this is a record of what those builds wrote, and must not
-// change if today's code ever renames a key. Today's build still writes boxhockey.settings, but only
-// from GameSettingsProvider, which mounts inside PersistGate and writes only on a real change, so a
-// fresh install can't have it yet when the migrate runs.
+// change if today's code ever renames a key. Today's build no longer writes boxhockey.settings at all
+// (settings live in the Redux store since 2026-10-07), so a fresh install can't have it when the
+// migrate runs.
 export const LEGACY_STORAGE_KEYS: readonly string[] = ['boxhockey.appearance', 'boxhockey.playerColors', 'boxhockey.settings', 'boxhockey.sound', 'boxhockey.vibrate']

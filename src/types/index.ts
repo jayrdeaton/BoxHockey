@@ -12,7 +12,7 @@ export type GameMode = 'twoPlayer' | 'vsCpu'
 export type AiDifficulty = 'easy' | 'medium' | 'hard'
 
 // How a shot is aimed & released — per-PLAYER, not a single round-wide choice (two people sharing
-// one device may simply prefer a different feel — see GameSettings.controlScheme below, and
+// one device may simply prefer a different feel — see Settings.controlScheme below, and
 // LightCycles' identically-shaped keyScheme setting, the pattern this one mirrors). Read by
 // useGameState.ts's STRIKE case (via CONTROL_SCHEME_SIGN and resolveStrikeVelocity in
 // constants/game.ts and useGameState.ts respectively) to decide both the sign and the power model
@@ -119,7 +119,7 @@ export type InterceptSpeed = 'low' | 'medium' | 'high'
 // preview at all.
 export type ShotPreviewLength = 'off' | 'short' | 'medium' | 'long'
 
-export interface GameSettings {
+export interface Settings {
   gameMode: GameMode
   boardVariant: BoardVariant
   scoreToWin: number
@@ -131,7 +131,7 @@ export interface GameSettings {
   lockOrientation: boolean
   // The angle the lock is holding. Written by OrientationProvider's onLockChange (recorded on lock,
   // cleared on unlock) and handed back as lockInitialValue, so a relaunch reopens in the locked
-  // orientation instead of portrait. Never set by the UI directly; see isValidLockedRotation.
+  // orientation instead of portrait. Never set by the UI directly; absent while unlocked.
   lockedRotation?: ViewRotation
   tipoffMode: TipoffMode
   friction: FrictionLevel
@@ -159,7 +159,7 @@ export interface GameSettings {
   // iOS-only. Off by default — deliberately opt-in rather than always-on, so it only kicks in for
   // someone who's actually hit the problem and gone looking for a fix, instead of every player
   // eating a "swipe twice to go home" surprise from day one. Mirrored into native UserDefaults (see
-  // useGameSettings.tsx) for @tastic/edge-guard's own config plugin swizzle of
+  // Providers.tsx's EdgeGuardBridge) for @tastic/edge-guard's own config plugin swizzle of
   // preferredScreenEdgesDeferringSystemGestures to read at runtime.
   deferBottomEdgeGestures: boolean
 }
@@ -173,7 +173,7 @@ export interface Obstacle {
 
 // A small round peg at one edge of a goal mouth — built for EVERY board variant (see
 // buildGoalPosts in utils/board.ts), independent of the rink pocket/wraparound setting (see
-// GameSettings.rink's own comment). Deliberately its own shape, not an Obstacle: a post is round
+// Settings.rink's own comment). Deliberately its own shape, not an Obstacle: a post is round
 // (real hockey posts are cylinders, and circleVsCircle gives a true curved deflection unlike a
 // rect's flat faces/hard corners) and colored per-goal rather than the neutral wall color (see
 // GoalPost.player).
@@ -230,14 +230,14 @@ export interface BoardLayout {
   obstacles: Obstacle[]
   gravityWells: GravityWell[]
   // Both goal mouths' posts — always populated, on every variant, regardless of the `rink` pocket
-  // setting (see GameSettings.rink's own comment). See GoalPost's own comment for why these aren't
+  // setting (see Settings.rink's own comment). See GoalPost's own comment for why these aren't
   // just more Obstacles.
   goalPosts: GoalPost[]
   // Decorative pegs capping each divider/gauntlet-wall gap's edges — see WallPost's own comment.
   // Always populated, in every mode including rink (wallThickness is goal-line-thin everywhere
   // now — see computeBoardLayout).
   wallPosts: WallPost[]
-  // Both 0 unless GameSettings.rink is on — see computeBoardLayout in utils/board.ts.
+  // Both 0 unless Settings.rink is on — see computeBoardLayout in utils/board.ts.
   cornerRadius: number // rounded-corner radius at the 4 outer boundary corners
   behindGoalDepth: number // how far the true collision boundary extends past board.y/board.y+height behind each goal
   // How far each faceoff dot sits from its own goal line, as a fraction of height/2 — see
@@ -249,7 +249,7 @@ export interface BoardLayout {
   faceoffOffsetYRatio: number
   // What the board's own screen container should set as its top margin, in place of the raw
   // safe-area inset — see computeBoardLayout's own comment. Equal to insets.top whenever
-  // GameSettings.rink is off, which "borrows" up to insets.top worth of the otherwise-empty
+  // Settings.rink is off, which "borrows" up to insets.top worth of the otherwise-empty
   // status-bar/notch space for its behind-the-goal pocket instead of shrinking the front-line
   // field for all of it when rink is on — the two coordinate systems (board.x/y here, and the
   // screen container's own layout) have to agree on where the container's origin actually is, so
@@ -394,7 +394,7 @@ export interface GameState {
   lastWellPolarity: 'attract' | 'repel' | null
   // Same "counter + kind" shape as wellEnterCount/lastWellPolarity above — bumped whenever
   // stepPhysics reports the puck struck the invisible one-way door at the goal mouth (only
-  // reachable when GameSettings.rink is on), so Board.tsx can flash that goal's own color right in
+  // reachable when Settings.rink is on), so Board.tsx can flash that goal's own color right in
   // the visual gap between the posts. Never reset between rounds/games (same as bounceCount) —
   // Board.tsx guards against a stale nonzero value on mount by diffing against a ref, not by
   // expecting this to come back to 0.

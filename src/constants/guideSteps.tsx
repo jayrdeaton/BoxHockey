@@ -5,7 +5,7 @@ import { CONTROL_SCHEME_SIGN } from '@/constants/game'
 import type { ControlScheme, GameMode, Player, TipoffMode } from '@/types'
 
 // How to shoot, for one scheme (the default is 'flick' for both seats, see
-// gameSettingsValidation.ts). Power model per resolveStrikeVelocity in useGameState.ts: 'flick' is
+// redux/settingsSlice.ts). Power model per resolveStrikeVelocity in useGameState.ts: 'flick' is
 // speed-based, 'pull'/'push' distance-based up to MAX_STICK_PULLBACK_PIXELS. "From anywhere" because
 // a shot starts wherever the finger or mouse lands, never only on the puck (useGameState.ts's
 // tryAimStart). The direction is stated as where the PUCK flies relative to the gesture, per

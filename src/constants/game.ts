@@ -115,14 +115,14 @@ export const DIVIDER_HOLE_TO_PUCK_RADIUS: Record<PuckSizeLevel, number> = {
 }
 export const WALL_THICKNESS = 10
 // Goal line stroke width (Board.tsx's 4 goal-line <Line> segments). Also reused, when
-// GameSettings.rink is off, as the divider/perimeter wall thickness fed into computeBoardLayout
+// Settings.rink is off, as the divider/perimeter wall thickness fed into computeBoardLayout
 // (see its wallThickness local) — guarantees "walls as thin as the goal line" stays a real
 // equality rather than two independently-tuned literals that could drift apart. NOT used for
 // Board.tsx's separate zone-line <Line> segments, which happen to share this same literal value
 // today by coincidence, not by relationship.
 export const GOAL_LINE_STROKE_WIDTH = 4
 // Radius (as a fraction of puckRadius) of the small round pegs capping a goal mouth's edges
-// (buildGoalPosts) and, when GameSettings.rink is off, a divider/gauntlet wall's hole edges
+// (buildGoalPosts) and, when Settings.rink is off, a divider/gauntlet wall's hole edges
 // (buildWallPosts) — shared so both post styles read as the same kind of thing visually.
 export const WALL_POST_RADIUS_RATIO = 0.18
 export const STOP_THRESHOLD = 0.12
