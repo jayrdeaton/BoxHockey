@@ -109,11 +109,12 @@ export default function LoadoutScreen() {
   // panel arrangement, not a stored per-round choice. This is what lets two players sit
   // shoulder-to-shoulder and pick a color at the same time once the phone is turned sideways,
   // instead of a portrait-narrow column — and for vs-CPU, it's simply whichever way the solo player
-  // is holding it. Lock Orientation (see SettingsDialog) is the opt-in for pinning it. app.json is
-  // portrait-locked at the OS level now (no more real OS rotation to rely on — see
-  // @tastic/split-screen's FakeLandscapeView below, which fakes the rest entirely in JS from this
-  // hook's live accelerometer reading).
-  const { orientationMode, p1OnRight, upsideDown, resolved: p1OnRightResolved } = useOrientationState(settings.lockOrientation)
+  // is holding it. Lock Orientation (see SettingsDialog) pins it app-wide by freezing the shared
+  // reading itself (OrientationProvider's freezeWhileLocked in _layout.tsx), so this read takes no
+  // `locked` argument. app.json is portrait-locked at the OS level now (no more real OS rotation to
+  // rely on: see @tastic/split-screen's FakeLandscapeView below, which fakes the rest entirely in
+  // JS from this hook's live accelerometer reading).
+  const { orientationMode, p1OnRight, upsideDown, resolved: p1OnRightResolved } = useOrientationState()
 
   // The panel area's own layout (which branch renders, which side each panel is on) lags one fade
   // behind the live orientationMode/p1OnRight/upsideDown above — see useDualZoneLayout's own

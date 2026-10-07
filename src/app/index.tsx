@@ -16,11 +16,13 @@ export default function HomeScreen() {
   const { settings, setSettings } = useGameSettings()
   // Follows the device's current physical tilt (see @tastic/core's useOrientationState, which
   // useRotation reads internally), so the title screen rotates along with everywhere else as soon
-  // as the phone is turned — Lock Orientation (see SettingsDialog) is the opt-in for pinning it.
+  // as the phone is turned. Lock Orientation (see SettingsDialog) pins it app-wide by freezing the
+  // shared reading itself (OrientationProvider's freezeWhileLocked in _layout.tsx), so neither this
+  // nor FakeLandscapeView below takes a `locked` argument.
   // app.json is portrait-locked at the OS level now (no more real OS rotation to rely on) — see
   // FakeLandscapeView below, which fakes the rest entirely in JS from this hook's live
   // accelerometer reading.
-  const rotation = useRotation(settings.lockOrientation)
+  const rotation = useRotation()
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   // First launch only (and once per session): opens the how-to-play cards over this screen. Called
@@ -56,7 +58,7 @@ export default function HomeScreen() {
       portrait-locked at the OS level (no more real OS rotation to rely on). SettingsDialog is
       deliberately left outside this wrapper — it renders as a centered modal overlay via Portal,
       unaffected by (and not needing) this transform. */}
-      <FakeLandscapeView locked={settings.lockOrientation} style={styles.rotatable}>
+      <FakeLandscapeView style={styles.rotatable}>
         {/* Same top-left slot every @tastic title screen uses for this — see LightCycles' own
         identical trophy IconButton. */}
         <IconButton icon='trophy' iconColor={fg} size={24} style={[styles.topLeft, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={() => router.push('/achievements')} accessibilityLabel='Stats & Achievements' />

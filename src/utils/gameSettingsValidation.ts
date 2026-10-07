@@ -39,6 +39,13 @@ function isValidControlScheme(value: unknown): value is 'pull' | 'push' | 'flick
   return value === 'pull' || value === 'push' || value === 'flick'
 }
 
+// lockedRotation is optional and absent from DEFAULT_SETTINGS: it only exists while Lock Orientation
+// is on, and settings saved before it existed don't have it either. It must pass when missing, because
+// a failed isValidSettings makes createGameSettingsProvider discard EVERY saved setting, not just this.
+function isValidLockedRotation(value: unknown): value is GameSettings['lockedRotation'] {
+  return value === undefined || value === 0 || value === 90 || value === 180 || value === -90
+}
+
 export function isValidSettings(value: unknown): value is GameSettings {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<GameSettings>
@@ -48,6 +55,7 @@ export function isValidSettings(value: unknown): value is GameSettings {
     typeof v.scoreToWin === 'number' &&
     (v.aiDifficulty === 'easy' || v.aiDifficulty === 'medium' || v.aiDifficulty === 'hard') &&
     typeof v.lockOrientation === 'boolean' &&
+    isValidLockedRotation(v.lockedRotation) &&
     (v.tipoffMode === 'coinFlip' || v.tipoffMode === 'faceoff' || v.tipoffMode === 'tripleTap') &&
     (v.friction === 'low' || v.friction === 'medium' || v.friction === 'high') &&
     (v.shotPreviewLength === 'off' || v.shotPreviewLength === 'short' || v.shotPreviewLength === 'medium' || v.shotPreviewLength === 'long') &&

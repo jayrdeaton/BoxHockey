@@ -98,9 +98,12 @@ export default function GameScreen() {
   // touch handlers below can close over it — the tradeoff called out in MatchOverlays' own comment
   // (this board/gesture tree now re-renders on a live tilt change too) is accepted deliberately for
   // this feature; tilt changes are debounced at the source (see useOrientationState) so this is an
-  // occasional re-render, not a per-frame one.
-  const liveOrientation = useOrientationState()
-  const isUpsideDown = liveOrientation.orientationMode === 'faceToFace' && liveOrientation.upsideDown
+  // occasional re-render, not a per-frame one. Lock Orientation applies here too, like everywhere
+  // else: _layout.tsx's OrientationProvider (freezeWhileLocked) freezes this shared reading itself
+  // while it's on, so a locked board neither flips nor re-maps touches when the phone is turned
+  // over mid-match (it stays at whichever way up it was when the lock went on).
+  const orientation = useOrientationState()
+  const isUpsideDown = orientation.orientationMode === 'faceToFace' && orientation.upsideDown
 
   // computeBoardLayout's own insets.top/bottom handling is asymmetric BY DESIGN for the normal,
   // never-rotated case: the top inset is reserved externally (boardArea's own marginTop below,
@@ -1066,7 +1069,9 @@ interface MatchOverlaysProps {
 // top of it and should still read right-side-up however the phone is actually being held, so they
 // rotate their own content in place via `rotation` rather than reflowing layout (unlike /index and
 // /loadout's FakeLandscapeView) — the fixed zones have to keep the exact shape TouchInputLayer's
-// unrotated hit-zones already use.
+// unrotated hit-zones already use. While Lock Orientation is on, this reading is frozen app-wide
+// (see _layout.tsx's OrientationProvider), so the overlays hold the locked angle along with the
+// board's own flip above.
 function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, seatUnlocks, achievementOwners, onResetGame, confirmVisible, cancelBack, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
   const rotation = useRotation()
   const cardRotationStyle = rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }

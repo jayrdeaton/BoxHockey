@@ -18,17 +18,18 @@ interface Props {
 // the screen stack, so any screen can reach it through useGuide() (the Settings "How to Play" row)
 // and useAutoShowGuide() (Home) without prop-drilling.
 //
-// Reads the rotation the same way Home does for its own Settings dialog,
-// useRotation(settings.lockOrientation), so the guide's card sits at exactly the angle that dialog
-// does. Its Portal renders outside any FakeLandscapeView, so unlike on-screen content it can't
-// inherit that rotation and has to be handed it. `children` is the stable element _layout passes in,
-// so a tilt-driven re-render here never re-renders the screen stack under it.
+// Reads the rotation the same way Home does for its own Settings dialog, plain useRotation() (Lock
+// Orientation freezes the shared reading itself, see _layout.tsx), so the guide's card sits at
+// exactly the angle that dialog does. Its Portal renders outside any FakeLandscapeView, so unlike
+// on-screen content it can't inherit that rotation and has to be handed it. `children` is the
+// stable element _layout passes in, so a tilt-driven re-render here never re-renders the screen
+// stack under it.
 //
 // The cards follow the live settings (the mode, each seat's shooting style, the tip-off, the goal target), so a
 // replay after a player changes any of them in the loadout still describes the next match exactly.
 export function GuideHost({ children }: Props) {
   const { settings } = useGameSettings()
-  const rotation = useRotation(settings.lockOrientation)
+  const rotation = useRotation()
   const touch = useIsTouchPrimaryDevice()
   const seenVersion = useSelector((state: RootState) => selectGuideVersionSeen(state))
   const dispatch = useDispatch()

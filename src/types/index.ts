@@ -1,4 +1,5 @@
 import { AchievementDefinition as BaseAchievementDefinition, DayStreakState, OutcomeRecord, RoundResult, WinStreakState } from '@tastic/achievements'
+import type { ViewRotation } from '@tastic/core'
 
 export type Player = 1 | 2
 
@@ -123,9 +124,15 @@ export interface GameSettings {
   boardVariant: BoardVariant
   scoreToWin: number
   aiDifficulty: AiDifficulty
-  // Opt-in — see useOrientationLock. Off by default: /loadout's panel arrangement just follows
-  // however the phone is actually being held, rather than being a stored preference itself.
+  // Lock Orientation, app-wide: _layout.tsx's OrientationBridge hands it to @tastic/core's
+  // OrientationProvider (freezeWhileLocked), which freezes the one shared orientation reading for
+  // every screen, the in-game board, dialogs and the status bar alike. Off by default: all of those
+  // just follow however the device is actually being held.
   lockOrientation: boolean
+  // The angle the lock is holding. Written by OrientationProvider's onLockChange (recorded on lock,
+  // cleared on unlock) and handed back as lockInitialValue, so a relaunch reopens in the locked
+  // orientation instead of portrait. Never set by the UI directly; see isValidLockedRotation.
+  lockedRotation?: ViewRotation
   tipoffMode: TipoffMode
   friction: FrictionLevel
   shotPreviewLength: ShotPreviewLength
