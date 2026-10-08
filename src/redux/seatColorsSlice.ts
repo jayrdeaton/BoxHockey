@@ -3,12 +3,10 @@ import { createSeatColorsSlice, type SeatColorsState as GenericSeatColorsState }
 import { DEFAULT_P1_COLOR, DEFAULT_P2_COLOR } from '@/constants/game'
 import { Player } from '@/types'
 
-// Thin binding over @tastic/profile's createSeatColorsSlice — this app's own seatColorsSlice.ts was
-// the reference implementation the factory was extracted from (see that package's own doc comment
-// on createSeatColorsSlice), so this is now just the app-specific glue: the Player seat type, this
-// app's own default colors, and the 'boxhockey' namespace that prefixes every action type (e.g.
-// 'seatColors/boxhockey/setLastGuestColor') so this slice's actions never collide with another
-// independent seat-colors concern in the same app.
+// The loadout's per-seat color memory: a thin binding over @tastic/profile's createSeatColorsSlice
+// (see its doc for each field: a guest seat's last color, the CPU seat's last color, and a manual
+// recolor overriding a profile-selected seat's own color until that seat's selection changes). Not a
+// setting: the player's settings live in settingsSlice.ts.
 export type SeatColorsState = GenericSeatColorsState<Player>
 
 export const defaultSeatColorsState: SeatColorsState = {

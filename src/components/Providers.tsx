@@ -7,7 +7,6 @@ import { Provider as ReduxProvider, useDispatch, useSelector } from 'react-redux
 import { PersistGate } from 'redux-persist/integration/react'
 
 import { persistor, type RootState, store } from '@/redux/store'
-import { useSplashReady } from '@/utils/splashGate'
 
 interface Props {
   children: ReactNode
@@ -28,12 +27,6 @@ const FeedbackBridge = ({ children }: Props) => {
   // no need to re-check it here).
   const playSelection = useAudioPool(require('../../assets/sounds/select.wav'))
   const playNotification = useAudioPool(require('../../assets/sounds/notification.wav'))
-
-  // PersistGate (below) already blocks rendering until redux-persist has rehydrated, so by the
-  // time this mounts haptic/sound are already the real persisted values — these gates are always
-  // ready the instant FeedbackBridge exists, unlike the old version's async AsyncStorage load.
-  useSplashReady('haptics', true)
-  useSplashReady('sound', true)
 
   const bridgeProps = useFeedbackBridgeProps({ initialValue: haptic, onChange, soundInitialValue: sound, onSoundChange, sound: { selection: playSelection, notification: playNotification } })
 
