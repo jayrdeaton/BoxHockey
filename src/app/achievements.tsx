@@ -5,7 +5,7 @@ import { AchievementCatalogSection, ActivityStatSection, BaseStatsScreen, StatRo
 import { ProfileChip, ProfilePicker } from '@tastic/profile'
 import { useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
-import { ActivityIndicator, Text } from 'react-native-paper'
+import { Text } from 'react-native-paper'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { ACHIEVEMENT_CATALOG } from '@/constants/achievements'
@@ -52,7 +52,7 @@ export default function AchievementsScreen() {
   // comment for the full reasoning.
   const rotation = useRotation()
   const insets = rotateInsets(useSafeAreaInsets(), rotation)
-  const { stats, unlockedAchievements, loaded, resetAll } = useGameStats()
+  const { stats, unlockedAchievements, resetAll } = useGameStats()
   const { profiles } = useProfiles()
   const profilePickerHost = usePopoverHost()
   const fg = dark ? '#FFFFFF' : '#000000'
@@ -70,23 +70,6 @@ export default function AchievementsScreen() {
   const overall = useMemo(() => getOverallTotals(statsView), [statsView])
   const rankings = useMemo(() => getProfileRankings(profiles, stats.profiles), [profiles, stats.profiles])
   const goalDiff = statsView.goals.scored - statsView.goals.conceded
-
-  // Every computation above already reads cleanly off useAchievements' own zeroed defaultStats
-  // while still loading, so nothing above needs to change — but rendering the real sections over
-  // that zeroed data would flash "0 games played" for a beat on every launch. onReset is withheld
-  // here too: resetting stats that haven't actually been read back from storage yet has nothing
-  // real to confirm against.
-  if (!loaded) {
-    return (
-      <FakeLandscapeView style={styles.rotatable}>
-        <BaseStatsScreen onBack={safeBack} insets={insets} rotation={rotation}>
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator color={themeColors.primary} />
-          </View>
-        </BaseStatsScreen>
-      </FakeLandscapeView>
-    )
-  }
 
   return (
     <FakeLandscapeView style={styles.rotatable}>
@@ -158,11 +141,6 @@ export default function AchievementsScreen() {
 const styles = StyleSheet.create({
   boldText: {
     fontWeight: 'bold'
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 48
   },
   profileValue: {
     alignItems: 'center',

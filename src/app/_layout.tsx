@@ -63,9 +63,9 @@ function OrientationBridge({ children }: { children: ReactNode }) {
 
 // ProfilesProvider reconciles the local roster with the shared App Group one before `loaded` flips,
 // so a screen mounting earlier would read (and could persist) the wrong profiles. This holds
-// everything nested inside it, and the splash screen, until that's done, while ProfilesProvider and
-// GameStatsProvider sit above it and start loading immediately, in parallel. Settings need no gate:
-// they live in the Redux store, which Providers' PersistGate already holds until rehydrated.
+// everything nested inside it, and the splash screen, until that's done, while ProfilesProvider sits
+// above it and starts reconciling immediately. Settings and stats need no gate: they live in the
+// Redux store, which Providers' PersistGate already holds until rehydrated.
 function GatedApp({ children }: { children: ReactNode }) {
   const { loaded } = useProfiles()
   return (

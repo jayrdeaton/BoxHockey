@@ -93,9 +93,9 @@ function pickRandom<T>(options: readonly { value: T }[]): T {
 }
 
 export default function LoadoutScreen() {
-  // Read only from this screen's own route param, never from useSettings().settings.gameMode
-  // — the settings hook's AsyncStorage read is async, and racing it here could momentarily show
-  // the wrong number of player panels.
+  // Read only from this screen's own route param, never from useSettings().settings.gameMode:
+  // the route param is the mode this screen was opened for (settings.gameMode is only the last mode
+  // saved).
   const params = useLocalSearchParams<{ mode: string }>()
   const gameMode = useMemo(() => parseGameMode(params.mode), [params.mode])
   const humanPlayers = useMemo(() => humanPlayersFor(gameMode), [gameMode])

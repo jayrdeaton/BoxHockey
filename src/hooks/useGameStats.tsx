@@ -2,12 +2,10 @@ import { mapUnlocksBySeat, useAchievements } from '@tastic/achievements'
 import { createContext, ReactNode, useCallback, useContext, useMemo } from 'react'
 
 import { ACHIEVEMENT_CATALOG } from '@/constants/achievements'
+import { achievementsActions } from '@/redux/achievementsSlice'
+import type { RootState } from '@/redux/store'
 import { AchievementDefinition, Player, StatsState, UnlockedAchievementsState } from '@/types'
 import { applyMatchOutcome, getProfileStatsView, MatchContext, MatchOutcome } from '@/utils/statsEngine'
-import { DEFAULT_STATS, isValidStats } from '@/utils/statsValidation'
-
-// Produces 'boxhockey.stats' and 'boxhockey.achievements'.
-const STORAGE_NAMESPACE = 'boxhockey'
 
 export interface RecordMatchResult {
   // Device-wide newly-unlocked achievements (bare-id keyed).
@@ -20,10 +18,6 @@ export interface RecordMatchResult {
 interface GameStatsContextValue {
   stats: StatsState
   unlockedAchievements: UnlockedAchievementsState
-  // False until the stored blobs have been read (or failed to read) — see @tastic/achievements' own
-  // useAchievements doc: lets achievements.tsx hold off rendering "0 games played" over real,
-  // still-loading data.
-  loaded: boolean
   recordMatchOutcome: (outcome: MatchOutcome, context: MatchContext) => RecordMatchResult
   // Wipes both stored keys back to defaults — irreversible, so callers confirm with the player
   // first (see achievements.tsx's reset confirmation).
@@ -43,17 +37,15 @@ function profileViews(stats: StatsState): Record<string, StatsState> {
   return Object.fromEntries(Object.entries(stats.profiles).map(([profileId, bucket]) => [profileId, getProfileStatsView(bucket)]))
 }
 
-// Single source of truth for local stats/achievements, mounted once in _layout.tsx — expo-router
-// keeps prior screens mounted, so a per-screen AsyncStorage-backed copy could go stale or clobber
-// a concurrent update.
+// Single source of truth for local stats/achievements (the store's `achievements` slice, see
+// redux/achievementsSlice.ts), mounted once in _layout.tsx so useAchievements' mount-time unlock
+// re-sweep runs once and every screen shares the same callbacks.
 export function GameStatsProvider({ children }: Props) {
-  const { stats, unlockedAchievements, loaded, recordOutcome, resetAll, removeProfile } = useAchievements<StatsState>({
-    namespace: STORAGE_NAMESPACE,
+  const { stats, unlockedAchievements, recordOutcome, resetAll, removeProfile } = useAchievements<StatsState, RootState>({
     catalog: ACHIEVEMENT_CATALOG,
-    defaultStats: DEFAULT_STATS,
-    isValidStats,
-    profileViews,
-    migrateStats: (stored) => ({ ...stored, profiles: stored.profiles ?? {} })
+    select: (state) => state.achievements,
+    actions: achievementsActions,
+    profileViews
   })
 
   const recordMatchOutcome = useCallback(
@@ -80,7 +72,7 @@ export function GameStatsProvider({ children }: Props) {
     [removeProfile]
   )
 
-  const value = useMemo(() => ({ stats, unlockedAchievements, loaded, recordMatchOutcome, resetAll, removeProfileStats }), [stats, unlockedAchievements, loaded, recordMatchOutcome, resetAll, removeProfileStats])
+  const value = useMemo(() => ({ stats, unlockedAchievements, recordMatchOutcome, resetAll, removeProfileStats }), [stats, unlockedAchievements, recordMatchOutcome, resetAll, removeProfileStats])
 
   return <GameStatsContext.Provider value={value}>{children}</GameStatsContext.Provider>
 }
