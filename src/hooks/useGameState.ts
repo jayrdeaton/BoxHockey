@@ -607,10 +607,10 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
         return { ...state, phase: 'simulating', currentPlayer: state.faceoff.result.winner, faceoff: null, puck: { ...state.puck, vx: action.vx, vy: action.vy } }
       }
 
-      // Restarts the current draw from scratch — dispatched by useFaceoff.ts when the app returns
-      // from the background mid-race, or when a pause dialog (settings/quit-confirm) closes
-      // mid-draw, since a suspended setTimeout chain can't be trusted to resume with correct
-      // relative timing (see useFaceoff.ts's AppState listener and its pause-resume effect).
+      // Restarts the current draw from scratch. Dispatched by useFaceoff.ts's pause-resume effect
+      // when a pause clears mid-draw (a settings/quit-confirm dialog closing, or Resume after the
+      // app was backgrounded), since a suspended setTimeout chain can't be trusted to resume with
+      // correct relative timing.
       // Bumping faceoffRound (not just resetting `faceoff`) is what lets that hook's
       // timer-scheduling effect tell "a real restart happened" apart from `faceoff`'s object
       // identity changing on every ordinary sub-action (count ticks, taps, ...), which it

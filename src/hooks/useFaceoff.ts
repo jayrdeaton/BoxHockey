@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react'
-import { AppState } from 'react-native'
 
 import { FACEOFF_COUNTDOWN_STEP_MS, FACEOFF_HOLD_MAX_MS, FACEOFF_HOLD_MIN_MS, FACEOFF_TAP_TIMEOUT_MS } from '@/constants/game'
 import { BoardLayout, GameState, Player } from '@/types'
@@ -23,8 +22,8 @@ interface FaceoffControls {
 // "controls object driven by a timer chain" shape useAIOpponent.ts uses for CPU shots. 'coinFlip'
 // mode needs no timing at all — it's resolved synchronously inside the reducer itself (see
 // useGameState.ts's RESET/NEXT_ROUND cases), so this hook has nothing to do for it. `paused`
-// (settings/quit-confirm dialog open — see game.tsx) halts every timer below and restarts the
-// current draw once it clears (see the pause-resume effect near the bottom).
+// (settings/quit-confirm dialog open, or the app was backgrounded - see game.tsx) halts every timer
+// below and restarts the current draw once it clears (see the pause-resume effect near the bottom).
 export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Player | null, difficulty: AIDifficulty, paused: boolean, controls: FaceoffControls): void {
   const { faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart } = controls
 
@@ -56,7 +55,7 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
   // Keyed on faceoffRound rather than `state.faceoff` itself: the latter is a new object on every
   // sub-action (each count tick, each tap), which would tear down and restart this whole chain
   // mid-flight. faceoffRound only bumps when a genuinely new draw begins (game start, post-goal
-  // restart, or an app-backgrounding recovery — see the AppState effect below), so this effect
+  // restart, or a restart after a pause - see the pause-resume effect below), so this effect
   // runs exactly once per draw. Also gated on !isReadyStage — on the game's first draw the
   // countdown must not start until FACEOFF_READY has flipped stage away from 'ready' (see
   // useGameState.ts), and isReadyStage flipping false is exactly what re-runs this effect at that
@@ -123,10 +122,10 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
     faceoffLaunch(knock.vx, knock.vy)
   }, [state.phase, state.faceoff?.stage, result, board, faceoffLaunch])
 
-  // ─── Pause (settings/quit-confirm dialog) recovery ────────────────────────────────────────
-  // Mirrors the backgrounding recovery below: the countdown-chain effect above already halts
-  // while paused, but a suspended setTimeout chain can't be trusted to resume with correct
-  // relative timing once the dialog closes, so restart the current draw from scratch instead of
+  // ─── Pause (dialog or background) recovery ────────────────────────────────────────────────
+  // The countdown-chain effect above already halts while paused, but a suspended setTimeout chain
+  // can't be trusted to resume with correct relative timing once the pause clears (a dialog
+  // closing, or Resume on the Paused card), so restart the current draw from scratch instead of
   // trying to pick the old timers back up. Skipped while still in 'ready' (nothing was running to
   // interrupt — a dialog can't even open mid-drag/mid-press since it captures the whole screen)
   // and while 'resolved' (unreachable during a pause anyway, since the chain that would resolve it
@@ -139,19 +138,4 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
     const fo = stateRef.current.faceoff
     if (stateRef.current.phase === 'faceoff' && fo && fo.stage !== 'ready' && fo.stage !== 'resolved') faceoffRestart()
   }, [paused, faceoffRestart])
-
-  // ─── Backgrounding recovery ────────────────────────────────────────────────────────────────
-  // The screen stays mounted while backgrounded, so the unmount-cleanup above doesn't help here —
-  // a suspended setTimeout chain resumes with no reliable relationship to real elapsed time (it
-  // may fire in a burst, or with the human timeout landing the instant the app comes back
-  // regardless of how long it was actually gone), which would wreck a millisecond-sensitive race.
-  // Simplest reliable fix: just restart the current draw from scratch on return to foreground.
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next !== 'active') return
-      const fo = stateRef.current.faceoff
-      if (stateRef.current.phase === 'faceoff' && fo && fo.stage !== 'resolved') faceoffRestart()
-    })
-    return () => sub.remove()
-  }, [faceoffRestart])
 }

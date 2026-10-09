@@ -401,8 +401,8 @@ export interface GameState {
   goalDoorHitCount: number
   lastGoalDoorSide: 'top' | 'bottom' | null
   faceoff: FaceoffState | null
-  // Bumped every time a fresh tip-off draw begins (game start, post-goal restart, or an
-  // AppState-triggered restart after the app was backgrounded mid-race — see useFaceoff.ts). A
+  // Bumped every time a fresh tip-off draw begins (game start, post-goal restart, or a restart
+  // when a pause clears mid-race, the app being backgrounded included - see useFaceoff.ts). A
   // primitive counter rather than keying off `faceoff`'s own object identity, which changes on
   // every sub-action dispatch (count ticks, taps, ...) and would make it impossible for an effect
   // to distinguish "a real new draw started" from "the same draw progressed" using object identity

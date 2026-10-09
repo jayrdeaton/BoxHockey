@@ -73,7 +73,8 @@
       ],
       "expo-status-bar",
       "expo-asset",
-      "@tastic/edge-guard"
+      "@tastic/edge-guard",
+      "@tastic/core"
     ],
     "extra": {
       "router": {},

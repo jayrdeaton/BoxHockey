@@ -2,7 +2,7 @@ import { useAutoPaperTheme } from '@rific/auto-paper'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
 import { broadcastDeviceUnlocks } from '@tastic/achievements'
-import { useOrientationState, useRotation, useSettledWindowDimensions } from '@tastic/core'
+import { useBackgroundPause, useOrientationState, useRotation, useSettledWindowDimensions } from '@tastic/core'
 import { AchievementUnlockList, type AchievementUnlockOwner, ConfirmDialog, useQuitConfirmation } from '@tastic/hud'
 import { StatusBar } from 'expo-status-bar'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -174,7 +174,11 @@ export default function GameScreen() {
   // dependency. Only asked once there's a real score to lose — 0-0 exits immediately, since there's
   // nothing yet for a confirmation to protect (mirrors LightCycles' identical quit-confirmation gate).
   const { confirmVisible, requestBack, cancelBack } = useQuitConfirmation(() => scores[0] > 0 || scores[1] > 0, safeBack)
-  const paused = settingsOpen || confirmVisible
+  // Leaving the app mid-match (home, app switch, a phone call, Control Center) latches a pause that
+  // only the Paused dialog's Resume clears - see @tastic/core's useBackgroundPause. Skipped once the
+  // match is over, or while a dialog already holds the pause by itself.
+  const { backgroundPaused, resume } = useBackgroundPause(() => phase !== 'gameOver' && !settingsOpen && !confirmVisible)
+  const paused = settingsOpen || confirmVisible || backgroundPaused
 
   const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch, setInterceptTouch } = useGameState(board, scoreToWin, tipoffMode, friction, controlScheme, paused, interceptThreshold)
   const { phase, puck, aim, interceptAim, currentPlayer, scores, bounceCount, lastScoredGoal, wellEnterCount, lastWellPolarity, goalDoorHitCount, lastGoalDoorSide, faceoff, tripleTap } = state
@@ -205,6 +209,14 @@ export default function GameScreen() {
   useAIOpponent(state, board, aiPlayer, aiDifficulty, friction, controlScheme, paused, interceptThreshold, { tryAimStart, aimUpdate, shoot })
   useFaceoff(state, board, aiPlayer, aiDifficulty, paused, { faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart })
   useTripleTap(state, board, aiPlayer, aiDifficulty, paused, { tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch })
+
+  // A background pause can land mid-way through a CPU windup or intercept (a dialog can't: the corner
+  // buttons are hidden for that whole window, see cornerButtonsVisible), and useAIOpponent's timer chain
+  // can't pick a half-finished windup back up. Dropping the aim returns the turn to 'idle', so the CPU
+  // plans a fresh shot once play resumes; a human's own drag already ended when the app left.
+  useEffect(() => {
+    if (backgroundPaused) aimCancel()
+  }, [backgroundPaused, aimCancel])
 
   // Mid-slide intercept derived values — computed early since several things below (the cancel-
   // zone haptic, gestureEnabled, Board's own props) all need them. `interceptAim` is only ever
@@ -1022,7 +1034,7 @@ export default function GameScreen() {
       {/* Back + settings chips moved into MatchOverlays below (see its own comment) — they need the
       same live rotation-in-place treatment as its dialogs, which only that component's isolated
       tilt subscription provides. */}
-      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} seatUnlocks={seatUnlocks} achievementOwners={achievementOwners} onResetGame={() => resetGame(board)} confirmVisible={confirmVisible} cancelBack={cancelBack} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={requestBack} />
+      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} seatUnlocks={seatUnlocks} achievementOwners={achievementOwners} onResetGame={() => resetGame(board)} confirmVisible={confirmVisible} cancelBack={cancelBack} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={requestBack} backgroundPaused={backgroundPaused} onResume={resume} />
     </View>
   )
 }
@@ -1067,6 +1079,9 @@ interface MatchOverlaysProps {
   fg: string
   cornerButtonBg: string
   onBackPress: () => void
+  // GameScreen's useBackgroundPause latch and its resume, for the Paused dialog below.
+  backgroundPaused: boolean
+  onResume: () => void
 }
 
 // Kept as its own sibling of the board/gesture tree above, specifically so this live tilt
@@ -1079,7 +1094,7 @@ interface MatchOverlaysProps {
 // unrotated hit-zones already use. While Lock Orientation is on, this reading is frozen app-wide
 // (see _layout.tsx's OrientationProvider), so the overlays hold the locked angle along with the
 // board's own flip above.
-function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, seatUnlocks, achievementOwners, onResetGame, confirmVisible, cancelBack, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress }: MatchOverlaysProps) {
+function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, seatUnlocks, achievementOwners, onResetGame, confirmVisible, cancelBack, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress, backgroundPaused, onResume }: MatchOverlaysProps) {
   const rotation = useRotation()
   const cardRotationStyle = rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }
   // The 180° upsideDown case also swaps which edge each chip sits on — a pure in-place spin isn't
@@ -1097,7 +1112,9 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
   // rebuilt directly. Covers 'striking' and 'simulating' as well as 'aiming': not just gameplay
   // polish — it closes the window where a CPU turn's own windup/shoot/settle timer chain (see
   // useAIOpponent.ts) could otherwise get interrupted mid-flight by a just-opened dialog. With all
-  // three phases covered, `paused` can only ever turn true while nothing in that chain is pending.
+  // three phases covered, a dialog can only ever open while nothing in that chain is pending; a
+  // background pause can still land mid-chain, so it cancels the aim instead (see the aimCancel
+  // effect in GameScreen).
   // 'simulating' is also just the puck actually moving — per explicit feedback, the chips should
   // stay out of the way for that whole stretch, not reappear the instant a shot is struck while the
   // puck is still in motion. Lives here (not GameScreen, where these buttons used to render) so the
@@ -1109,6 +1126,14 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
     cornerButtonsOpacity.value = withTiming(cornerButtonsVisible ? 1 : 0, { duration: 150 })
   }, [cornerButtonsVisible]) // eslint-disable-line react-hooks/exhaustive-deps
   const cornerButtonsStyle = useAnimatedStyle(() => ({ opacity: cornerButtonsOpacity.value }))
+
+  const progressMessage = (
+    <>
+      <Text style={{ color: playerColor[1] }}>{scores[0]}</Text>
+      <Text style={{ color: fgMuted }}> – </Text>
+      <Text style={{ color: playerColor[2] }}>{scores[1]}</Text>
+    </>
+  )
 
   return (
     <>
@@ -1154,24 +1179,11 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
           passed through as the raw number rather than re-derived. Trades away this dialog's old
           secondary-accent Quit button and MONO_FONT styling for the shared component's primary
           accent and default font — an approved trade-off, not an oversight. */}
-      <ConfirmDialog
-        visible={confirmVisible}
-        title='Quit Match?'
-        message={
-          <>
-            <Text style={{ color: playerColor[1] }}>{scores[0]}</Text>
-            <Text style={{ color: fgMuted }}> – </Text>
-            <Text style={{ color: playerColor[2] }}>{scores[1]}</Text>
-          </>
-        }
-        confirmLabel='Quit'
-        cancelLabel='Cancel'
-        icon='alert-circle-outline'
-        destructive={false}
-        onConfirm={safeBack}
-        onCancel={cancelBack}
-        rotation={rotation}
-      />
+      <ConfirmDialog visible={confirmVisible} title='Quit Match?' message={progressMessage} confirmLabel='Quit' cancelLabel='Cancel' icon='alert-circle-outline' destructive={false} onConfirm={safeBack} onCancel={cancelBack} rotation={rotation} />
+
+      {/* Shown when the app comes back from the background mid-match (see useBackgroundPause above):
+      play stays frozen until Resume, so a match never restarts before the player is back and ready. */}
+      <ConfirmDialog visible={backgroundPaused} title='Paused' message={progressMessage} confirmLabel='Resume' cancelLabel='Quit' icon='pause-circle-outline' destructive={false} onConfirm={onResume} onCancel={safeBack} rotation={rotation} />
 
       {/* Back + settings — vertically centered on the side edges at the dividing-wall centerline
           (board.boardMarginTop + board.centerY in root-relative coordinates), rather than the top

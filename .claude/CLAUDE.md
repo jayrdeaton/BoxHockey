@@ -13,7 +13,7 @@ A digital BoxHockey game (Expo/React Native, Skia-rendered). Part of the `@rific
 ```bash
 npm run lint          # expo lint .
 npm run fix            # expo lint . --fix
-npm test               # Jest (13 suites, 286 tests)
+npm test               # Jest (16 suites, 298 tests)
 npm run test:watch     # Jest --watchAll
 npm run typecheck      # tsc
 npm run verify         # lint + test + typecheck
@@ -138,6 +138,14 @@ A first-run, replayable "how to play" flow, built on `@tastic/hud/guide` (a ligh
 - **Stats and achievements live in Redux too** (2026-10-07): `src/redux/achievementsSlice.ts` (`@tastic/achievements`' `createAchievementsSlice`, mounted as `achievements`; byte-identical across AirHockey/BoxHockey/LightCycles/Pong/Snake), read and written only through `hooks/useGameStats.tsx`'s `GameStatsProvider` (`useAchievements` with `select`/`actions`). Needs `@tastic/achievements` 0.3.0+. Old AsyncStorage stats and achievements were deliberately not imported: players start fresh (Jay). Nothing loads asynchronously anymore, so the achievements screen has no loading guard and `useGameStats()` has no `loaded`.
 - Needs `@tastic/core` 0.11.0+. Lock Orientation is native only: web derives its reading from the window shape and is never frozen.
 
+## Background pause and stale seat profiles (2026-10-08)
+
+- **Leaving the app mid-match pauses it until the player resumes.** `game.tsx` calls `@tastic/core`'s `useBackgroundPause(() => phase !== 'gameOver' && !settingsOpen && !confirmVisible)` and folds the latch into `paused = settingsOpen || confirmVisible || backgroundPaused`, so everything a dialog halts (physics loop, scored/coin-flip/face-off/triple-tap timers, CPU chains, Edge Guard) halts the same way. Any AppState other than `'active'` counts, iOS `'inactive'` (Control Center, call banner) included; web gets it from react-native-web's visibility mapping. The latch survives the return: `MatchOverlays` (props `backgroundPaused`/`onResume`) shows a Paused `ConfirmDialog` with the Quit Match? dialog's own score (`progressMessage`) and rotation, Resume (contained) and Quit (outlined, `safeBack` directly).
+- `useFaceoff.ts`'s own AppState restart effect is gone: the pause-resume effect restarts an interrupted draw on Resume. GameScreen also calls `aimCancel()` when a background pause lands, because a CPU windup or intercept can be caught mid-chain (a dialog can't, see `cornerButtonsVisible`) and `useAIOpponent` can't resume one; the CPU replans from `'idle'` after Resume.
+- **A seat can no longer point at a profile a sibling app deleted.** `useProfiles.tsx` dispatches `profileSelectionActions.pruneToRoster(ids)` right after both `profilesActions.setAll` calls (initial reconcile and `onRemoteChange`). `profileExtensions` (controlScheme) and stats are deliberately not pruned: a failed native read reports an empty roster, which would erase real players' data for good.
+- Needs `@tastic/core` 0.12.0 (`useBackgroundPause`) and a `@tastic/profile` release with `pruneToRoster`; until Jay releases them, both are installed from local tarballs with `npm install --no-save` and `package.json` is unchanged.
+- Tested in `backgroundPause.test.tsx` (the real `useBackgroundPause` driving `useGameState`/`useFaceoff`/`useAIOpponent` through a faked AppState) and `profiles.test.tsx` (the real `ProfilesProvider` and `@tastic/profile` sync over a faked `TasticProfile` native module). Not verified live on a device or in a browser.
+
 ## Testing
 
 - Framework: Jest (`@infinitetoken/jest-config/expo`, `jest-expo` preset)
@@ -158,6 +166,10 @@ src/
   __tests__/    - test suites
   __mocks__/    - manual Jest mocks for native/Expo modules
 ```
+
+## OS portrait lock (2026-10-08)
+
+The OS is locked to portrait on every device and the app draws all rotation itself (`@tastic/core`'s `OrientationProvider` reads the accelerometer). `@tastic/core`'s Expo config plugin (`"@tastic/core"` in `app.json`'s `plugins`) owns every native setting that depends on: `orientation: "portrait"`; `ios.requireFullScreen` plus a Portrait-only iPad orientation list (audit F009: without it Expo forces all four iPad orientations, so iOS turned the screen on top of the app's own rotation, and Split View, Slide Over and Stage Manager are the price); and `android:appCategory="game"` (Android 16 and later ignore the portrait lock on tablets and unfolded foldables, except for games). Don't set any of those by hand here, and don't add `expo-screen-orientation` (it re-enables upside down on home-button iPhones). The why behind each is in @tastic/core's README. Check the result with `npx expo config --type introspect`; it only takes effect in a new native build.
 
 ## CI
 

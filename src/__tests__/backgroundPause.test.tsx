@@ -1,0 +1,147 @@
+import { useBackgroundPause } from '@tastic/core'
+import { act, renderHook } from '@testing-library/react-native'
+import { useEffect } from 'react'
+import { AppState } from 'react-native'
+
+import { FACEOFF_COUNTDOWN_STEP_MS, FRICTION_LEVELS, INTERCEPT_SPEED_THRESHOLDS } from '@/constants/game'
+import { useAIOpponent } from '@/hooks/useAIOpponent'
+import { useFaceoff } from '@/hooks/useFaceoff'
+import { useGameState } from '@/hooks/useGameState'
+import { DEFAULT_SETTINGS } from '@/redux/settingsSlice'
+import { BoardLayout, Player, TipoffMode } from '@/types'
+
+import { emitAppState } from '../testUtils/appState'
+
+// Same synthetic board physics.test.ts uses.
+const board: BoardLayout = {
+  x: 10,
+  y: 10,
+  width: 300,
+  height: 500,
+  wallThickness: 8,
+  goalWidth: 80,
+  goalLeft: 110,
+  goalRight: 190,
+  puckRadius: 18,
+  centerX: 160,
+  centerY: 260,
+  obstacles: [],
+  gravityWells: [],
+  goalPosts: [],
+  wallPosts: [],
+  cornerRadius: 0,
+  behindGoalDepth: 0,
+  faceoffOffsetYRatio: 0.42,
+  boardMarginTop: 0
+}
+
+const FRICTION = FRICTION_LEVELS[DEFAULT_SETTINGS.friction]
+const INTERCEPT = INTERCEPT_SPEED_THRESHOLDS[DEFAULT_SETTINGS.interceptSpeed]
+const CONTROLS = DEFAULT_SETTINGS.controlScheme
+
+interface MatchProps {
+  tipoffMode: TipoffMode
+  aiPlayer: Player | null
+  // game.tsx drops the aim the moment a background pause lands (its aimCancel effect); false shows why it has to.
+  cancelAimOnPause: boolean
+}
+
+// GameScreen's pause wiring in miniature: the same game hooks, fed `paused` from the real
+// useBackgroundPause, with no dialog of their own open.
+function useMatch({ tipoffMode, aiPlayer, cancelAimOnPause }: MatchProps) {
+  const { backgroundPaused, resume } = useBackgroundPause(() => state.phase !== 'gameOver')
+  const controls = useGameState(board, DEFAULT_SETTINGS.scoreToWin, tipoffMode, FRICTION, CONTROLS, backgroundPaused, INTERCEPT)
+  const { state, aimCancel } = controls
+  useAIOpponent(state, board, aiPlayer, 'hard', FRICTION, CONTROLS, backgroundPaused, INTERCEPT, controls)
+  useFaceoff(state, board, aiPlayer, 'hard', backgroundPaused, controls)
+  useEffect(() => {
+    if (backgroundPaused && cancelAimOnPause) aimCancel()
+  }, [backgroundPaused, cancelAimOnPause, aimCancel])
+  return { ...controls, backgroundPaused, resume }
+}
+
+function advance(ms: number) {
+  act(() => {
+    jest.advanceTimersByTime(ms)
+  })
+}
+
+// Steps the clock in small slices until `done` holds, so a test can stop at the exact moment a
+// randomized CPU delay lands instead of overshooting into the next step.
+function advanceUntil(done: () => boolean, maxMs = 5000) {
+  for (let elapsed = 0; elapsed < maxMs && !done(); elapsed += 10) advance(10)
+}
+
+beforeEach(() => {
+  jest.mocked(AppState.addEventListener).mockClear()
+  jest.useFakeTimers()
+})
+
+afterEach(() => {
+  jest.useRealTimers()
+})
+
+describe('pausing when the app leaves the foreground mid-match', () => {
+  it('freezes a face-off countdown, keeps it frozen after the app comes back, and restarts the draw only on Resume', () => {
+    const { result } = renderHook(useMatch, { initialProps: { tipoffMode: 'faceoff', aiPlayer: null, cancelAimOnPause: true } })
+    act(() => {
+      result.current.faceoffReady(1)
+      result.current.faceoffReady(2)
+    })
+    advance(FACEOFF_COUNTDOWN_STEP_MS)
+    expect(result.current.state.faceoff).toMatchObject({ stage: 'countdown', count: 2 })
+    const round = result.current.state.faceoffRound
+
+    act(() => emitAppState('background'))
+    expect(result.current.backgroundPaused).toBe(true)
+    advance(FACEOFF_COUNTDOWN_STEP_MS * 10)
+    // Coming back doesn't lift the pause or touch the draw: the Paused dialog waits for Resume.
+    act(() => emitAppState('active'))
+    advance(FACEOFF_COUNTDOWN_STEP_MS * 10)
+    expect(result.current.backgroundPaused).toBe(true)
+    expect(result.current.state.faceoff).toMatchObject({ stage: 'countdown', count: 2 })
+    expect(result.current.state.faceoffRound).toBe(round)
+
+    // Resume restarts the draw from the ready check, never mid-count.
+    act(() => result.current.resume())
+    expect(result.current.backgroundPaused).toBe(false)
+    expect(result.current.state.faceoff).toMatchObject({ stage: 'ready', count: null })
+    expect(result.current.state.faceoffRound).toBe(round + 1)
+  })
+
+  // Starts a vs-CPU coin-flip match with the CPU on whichever seat won the flip, and stops the clock
+  // the moment the CPU commits to its windup (its release is still pending).
+  function startCpuWindup(cancelAimOnPause: boolean) {
+    const { result, rerender } = renderHook(useMatch, { initialProps: { tipoffMode: 'coinFlip', aiPlayer: null, cancelAimOnPause } })
+    rerender({ tipoffMode: 'coinFlip', aiPlayer: result.current.state.currentPlayer, cancelAimOnPause })
+    act(() => result.current.coinFlipDone())
+    advanceUntil(() => result.current.state.phase === 'aiming')
+    expect(result.current.state.phase).toBe('aiming')
+    return result
+  }
+
+  it('strands a CPU windup the pause interrupted in aiming if the aim is left alone', () => {
+    const result = startCpuWindup(false)
+    act(() => emitAppState('inactive'))
+    act(() => emitAppState('active'))
+    act(() => result.current.resume())
+    advance(5000)
+    expect(result.current.state.phase).toBe('aiming')
+  })
+
+  it('drops a CPU windup the pause interrupted, so the CPU plans and takes a fresh shot after Resume', () => {
+    const result = startCpuWindup(true)
+    act(() => emitAppState('inactive'))
+    expect(result.current.state.phase).toBe('idle')
+    expect(result.current.state.aim).toBeNull()
+    act(() => emitAppState('active'))
+    advance(5000)
+    // Nothing moves until Resume.
+    expect(result.current.state.phase).toBe('idle')
+
+    act(() => result.current.resume())
+    advanceUntil(() => result.current.state.phase !== 'idle' && result.current.state.phase !== 'aiming')
+    // A flick shot goes straight to 'simulating', a pull/push one through the 'striking' swing.
+    expect(['striking', 'simulating']).toContain(result.current.state.phase)
+  })
+})

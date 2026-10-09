@@ -37,7 +37,9 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
   // `paused` (settings/quit-confirm dialog open — see game.tsx) is only checked here, before
   // anything below has dispatched — safe to gate the whole chain on it at this single point
   // because game.tsx hides the corner buttons for the entire 'aiming'/'striking' window this
-  // chain runs through once tryAimStart commits, so paused can't flip true again mid-windup.
+  // chain runs through once tryAimStart commits, so a dialog can't open again mid-windup. A
+  // background pause still can, so game.tsx cancels the aim then, and this effect plans a fresh
+  // shot from 'idle' once play resumes.
   useEffect(() => {
     if (aiPlayer === null || paused) return
     if (state.phase !== 'idle' || state.currentPlayer !== aiPlayer) return
