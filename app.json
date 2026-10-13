@@ -23,7 +23,7 @@
     "assetBundlePatterns": [
       "**/*"
     ],
-    "icon": "./assets/images/dark-icon.png",
+    "icon": "./assets/images/icon-dark.png",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.infinitetoken.BoxHockey",
@@ -31,8 +31,8 @@
         "ITSAppUsesNonExemptEncryption": false
       },
       "icon": {
-        "dark": "./assets/images/dark-icon.png",
-        "light": "./assets/images/light-icon.png"
+        "dark": "./assets/images/icon-dark.png",
+        "light": "./assets/images/icon-light.png"
       },
       "entitlements": {
         "com.apple.security.application-groups": [
@@ -46,7 +46,7 @@
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/dark-icon.png"
+      "favicon": "./assets/images/icon-dark.png"
     },
     "plugins": [
       "expo-router",
@@ -62,12 +62,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/splash-light.png",
           "imageWidth": 200,
-          "backgroundColor": "#FFFFFF",
+          "backgroundColor": "#FAFAFA",
           "dark": {
-            "image": "./assets/images/splash-icon.png",
-            "backgroundColor": "#000000"
+            "image": "./assets/images/splash-dark.png",
+            "backgroundColor": "#050505"
           }
         }
       ],

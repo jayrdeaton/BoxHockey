@@ -174,3 +174,7 @@ The OS is locked to portrait on every device and the app draws all rotation itse
 ## CI
 
 `.github/workflows/ci.yml` uses the shared reusable workflow (`infinitetoken/Workflows/.github/workflows/npm-ci.yml@v1`, defaults to `npm run verify`) — previously present locally but never committed, and hand-rolled (`npm ci && npm run ci`). The `ci` npm script was renamed to `verify` to match.
+
+## Icons and splash (2026-10-13)
+
+Seven games (AirHockey, BoxHockey, Hangman, LightCycles, Pong, Snake, Solitaire) and Expo-Starter use the same four files, `assets/images/icon-light.png`, `icon-dark.png`, `splash-light.png` and `splash-dark.png`, and the same `app.json` config. The icons are opaque 1024px squares on `#FAFAFA` (light) and `#050505` (dark). Each splash is its icon's art on a transparent background. The `expo-splash-screen` plugin paints the same two colors behind it, at `imageWidth` 200. `expo.icon` and `web.favicon` are `icon-dark.png`, `ios.icon` is the dark/light pair, and there is no Android `adaptiveIcon` (Android uses `expo.icon`). Snake is the only game whose light and dark art differ (its body and head fill). The other games keep two identical splash files so the config is the same everywhere. Icon and splash changes only take effect in a new native build.
