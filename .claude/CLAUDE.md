@@ -146,6 +146,10 @@ A first-run, replayable "how to play" flow, built on `@tastic/hud/guide` (a ligh
 - Needs `@tastic/core` 0.12.0 (`useBackgroundPause`) and a `@tastic/profile` release with `pruneToRoster`; until Jay releases them, both are installed from local tarballs with `npm install --no-save` and `package.json` is unchanged.
 - Tested in `backgroundPause.test.tsx` (the real `useBackgroundPause` driving `useGameState`/`useFaceoff`/`useAIOpponent` through a faked AppState) and `profiles.test.tsx` (the real `ProfilesProvider` and `@tastic/profile` sync over a faked `TasticProfile` native module). Not verified live on a device or in a browser.
 
+## Achievement toasts (2026-10-14)
+
+`game.tsx` gets every mode's unlocks from `@tastic/achievements` 0.5.0's `broadcastDeviceUnlocks(seats, result.profiles, result.device, profileIds)`: 2 Player passes `[1, 2]`, Vs CPU passes `[1]` and toasts `[1]`. The old Vs CPU merge `[...result.device, ...result.profiles[1]]` toasted a profile's first-round achievements twice (`device` evaluates the whole catalog) and credited a profile with device totals another profile reached; 2 Player broadcast every device unlock onto both seats. Now a seat with a profile gets only `scope: 'device'` entries from `device`, and a guest seat gets all of it. Same change in Snake and LightCycles.
+
 ## Testing
 
 - Framework: Jest (`@infinitetoken/jest-config/expo`, `jest-expo` preset)

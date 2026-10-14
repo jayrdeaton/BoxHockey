@@ -489,17 +489,17 @@ export default function GameScreen() {
         // (seat 2 sits rotated 180° from seat 1 - see isUpsideDown above) would see it upside-down
         // even though it's their own achievement. Broadcasting into seatUnlocks instead lets the
         // Game Over card below (which already carries its own cardRotationStyle) show each seat's
-        // own unlocks once the match settles. Device-wide achievements have no per-seat owner, but
-        // both seats are human here, so they're broadcast into both seats' own entries rather than
-        // dropped or arbitrarily attributed to one side.
-        const broadcast = broadcastDeviceUnlocks([1, 2] as Player[], result.profiles, result.device)
+        // own unlocks once the match settles. Each seat also gets the device-wide unlocks that are
+        // really its own (all of them for a guest, only scope: 'device' ones for a profile; see
+        // @tastic/achievements' broadcastDeviceUnlocks).
+        const broadcast = broadcastDeviceUnlocks([1, 2] as Player[], result.profiles, result.device, profileIds)
         // eslint-disable-next-line react-hooks/set-state-in-effect -- a real one-shot transition guarded by prevPhaseRef above, not a render loop; the sibling vsCpu branch below fires showAchievementToast (which does the same thing inside @rific/toaster) unconditionally in this same effect
         setSeatUnlocks(broadcast)
       } else {
         // vsCpu only ever has one human perspective (seat 1; seat 2 is the CPU) to address, so the
         // shared, screen-fixed toast is fine here - one per newly-unlocked achievement, in its own
-        // tier color and icon, its own profile unlocks joining the device-wide ones as before.
-        ;[...result.device, ...(result.profiles[1] ?? [])].forEach((achievement) => {
+        // tier color and icon, filtered the same way as the two-seat branch above.
+        ;(broadcastDeviceUnlocks([1] as Player[], result.profiles, result.device, profileIds)[1] ?? []).forEach((achievement) => {
           showAchievementToast(achievement.title, 'Achievement unlocked', undefined, { color: ACHIEVEMENT_TIER_COLORS[achievement.tier], icon: achievement.icon })
         })
       }
