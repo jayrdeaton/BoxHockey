@@ -10,13 +10,13 @@ BoxHockey is a physics-driven box hockey game for iOS, Android, and web. Built w
 
 - **Two modes:** One Player against a CPU opponent (Easy, Medium, Hard), or Two Player pass-and-play with both people on the same device. Players take turns shooting. After a goal, Coin Flip mode hands the puck to the player who conceded, in their own zone; Face-Off and Triple Tap restart from center with a new draw.
 - **Three ways to shoot, per player:** Flick (power comes from swipe speed, the default), Pull (slingshot: drag back, release to fire), or Push (drag toward the shot). Each seat picks its own, and a saved profile remembers its choice.
-- **Three tip-off modes:** Face-Off, a reaction race (both players ready up, a 3-2-1 countdown runs, then one of each player's two circles lights after a random hold and the first correct tap wins the knock); Coin Flip, a tap-to-flip animation for the opening possession; and Triple Tap (touch only), where each player taps their zone twice and then swipes, and the two swipes add together into the launch.
+- **Three tip-off modes:** Face-Off, a reaction race (both players ready up, a 3-2-1 countdown runs, then one of each player's two circles lights after a random hold and the first correct tap wins the knock); Coin Flip, a tap-to-flip animation for the opening possession; and Triple Tap (iOS and Android only), where each player taps their zone twice and then swipes, and the two swipes add together into the launch.
 - **Board variants and modifiers:** Classic (a center divider with two gaps), Gauntlet (three gapped walls splitting the rink into four zones), and Gravity (the classic divider plus a center attractor and four corner repellers). A Rink toggle adds rounded corners and a net pocket behind each goal on any of the three.
-- **Match options:** puck speed (friction), puck size (the goal and wall gaps scale with it), score to win (3, 5, 7, or 10), an optional trajectory preview that draws predicted bank shots, and a "slap shot" setting that lets the receiving player hit a puck that's still sliding. The loadout also has randomize and reset buttons.
+- **Match options:** puck speed (friction), puck size (the goal and wall gaps scale with it), score to win (3, 5, 7, or 10), a shot preview (Off by default, or Short, Medium, or Long, where the longer lengths draw predicted bank shots), and a Slap Shot setting (Patient, Alert, or Aggressive) that sets how early the receiving player can hit a puck that's still sliding. The loadout also has randomize and reset buttons.
 - **Player profiles:** saved names, colors, tags, and shot style per seat. On iOS the roster is shared with my other games through an App Group.
 - **Stats and achievements:** per-profile and device-wide records (vs CPU by difficulty, two-player results by seat, wins per board variant, goals, shutouts, best win margin, win and day streaks, player rankings) and 33 bronze/silver/gold achievements.
 - **How-to-play guide:** a short first-run guide, replayable from Settings, built from the live settings: the shot card describes each seat's actual control scheme and the tip-off card matches the selected mode.
-- **Settings:** sound, haptics, appearance, an app-wide Lock Orientation setting, an iOS option to defer system edge gestures during play, and a manual update check. A match pauses automatically when the app goes to the background.
+- **Settings:** sound, haptics, appearance, an app-wide Lock Orientation setting, Edge Guard (an iOS option that makes system edge gestures need a second swipe during play), and Check for Updates. A match pauses automatically when the app goes to the background and stays Paused until a player taps Resume.
 
 ## Under the hood
 
@@ -47,8 +47,8 @@ BoxHockey is a physics-driven box hockey game for iOS, Android, and web. Built w
 | [`@rific/auto-paper`](https://www.npmjs.com/package/@rific/auto-paper) | React Native Paper theming from seed colors, light/dark appearance |
 | [`@rific/feedback-press`](https://www.npmjs.com/package/@rific/feedback-press) | Buttons with haptic and sound feedback, vibration, game sounds |
 | [`@rific/toaster`](https://www.npmjs.com/package/@rific/toaster) | Toast notifications (achievement unlocks, update errors) |
-| [`@rific/splash-gate`](https://www.npmjs.com/package/@rific/splash-gate) | Keeps the splash screen up until fonts, theme, and profiles are ready |
-| [`@rific/updater`](https://www.npmjs.com/package/@rific/updater) | OTA update checks and the build/update scripts |
+| [`@rific/splash-gate`](https://www.npmjs.com/package/@rific/splash-gate) | Keeps the splash screen up until the theme, fonts, and profiles are ready |
+| [`@rific/updater`](https://www.npmjs.com/package/@rific/updater) | OTA update checks and the `build`/`update` scripts |
 | [`@rific/focus-chain`](https://www.npmjs.com/package/@rific/focus-chain) | Peer dependency of `@tastic/profile` for form focus |
 
 ## Getting started
@@ -58,13 +58,15 @@ npm install
 npm run ios        # or: npm run android / npm start (web)
 ```
 
-The app uses native code and config plugins that Expo Go doesn't include (the `@tastic/core` and `@tastic/edge-guard` config plugins and `@tastic/profile`'s native iOS shared-roster module), so iOS and Android run as a development build (`expo-dev-client`). `npm run ios` and `npm run android` build it locally; `npm run client` starts the dev server for an already-installed build. `npm install` also runs `setup-skia-web`, which sets up CanvasKit for the web target.
+The app uses native code that Expo Go doesn't include (the `@tastic/core` and `@tastic/edge-guard` config plugins and `@tastic/profile`'s native iOS shared-roster module), so iOS and Android run as a development build (`expo-dev-client`). `npm run ios` and `npm run android` build it locally (`expo run:*`), and `npm run client` starts the dev server for an already-installed build. `npm install` also runs `setup-skia-web` (the `postinstall` script), which copies Skia's CanvasKit WASM into `public/` for the web target.
 
 ### Checks
 
 ```bash
 npm run verify     # lint (expo lint) + Jest + typecheck (tsc)
 ```
+
+CI runs the same command on pushes and pull requests to `main`, and `npm run build` / `npm run update` (via `@rific/updater`) run it before building or publishing.
 
 ## Project layout
 
@@ -74,7 +76,8 @@ src/
   components/   board rendering, gravity-well marker, loadout controls, dialogs, theme, guide host and art
   constants/    game tuning, achievement catalog, guide steps, fonts, release info
   hooks/        game state reducer and loop, AI opponent, face-off and Triple Tap timers, profiles, stats, settings, sound
-  redux/        redux-persist store and slices (settings, profiles, seat colors, achievements, guide, live play)
+  redux/        redux-persist store and slices (settings, profiles, per-profile shot style, seat colors, achievements, guide, live play)
+  testUtils/    shared test helpers
   types/        shared TypeScript types
   utils/        physics, board geometry, AI, face-off knock, game mode helpers, stats engine and validation
   __tests__/    Jest suites
