@@ -22,7 +22,7 @@ interface ProfileRankingRowProps {
   fgMuted: string
 }
 
-// One row per saved profile — a ProfileChip (that profile's own saved color and tag) plus its name
+// One row per saved profile - a ProfileChip (that profile's own saved color and tag) plus its name
 // and record. Stays BoxHockey-local: @tastic/hud's StatRow has no notion of a leading identity chip.
 function ProfileRankingRow({ ranking, fg, fgMuted }: ProfileRankingRowProps) {
   const { profile, wins, losses, played } = ranking
@@ -44,11 +44,11 @@ function ProfileRankingRow({ ranking, fg, fgMuted }: ProfileRankingRowProps) {
 
 export default function AchievementsScreen() {
   const { dark, colors: themeColors } = useAutoPaperTheme()
-  // Unlike index.tsx/loadout.tsx, this screen previously had no orientation handling at all — it
+  // Unlike index.tsx/loadout.tsx, this screen previously had no orientation handling at all - it
   // always rendered right-side-up regardless of how the phone was actually being held, the one
   // screen in the app that didn't rotate along with everywhere else. rotateInsets remaps the
   // device's own raw (never-rotated) safe-area reading onto whichever edge it actually corresponds
-  // to once FakeLandscapeView below visually rotates the content — see index.tsx's identical
+  // to once FakeLandscapeView below visually rotates the content - see index.tsx's identical
   // comment for the full reasoning.
   const rotation = useRotation()
   const insets = rotateInsets(useSafeAreaInsets(), rotation)
@@ -59,11 +59,11 @@ export default function AchievementsScreen() {
   const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   // null = "All Profiles" (device-wide). Self-heals to null if the selected profile is deleted from
-  // another still-mounted screen — effectiveProfileId simply stops matching any entry in `profiles`.
+  // another still-mounted screen - effectiveProfileId simply stops matching any entry in `profiles`.
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
   const effectiveProfileId = selectedProfileId && profiles.some((p) => p.id === selectedProfileId) ? selectedProfileId : null
   const profileBucket = effectiveProfileId ? (stats.profiles[effectiveProfileId] ?? DEFAULT_PROFILE_STATS) : null
-  // The same StatsState-shaped object every predicate and helper already reads — statsView === stats
+  // The same StatsState-shaped object every predicate and helper already reads - statsView === stats
   // for "All Profiles", so every section collapses to the device-wide view in that case.
   const statsView = profileBucket ? getProfileStatsView(profileBucket) : stats
 
@@ -121,7 +121,7 @@ export default function AchievementsScreen() {
         </StatSection>
 
         {/* A leaderboard across profiles is inherently a cross-profile question, so it only appears
-      on "All Profiles" — once you've drilled into one profile it answers a different question. */}
+      on "All Profiles" - once you've drilled into one profile it answers a different question. */}
         {effectiveProfileId === null && rankings.length > 0 && (
           <StatSection label='PLAYER RANKINGS'>
             {rankings.map((ranking) => (
@@ -148,7 +148,7 @@ const styles = StyleSheet.create({
     gap: 8
   },
   // Everything visible sits inside FakeLandscapeView now, which needs a real (not shrink-wrapped)
-  // full-bleed box to size its own ±90° dimension-swap math against correctly — see index.tsx's
+  // full-bleed box to size its own ±90° dimension-swap math against correctly - see index.tsx's
   // identical style/comment.
   rotatable: {
     flex: 1

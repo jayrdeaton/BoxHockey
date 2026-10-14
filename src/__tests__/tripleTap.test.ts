@@ -1,7 +1,7 @@
 // 'tripleTap' tip-off mode (see TipoffMode's own doc comment in types/index.ts): each player
 // presses their own single zone twice, then their third press is a swipe whose vector is captured.
 // The launch velocity is the plain vector SUM of both players' swipes (combineAndClampVelocity, the
-// same clamp-to-MAX_SPEED helper the ordinary shot mechanic already uses) — there is no shared
+// same clamp-to-MAX_SPEED helper the ordinary shot mechanic already uses) - there is no shared
 // countdown/beat and no timeout, so the reducer just waits until both swipes land, however long
 // that takes and in whatever order the two players' gesture threads happen to dispatch in.
 
@@ -55,7 +55,7 @@ describe('combineAndClampVelocity bounds (tripleTap launch combine)', () => {
     expect(Math.hypot(combined.vx, combined.vy)).toBeCloseTo(MAX_SPEED, 9)
   })
 
-  it('two opposing swipes can partly (or fully) cancel — this is authentic "stick clash" behavior, not a bug', () => {
+  it('two opposing swipes can partly (or fully) cancel - this is authentic "stick clash" behavior, not a bug', () => {
     const combined = combineAndClampVelocity(10, 0, -10, 0)
     expect(combined.vx).toBeCloseTo(0)
     expect(combined.vy).toBeCloseTo(0)
@@ -95,7 +95,7 @@ describe('tripleTap reducer sequencing', () => {
     }
   }
 
-  it('waits patiently — one player finishes all 3 inputs, the other has not even started: no result yet, phase unchanged', () => {
+  it('waits patiently - one player finishes all 3 inputs, the other has not even started: no result yet, phase unchanged', () => {
     let s = makeLiveTripleTapState()
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
@@ -107,7 +107,7 @@ describe('tripleTap reducer sequencing', () => {
     expect(s.tripleTap?.swipe[1]).toBeNull()
   })
 
-  it('winner is whichever player initiated their own swipe first — P1 first, even though P1s SWIPE_END is dispatched last', () => {
+  it('winner is whichever player initiated their own swipe first - P1 first, even though P1s SWIPE_END is dispatched last', () => {
     let s = makeLiveTripleTapState()
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
@@ -120,7 +120,7 @@ describe('tripleTap reducer sequencing', () => {
     expect(s.tripleTap?.result?.winner).toBe(1)
   })
 
-  it('winner is whichever player initiated their own swipe first — P2 first', () => {
+  it('winner is whichever player initiated their own swipe first - P2 first', () => {
     let s = makeLiveTripleTapState()
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
@@ -193,7 +193,7 @@ describe('tripleTap reducer sequencing', () => {
     expect(next).toBe(s)
   })
 
-  it('a duplicate TRIPLE_TAP_SWIPE_START once already started is a no-op — the first timestamp is never overwritten', () => {
+  it('a duplicate TRIPLE_TAP_SWIPE_START once already started is a no-op - the first timestamp is never overwritten', () => {
     let s = makeLiveTripleTapState()
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
@@ -203,7 +203,7 @@ describe('tripleTap reducer sequencing', () => {
     expect(next.tripleTap?.swipeStartedAt[0]).toBe(200)
   })
 
-  it('a duplicate TRIPLE_TAP_SWIPE_END once already captured is a no-op — the first swipe is never overwritten', () => {
+  it('a duplicate TRIPLE_TAP_SWIPE_END once already captured is a no-op - the first swipe is never overwritten', () => {
     let s = makeLiveTripleTapState()
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
@@ -254,12 +254,12 @@ describe('tripleTap reducer sequencing', () => {
   })
 })
 
-// ─── Turn-alternation fuzz — tipoffMode: 'tripleTap' (reducer level, no React, no timers) ────────
+// ─── Turn-alternation fuzz - tipoffMode: 'tripleTap' (reducer level, no React, no timers) ────────
 // Self-contained rather than folded into turnAlternation.test.ts's own shared driveFuzzRun/
 // resolveFaceoffDraw, to keep this feature's blast radius off that already-passing suite. Each
-// iteration is an independent fresh draw (RESET), so this is scoped to what's actually NEW here —
+// iteration is an independent fresh draw (RESET), so this is scoped to what's actually NEW here -
 // does a tripleTap draw's own resolution correctly interact with PHYSICS_STEP's existing,
-// already-tested unconditional turn-flip rules — not re-proving those rules generically (that's
+// already-tested unconditional turn-flip rules - not re-proving those rules generically (that's
 // turnAlternation.test.ts's own job for 'faceoff'/'coinFlip').
 function mulberry32(seed: number) {
   let s = seed
@@ -276,11 +276,11 @@ type Rng = () => number
 type Reducer = ReturnType<typeof makeReducer>
 type TripleTapAction = { type: 'TRIPLE_TAP_PRESS'; player: Player; atMs: number } | { type: 'TRIPLE_TAP_SWIPE_START'; player: Player; atMs: number } | { type: 'TRIPLE_TAP_SWIPE_END'; player: Player; dx: number; dy: number }
 
-// Randomly riffles two ordered streams together, preserving each stream's own internal order —
+// Randomly riffles two ordered streams together, preserving each stream's own internal order -
 // unlike a plain full shuffle, this can never reorder ONE player's own 3 actions relative to each
 // other (a single player's own presses/swipe are always strictly sequential in real play, driven
 // by the same finger one gesture at a time; only the RELATIVE order between the two different
-// players' independent streams is genuinely arbitrary — see TripleTapState's own doc comment on
+// players' independent streams is genuinely arbitrary - see TripleTapState's own doc comment on
 // why the reducer has to read stored timestamps rather than trust dispatch order for exactly that
 // between-players case).
 function interleave<T>(a: T[], b: T[], rng: Rng): T[] {
@@ -323,7 +323,7 @@ function driveTripleTapFuzzRun(totalDraws: number, seed: number): { draws: numbe
       { type: 'TRIPLE_TAP_SWIPE_START', player: 2, atMs: 100 + rng() * 200 },
       { type: 'TRIPLE_TAP_SWIPE_END', player: 2, dx: Math.cos(p2Angle) * p2Mag, dy: Math.sin(p2Angle) * p2Mag }
     ]
-    // The relative order BETWEEN the two players' own streams must not affect the outcome — see
+    // The relative order BETWEEN the two players' own streams must not affect the outcome - see
     // the dedicated dispatch-order-independence test above; this fuzz hammers that invariant across
     // many random interleavings too.
     for (const a of interleave(p1Actions, p2Actions, rng)) state = reducer(state, a)
@@ -364,7 +364,7 @@ function driveTripleTapFuzzRun(totalDraws: number, seed: number): { draws: numbe
   return { draws, goals, misses }
 }
 
-describe('turn alternation fuzz — tipoffMode: tripleTap (reducer level, no React, no timers)', () => {
+describe('turn alternation fuzz - tipoffMode: tripleTap (reducer level, no React, no timers)', () => {
   it('never gives the launch winner a follow-up turn, hit or miss, across 60 independent draws, in randomized dispatch order', () => {
     const summary = driveTripleTapFuzzRun(60, 424242)
     expect(summary.draws).toBe(60)

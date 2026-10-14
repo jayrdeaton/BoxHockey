@@ -13,7 +13,7 @@ interface Props {
 }
 
 // Redux-backed haptic/sound settings, dispatching through @rific/feedback-press's own
-// hapticActions/soundActions — same shape as Expo-Starter/Snake's FeedbackBridge, converged onto
+// hapticActions/soundActions - same shape as Expo-Starter/Snake's FeedbackBridge, converged onto
 // fleet-wide rather than this app's old direct-AsyncStorage version.
 const FeedbackBridge = ({ children }: Props) => {
   const haptic = useSelector((state: RootState) => state.haptic)
@@ -23,7 +23,7 @@ const FeedbackBridge = ({ children }: Props) => {
   const onSoundChange = useCallback((next: SoundSettings) => dispatch(soundActions.initialize(next)), [dispatch])
 
   // Generic UI feedback sounds, wired into every Button/IconButton/etc. in the package (see
-  // useFeedbackHandlers' `fire`, which already gates these on the sound-enabled setting itself —
+  // useFeedbackHandlers' `fire`, which already gates these on the sound-enabled setting itself -
   // no need to re-check it here).
   const playSelection = useAudioPool(require('../../assets/sounds/select.wav'))
   const playNotification = useAudioPool(require('../../assets/sounds/notification.wav'))

@@ -7,8 +7,8 @@ import { MONO_FONT } from '@/constants/fonts'
 
 export interface HeroTitleProps {
   color: string
-  // The live theme's p1/p2 colors — whatever the players actually picked (see Theme.tsx), not a
-  // fixed pair — so the goal-line accent beneath the title always matches the real in-game colors.
+  // The live theme's p1/p2 colors - whatever the players actually picked (see Theme.tsx), not a
+  // fixed pair - so the goal-line accent beneath the title always matches the real in-game colors.
   p1Color: string
   p2Color: string
 }
@@ -20,14 +20,14 @@ const TOTAL_LETTERS = WORD_TOP.length + WORD_BOTTOM.length
 const TOTAL_STAGGER_MS = getStaggeredWordDuration(TOTAL_LETTERS)
 
 // The goal-line accent (and the puck that drops onto it) stay hidden until the wordmark has mostly
-// landed — one "power on" beat once the letters settle, rather than motion competing with letters
+// landed - one "power on" beat once the letters settle, rather than motion competing with letters
 // still flying in.
 const LINE_DELAY_MS = Math.round(TOTAL_STAGGER_MS * 0.7)
 const LINE_DURATION_MS = 280
 const PUCK_DELAY_MS = LINE_DELAY_MS + LINE_DURATION_MS + 60
 // The puck's vertical position is one continuous chain, not a separate drop-in followed by a
 // separate idle animation: it eases down from PUCK_DROP_OFFSET to the top of its bounce range,
-// then keeps ping-ponging between top and bottom forever — same withRepeat idiom Board.tsx uses
+// then keeps ping-ponging between top and bottom forever - same withRepeat idiom Board.tsx uses
 // for its own idle pulses (see idlePulseT), just chained directly onto the entrance so there's no
 // hand-off moment where it visibly "starts" bouncing.
 const PUCK_DROP_MS = 220
@@ -36,8 +36,8 @@ const BOUNCE_DURATION_MS = 550
 const BOUNCE_HEIGHT = 8
 
 // Bespoke hero for this game (as opposed to LightCycles' light-trail wordmark): two staggered
-// lines of letters, then a goal-line accent — two colored bars sliding in from each side to meet
-// in the middle, echoing the two goals on the real board — with a small puck dropping onto the
+// lines of letters, then a goal-line accent - two colored bars sliding in from each side to meet
+// in the middle, echoing the two goals on the real board - with a small puck dropping onto the
 // seam between them once the bars land, then bouncing there for as long as the screen exists (see
 // puckY above) as one continuous motion rather than a drop-in that hands off to a separate idle
 // loop. The wordmark and bars themselves are a one-time entrance, not part of the loop.
@@ -53,8 +53,8 @@ export function HeroTitle({ color, p1Color, p2Color }: HeroTitleProps) {
 
   const puckProgress = useSharedValue(reducedMotion ? 1 : 0)
   // Rest position is translateY 0; the bounce range is -BOUNCE_HEIGHT/2 (top) to +BOUNCE_HEIGHT/2
-  // (bottom). The drop-in eases straight to the top of that range so the very next step — the
-  // infinite ping-pong — just continues on from there with no discontinuity.
+  // (bottom). The drop-in eases straight to the top of that range so the very next step - the
+  // infinite ping-pong - just continues on from there with no discontinuity.
   const puckY = useSharedValue(reducedMotion ? -BOUNCE_HEIGHT / 2 : PUCK_DROP_OFFSET)
   useEffect(() => {
     if (reducedMotion) return
@@ -77,7 +77,7 @@ export function HeroTitle({ color, p1Color, p2Color }: HeroTitleProps) {
 
       <View style={styles.lineRow}>
         <Animated.View style={[styles.bar, styles.barLeft, { backgroundColor: p1Color }, leftBarStyle]} />
-        {/* Black fill + white ring, fixed regardless of theme — matches the real in-game puck
+        {/* Black fill + white ring, fixed regardless of theme - matches the real in-game puck
             (see Board.tsx's puck Circle/stroke) rather than the screen's own black/white fg. */}
         <Animated.View pointerEvents='none' style={[styles.puck, puckStyle]} />
         <Animated.View style={[styles.bar, styles.barRight, { backgroundColor: p2Color }, rightBarStyle]} />

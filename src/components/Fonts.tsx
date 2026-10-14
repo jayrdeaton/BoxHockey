@@ -9,11 +9,11 @@ interface Props {
 }
 
 // Holds the splash screen up (see utils/splashGate.ts's 'fonts' gate) until the
-// MaterialCommunityIcons glyph font has actually loaded — otherwise every react-native-paper
+// MaterialCommunityIcons glyph font has actually loaded - otherwise every react-native-paper
 // Icon/IconButton (and @rific/feedback-press's IconButton, which wraps paper's under the hood)
 // would render blank for one visible frame before snapping in once the async load resolves.
 // Gated via the Gate component (SplashGate, per splashGate.ts's own alias) rather than a
-// hand-rolled `useSplashReady('fonts', loaded)` + unconditional `<>{children}</>` — that older
+// hand-rolled `useSplashReady('fonts', loaded)` + unconditional `<>{children}</>` - that older
 // shape marked the gate ready but still rendered children immediately regardless, letting a
 // react-native-paper icon render blank for one frame before the font swapped in. Wrapping
 // `children` in SplashGate actually holds them back until `ready` flips, matching Pong's own

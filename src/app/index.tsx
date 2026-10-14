@@ -19,7 +19,7 @@ export default function HomeScreen() {
   // as the phone is turned. Lock Orientation (see SettingsDialog) pins it app-wide by freezing the
   // shared reading itself (OrientationProvider's freezeWhileLocked in _layout.tsx), so neither this
   // nor FakeLandscapeView below takes a `locked` argument.
-  // app.json is portrait-locked at the OS level now (no more real OS rotation to rely on) — see
+  // app.json is portrait-locked at the OS level now (no more real OS rotation to rely on) - see
   // FakeLandscapeView below, which fakes the rest entirely in JS from this hook's live
   // accelerometer reading.
   const rotation = useRotation()
@@ -32,7 +32,7 @@ export default function HomeScreen() {
   const { colors, dark } = useAutoPaperTheme()
   // react-native-safe-area-context always reports insets relative to the device's own fixed
   // physical frame (the OS thinks the interface is still portrait-locked and never rotates, so it
-  // has no idea FakeLandscapeView below is rotating the content) — rotateInsets remaps them onto
+  // has no idea FakeLandscapeView below is rotating the content) - rotateInsets remaps them onto
   // whichever edge they actually correspond to once visually rotated, using the same rotation
   // FakeLandscapeView itself renders with, so `top`/`right` below always mean the screen's real,
   // visual edges regardless of how the phone is being held.
@@ -58,7 +58,7 @@ export default function HomeScreen() {
       Portal over the whole screen, and BaseSettingsDialog lays itself out in its own frame turned
       by the `rotation` passed below (see @tastic/hud's RotatedFrame). */}
       <FakeLandscapeView style={styles.rotatable}>
-        {/* Same top-left slot every @tastic title screen uses for this — see LightCycles' own
+        {/* Same top-left slot every @tastic title screen uses for this - see LightCycles' own
         identical trophy IconButton. */}
         <IconButton icon='trophy' iconColor={fg} size={24} style={[styles.topLeft, { top: 8 + insets.top, left: 8 + insets.left }]} onPress={() => router.push('/achievements')} accessibilityLabel='Stats & Achievements' />
         <IconButton icon='cog' iconColor={fg} size={24} style={[styles.topRight, { top: 8 + insets.top, right: 8 + insets.right }]} onPress={() => setSettingsOpen(true)} accessibilityLabel='Settings' />
@@ -91,7 +91,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1
   },
-  // Owns the flex-centering layout `container` used to apply directly — now one level deeper, since
+  // Owns the flex-centering layout `container` used to apply directly - now one level deeper, since
   // everything visible sits inside FakeLandscapeView, which needs a real (not shrink-wrapped)
   // full-bleed box to size its own absolutely-positioned children (the settings cog) against
   // correctly.

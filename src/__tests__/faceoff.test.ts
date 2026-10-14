@@ -30,7 +30,7 @@ const PLAYERS: Player[] = [1, 2]
 
 // Coverage for the faceoff winner's knock: real user feedback, explicit, that this must stay a
 // genuine physical shot with real velocity (never a static placement) while the winner still
-// never gets a follow-up shot off of it — see FACEOFF_LAUNCH's own comment in useGameState.ts,
+// never gets a follow-up shot off of it - see FACEOFF_LAUNCH's own comment in useGameState.ts,
 // which guarantees the loser always takes the next real turn regardless of how this knock
 // resolves. These tests lock in the knock's own physics: real velocity, toward the winner's
 // attacking goal, scaling with reaction time and margin.
@@ -39,7 +39,7 @@ describe('computeFaceoffKnock', () => {
     for (let i = 0; i < 200; i++) {
       const knock = computeFaceoffKnock(board, player, Math.random() * FACEOFF_MARGIN_MAX_MS * 2, Math.random() * FACEOFF_REACTION_MAX_MS * 2)
       // Player 1 attacks the TOP goal (vy negative); player 2 attacks the BOTTOM goal (vy
-      // positive) — see stepPhysics'/board.ts's "player 1 always sits at the bottom" convention.
+      // positive) - see stepPhysics'/board.ts's "player 1 always sits at the bottom" convention.
       // Jitter is hard-capped well under 90° (see FACEOFF_JITTER_MAX_DEG), so this must never flip.
       if (player === 1) {
         expect(knock.vy).toBeLessThan(0)
@@ -73,13 +73,13 @@ describe('computeFaceoffKnock', () => {
   })
 })
 
-// Regression coverage for a real reported bug: a "double failure" draw — BOTH players press the
-// wrong zone, or both fail to land a real press at all before FACEOFF_TAP_TIMEOUT_MS — used to
+// Regression coverage for a real reported bug: a "double failure" draw - BOTH players press the
+// wrong zone, or both fail to land a real press at all before FACEOFF_TAP_TIMEOUT_MS - used to
 // still set result.marginMs to FACEOFF_MARGIN_MAX_MS, the same value a genuine one-sided blowout
 // gets (real winner press vs. a whiffing opponent). Since a LARGER margin means LESS jitter in
 // computeFaceoffKnock (a "no real defense, could've hit anything" blowout deserves an accurate
-// shot), that accidentally handed the reducer's arbitrary coin-flip "winner" — who never landed a
-// single correct press either — the tightest, most accurate knock the game can produce, which
+// shot), that accidentally handed the reducer's arbitrary coin-flip "winner" - who never landed a
+// single correct press either - the tightest, most accurate knock the game can produce, which
 // could and did score off a draw nobody actually won. Fixed in useGameState.ts's FACEOFF_TAP
 // (both-disqualified branch) and FACEOFF_TIMEOUT case: marginMs is 0 (max jitter) whenever the
 // declared winner never landed a genuine correct-zone press themselves.

@@ -32,7 +32,7 @@ const BOARD_VARIANT_DESCRIPTIONS: Record<BoardVariant, string> = {
 }
 const BOARD_VARIANT_OPTIONS: MenuOption<BoardVariant>[] = (['classic', 'gauntlet', 'gravity'] as BoardVariant[]).map((value) => ({ value, label: BOARD_VARIANT_LABELS[value], description: BOARD_VARIANT_DESCRIPTIONS[value] }))
 
-// Independent of boardVariant, but rides along in the same popover as one of its rows — see
+// Independent of boardVariant, but rides along in the same popover as one of its rows - see
 // LoadoutSharedControls' own comment. A single option rather than an on/off pair: presence in a
 // one-item multi-select's value array already means "on," so there's nothing an "off" row would
 // add beyond what tapping the "on" row a second time (to un-toggle it) already does.
@@ -68,7 +68,7 @@ const SHOT_PREVIEW_LENGTH_OPTIONS: MenuOption<ShotPreviewLength>[] = [
 const CONTROL_SCHEME_OPTIONS: MenuOption<ControlScheme>[] = [
   { value: 'pull', label: 'Pull', description: 'Drag back, release to fire', icon: 'arrow-collapse' },
   { value: 'push', label: 'Push', description: 'Drag toward your shot, release to fire', icon: 'arrow-expand' },
-  { value: 'flick', label: 'Flick', description: 'Swipe fast — power comes from speed', icon: 'gesture-swipe' }
+  { value: 'flick', label: 'Flick', description: 'Swipe fast: power comes from speed', icon: 'gesture-swipe' }
 ]
 
 const ALL_TIPOFF_MODE_OPTIONS: MenuOption<TipoffMode>[] = [
@@ -76,7 +76,7 @@ const ALL_TIPOFF_MODE_OPTIONS: MenuOption<TipoffMode>[] = [
   { value: 'faceoff', label: 'Face-Off', description: 'Race the tap on every score', icon: 'hockey-puck' },
   { value: 'tripleTap', label: 'Triple Tap', description: 'Two taps, then swipe to launch', icon: 'gesture-double-tap' }
 ]
-// 'tripleTap' is touch/mobile only — no keyboard equivalent (see game.tsx), so it's hidden from the
+// 'tripleTap' is touch/mobile only - no keyboard equivalent (see game.tsx), so it's hidden from the
 // picker entirely on web rather than offered and left unplayable there. Computed once at module
 // scope since Platform.OS never changes at runtime; also keeps handleRandomizeMatchSettings below
 // from ever landing on it on web, with no separate edit needed there.
@@ -99,17 +99,17 @@ export default function LoadoutScreen() {
   const params = useLocalSearchParams<{ mode: string }>()
   const gameMode = useMemo(() => parseGameMode(params.mode), [params.mode])
   const humanPlayers = useMemo(() => humanPlayersFor(gameMode), [gameMode])
-  // CPU (when present at all) is always player 2 — see humanPlayersFor's own comment. Read this
+  // CPU (when present at all) is always player 2 - see humanPlayersFor's own comment. Read this
   // early: the guest/CPU color plumbing below needs it before the panels themselves do.
   const p2IsHuman = humanPlayers.includes(2)
 
   const { settings, setSettings } = useSettings()
   const { profiles, lastSelected, updateProfile, selectProfile } = useProfiles()
   // orientationMode just follows the device's current physical tilt (see @tastic/core's
-  // useOrientationState), CPU games included — how you're holding the phone right now decides the
+  // useOrientationState), CPU games included - how you're holding the phone right now decides the
   // panel arrangement, not a stored per-round choice. This is what lets two players sit
   // shoulder-to-shoulder and pick a color at the same time once the phone is turned sideways,
-  // instead of a portrait-narrow column — and for vs-CPU, it's simply whichever way the solo player
+  // instead of a portrait-narrow column - and for vs-CPU, it's simply whichever way the solo player
   // is holding it. Lock Orientation (see SettingsDialog) pins it app-wide by freezing the shared
   // reading itself (OrientationProvider's freezeWhileLocked in _layout.tsx), so this read takes no
   // `locked` argument. app.json is portrait-locked at the OS level now (no more real OS rotation to
@@ -118,15 +118,15 @@ export default function LoadoutScreen() {
   const { orientationMode, p1OnRight, upsideDown, resolved: p1OnRightResolved } = useOrientationState()
 
   // The panel area's own layout (which branch renders, which side each panel is on) lags one fade
-  // behind the live orientationMode/p1OnRight/upsideDown above — see useDualZoneLayout's own
-  // comment. Also drives the solo (vs-CPU) branch's own row below — that one doesn't rotate
+  // behind the live orientationMode/p1OnRight/upsideDown above - see useDualZoneLayout's own
+  // comment. Also drives the solo (vs-CPU) branch's own row below - that one doesn't rotate
   // anything, but still reorders/fades across a portrait<->landscape change the same way.
   const { panelLayout, panelFadeStyle } = useDualZoneLayout(orientationMode, p1OnRight, p1OnRightResolved, upsideDown, LOADOUT_PANEL_SWAP_FADE_MS)
 
   const [settingsOpen, setSettingsOpen] = useState(false)
   // react-native-safe-area-context always reports insets relative to the device's own fixed
   // physical frame (the OS thinks the interface is still portrait-locked and never rotates, so it
-  // has no idea FakeLandscapeView below is rotating the content) — rotateInsets remaps them onto
+  // has no idea FakeLandscapeView below is rotating the content) - rotateInsets remaps them onto
   // whichever edge they actually correspond to once visually rotated, using the same committed
   // rotation FakeLandscapeView itself renders with, so `top`/`left`/`right` below always mean the
   // screen's real, visual edges regardless of how the phone is being held.
@@ -139,21 +139,21 @@ export default function LoadoutScreen() {
 
   // Typed explicitly (rather than bare useDispatch()) because @tastic/profile's action creators
   // (seatColorsActions below) return a plain `{ payload, type }` interface with no index signature,
-  // which react-redux's default `useDispatch()` (typed Dispatch<UnknownAction>) rejects — same fix
+  // which react-redux's default `useDispatch()` (typed Dispatch<UnknownAction>) rejects - same fix
   // already applied in hooks/useProfiles.tsx for this package's other action creators.
   const dispatch = useDispatch<AppDispatch>()
   // A seat's live color comes from one of three independently-remembered places depending on what's
-  // currently in that seat — a selected profile's own saved color, a CPU opponent's own remembered
-  // color, or (human, no profile) a guest's own remembered color — never one shared slot the way
+  // currently in that seat - a selected profile's own saved color, a CPU opponent's own remembered
+  // color, or (human, no profile) a guest's own remembered color - never one shared slot the way
   // this used to work, which let a profile's live color drift from its saved one and made a CPU's
   // color fight a guest's over a single remembered value. Only guestColors/cpuColor are persisted
-  // here (the `seatColors` Redux slice — see redux/seatColorsSlice.ts — rehydrated by the time this
+  // here (the `seatColors` Redux slice - see redux/seatColorsSlice.ts - rehydrated by the time this
   // screen mounts, same PersistGate argument as Theme.tsx's own read of `state.theme`); a profile's
   // own saved color is never written back to (see the profile-color effect below for why, and
   // app/profiles.tsx's own ProfilesManager, the only place that's actually edited).
   const guestColors = useSelector((state: RootState) => state.seatColors.lastGuestColor)
   const cpuColor = useSelector((state: RootState) => state.seatColors.lastCpuColor)
-  // A manual recolor/clash-swap landing on a seat that has a profile selected — see
+  // A manual recolor/clash-swap landing on a seat that has a profile selected - see
   // redux/seatColorsSlice.ts's own doc comment. Persisted (survives navigation and relaunch), only
   // cleared when that seat's own selection genuinely changes (handleP1ProfileSelect/
   // handleP2ProfileSelect below), never by merely leaving and returning to this screen.
@@ -162,11 +162,11 @@ export default function LoadoutScreen() {
   const p1Profile = profiles.find((p) => p.id === lastSelected[1]) ?? null
   const p2Profile = p2IsHuman ? (profiles.find((p) => p.id === lastSelected[2]) ?? null) : null
 
-  // Kept in sync via their own trivial effects (never read during render, only written — a plain
+  // Kept in sync via their own trivial effects (never read during render, only written - a plain
   // render-body assignment trips this project's react-hooks/refs lint rule) purely so the
   // focus-reset effect below can read each seat's CURRENT resolved profile / persisted guest /
   // persisted CPU / persisted override color without listing profiles/guestColors/cpuColor/
-  // profileOverride themselves as its own dependencies — profiles is a brand new array from
+  // profileOverride themselves as its own dependencies - profiles is a brand new array from
   // useProfiles() on every one of its own re-renders, and depending on any of these reactively
   // there would re-fire that effect (see useFocusEffect's own re-run semantics: it re-invokes its
   // callback immediately, while still focused, whenever the callback's identity changes) merely
@@ -194,12 +194,12 @@ export default function LoadoutScreen() {
 
   // Keeps each seat's live theme color matching what it's actually supposed to be right now.
   // Mount-time and reactive only (lastSelected changing from something *outside* this screen's own
-  // pickers — e.g. deleting the currently-selected profile from Manage — and the profiles roster
-  // itself resolving) — a fresh tap-select is instead applied immediately by
+  // pickers - e.g. deleting the currently-selected profile from Manage - and the profiles roster
+  // itself resolving) - a fresh tap-select is instead applied immediately by
   // handleP1ProfileSelect/handleP2ProfileSelect below, which both know the newly-picked profile
   // directly and don't need to wait on lastSelected to round-trip back through here. Deliberately
   // does NOT run on every render (profiles is a brand new array from useProfiles() on every one of
-  // its own re-renders, so it's read here, not depended on — profiles.length stands in as a coarse
+  // its own re-renders, so it's read here, not depended on - profiles.length stands in as a coarse
   // "profiles finished loading" signal instead).
   useEffect(() => {
     const nextP1 = p1Profile ? (profileOverride[1] ?? p1Profile.color) : guestColors[1]
@@ -210,19 +210,19 @@ export default function LoadoutScreen() {
   }, [lastSelected[1], lastSelected[2], p2IsHuman, guestColors, cpuColor, profileOverride, profiles.length])
 
   // /loadout pushes /game and /profiles on top of itself and returns to this same screen via
-  // router.back()/safeBack() — a pop that reveals this SAME, still-mounted instance rather than a
+  // router.back()/safeBack() - a pop that reveals this SAME, still-mounted instance rather than a
   // fresh mount (see the `ready`-reset useFocusEffect below, which exists for the same reason). On
-  // every genuine focus regain — initial mount, and returning here from /game or /profiles —
+  // every genuine focus regain - initial mount, and returning here from /game or /profiles -
   // re-derive each seat's live color from its authoritative source (profile / guest / CPU, honoring
-  // any active override — see redux/seatColorsSlice.ts), so editing a profile's own saved color via
+  // any active override - see redux/seatColorsSlice.ts), so editing a profile's own saved color via
   // /profiles is picked up the instant you're back, the same way it already was before overrides
   // were persisted.
   //
-  // Deliberately triggers on lastSelected[seat]/p2IsHuman only — the same "a real reason to reapply
-  // this seat's color" identity the reactive effect above keys its own reapplication on — and reads
+  // Deliberately triggers on lastSelected[seat]/p2IsHuman only - the same "a real reason to reapply
+  // this seat's color" identity the reactive effect above keys its own reapplication on - and reads
   // profiles/guestColors/cpuColor/profileOverride through the refs above instead of depending on
   // them directly. useFocusEffect re-invokes this callback immediately, while still focused,
-  // whenever the callback's own identity changes (not just on an actual focus/blur transition) — so
+  // whenever the callback's own identity changes (not just on an actual focus/blur transition) - so
   // listing guestColors/cpuColor/profiles/profileOverride here directly would reapply on every one
   // of their changes even with no real navigation event.
   useFocusEffect(
@@ -239,7 +239,7 @@ export default function LoadoutScreen() {
     }, [lastSelected[1], lastSelected[2], p2IsHuman, setThemeColor])
   )
 
-  // Routes a seat's own just-changed color to whichever slot actually owns it right now — persists
+  // Routes a seat's own just-changed color to whichever slot actually owns it right now - persists
   // it as this seat's own profile override instead when a profile's selected there (see
   // redux/seatColorsSlice.ts), so the profile-color effect leaves it alone until this seat's
   // selection itself changes.
@@ -258,10 +258,10 @@ export default function LoadoutScreen() {
     [p1Profile, p2Profile, p2IsHuman, dispatch]
   )
 
-  // Picking the other slot's exact current color swaps the two instead of no-op'ing — only
+  // Picking the other slot's exact current color swaps the two instead of no-op'ing - only
   // reachable at all when that slot's own picker allowed it (allowSwapTaken: vs-CPU only, where
   // the "other" color there is only ever the CPU's, not a second real person's choice). Each side of
-  // a swap persists independently per its own seat rule above — a swap into a profile-selected seat
+  // a swap persists independently per its own seat rule above - a swap into a profile-selected seat
   // is transient there even though the CPU/guest side it came from persists normally.
   const handleP1ColorChange = useCallback(
     (hex: string) => {
@@ -285,13 +285,13 @@ export default function LoadoutScreen() {
   )
 
   // Applies a freshly-picked profile's own color immediately, rather than waiting for lastSelected
-  // to round-trip back through the profile-color effect above — that effect only reacts to
+  // to round-trip back through the profile-color effect above - that effect only reacts to
   // lastSelected actually *changing*, so tapping the already-selected profile again (the other way
-  // this is supposed to snap back to its saved color — see redux/seatColorsSlice.ts's own
+  // this is supposed to snap back to its saved color - see redux/seatColorsSlice.ts's own
   // profileOverride doc) wouldn't otherwise register. Clears this seat's own persisted override
   // first so a swap/manual recolor made under the previous selection can't leak into the new one.
   // Typed against @tastic/profile's own base Profile, not this app's own extended one (@/types'
-  // Profile, which adds controlScheme) — @tastic/hud's PlayerSetupPanel.onProfileSelect is typed
+  // Profile, which adds controlScheme) - @tastic/hud's PlayerSetupPanel.onProfileSelect is typed
   // against the base shape, and neither handler reads anything beyond .id/.color anyway, so there's
   // no real need for the extension here.
   const handleP1ProfileSelect = useCallback(
@@ -316,7 +316,7 @@ export default function LoadoutScreen() {
   // Unlike color above, this one *does* keep syncing back to a currently-selected profile's own
   // saved control scheme for as long as it stays selected: control scheme has no "freely override it
   // for one match" use case the way a paddle's color does. No swap-on-conflict needed here (unlike
-  // LightCycles' identically-shaped keyScheme handler) — pull/push isn't a shared physical resource
+  // LightCycles' identically-shaped keyScheme handler) - pull/push isn't a shared physical resource
   // the way a keyboard's WASD/arrow clusters are, so both players can happily use the same scheme at
   // once.
   const handleP1ControlSchemeChange = useCallback(
@@ -334,7 +334,7 @@ export default function LoadoutScreen() {
     [setSettings, settings.controlScheme, lastSelected, updateProfile]
   )
 
-  // Covers exactly the fields LoadoutSharedControls itself exposes — board shape, puck physics,
+  // Covers exactly the fields LoadoutSharedControls itself exposes - board shape, puck physics,
   // match rules, and (vs-CPU only) AI difficulty, since that picker also lives in this shared row
   // rather than a per-player panel the way LightCycles' cpuDifficulty does. Per-player stuff
   // (colors, control scheme) and app-wide prefs (lock orientation) live outside this row and aren't
@@ -370,8 +370,8 @@ export default function LoadoutScreen() {
 
   const [ready, setReady] = useState<Record<Player, boolean>>({ 1: false, 2: false })
 
-  // Every time this screen (re)gains focus — first arrival from the title screen, or coming back
-  // here via the post-game "Loadout" button — Ready starts false again. Without this, popping back
+  // Every time this screen (re)gains focus - first arrival from the title screen, or coming back
+  // here via the post-game "Loadout" button - Ready starts false again. Without this, popping back
   // to an already-mounted loadout whose players both left it Ready would immediately re-trigger the
   // all-ready effect below and bounce straight back into /game.
   useFocusEffect(
@@ -402,44 +402,44 @@ export default function LoadoutScreen() {
   const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
 
   const isPortrait = panelLayout.orientationMode === 'faceToFace'
-  // See @tastic/split-screen's needsSharedNeutralZone for the full reasoning — extracted there
+  // See @tastic/split-screen's needsSharedNeutralZone for the full reasoning - extracted there
   // once this exact boolean turned up independently hand-duplicated across LightCycles/AirHockey/
   // Snake too.
   const showMetaInSharedBand = needsSharedNeutralZone(panelLayout.orientationMode, humanPlayers.length)
 
-  // Where P2's own press-away zone lives on screen — matches panelLayout (the already-committed,
+  // Where P2's own press-away zone lives on screen - matches panelLayout (the already-committed,
   // currently-painted layout), not the live orientationMode/p1OnRight, since it needs to agree with
   // whichever arrangement is actually on screen right now, mid-fade included. Portrait always
   // renders P2's panel in the top half (see DualZoneLayout below); landscape puts it on whichever
-  // side panelLayout.p1OnRight says isn't P1's. Only meaningful in two-player mode — vsCpu's P2/CPU
+  // side panelLayout.p1OnRight says isn't P1's. Only meaningful in two-player mode - vsCpu's P2/CPU
   // slot shares controlsHost instead (see p2Host below), so it never needs a zone of its own.
   const p2ZoneStyle = gameMode === 'twoPlayer' ? (isPortrait ? styles.p2ZoneTop : panelLayout.p1OnRight ? styles.p2ZoneLeft : styles.p2ZoneRight) : null
 
   // Vs-CPU only has one human slot, so its Ready toggle renders standalone below both panels
   // instead of embedded in this panel.
   const showReadyButton = gameMode === 'twoPlayer'
-  // P1's own panel and the shared controls row always share one host — mutually exclusive
+  // P1's own panel and the shared controls row always share one host - mutually exclusive
   // regardless of game mode, since both sit in the same near/bottom zone. Vs-CPU additionally
   // folds P2/CPU's panel into this same host: only one human is ever driving both slots there, so
   // having both YOU's and CPU's popovers open at once is just clutter. Two-player mode keeps P2 on
-  // its own independent host, since two real people editing at once is the whole point there —
+  // its own independent host, since two real people editing at once is the whole point there -
   // lobby.tsx (rather than PlayerSetupPanel's own internal fallback) owns it explicitly so the
   // press-away zones below can close it without a P1-side tap ever reaching into P2's own popover,
   // or vice versa.
   const controlsHost = usePopoverHost()
   const p2PanelHost = usePopoverHost()
   const p2Host = gameMode === 'vsCpu' ? controlsHost : p2PanelHost
-  // Vs-CPU's own standalone Ready button (below, not per-panel — see showReadyButton) is centered
+  // Vs-CPU's own standalone Ready button (below, not per-panel - see showReadyButton) is centered
   // under the whole row, not under either player's own trigger, so it doesn't share a center with
   // an open popover the way a two-player panel's *embedded* Ready button does. A side player's
   // popover is centered on that player's own (off-center) trigger instead, so it can't fully cover
-  // the wider gap between its edge and the standalone button's — leaving a sliver of the button's
+  // the wider gap between its edge and the standalone button's - leaving a sliver of the button's
   // own border peeking out from beside/behind the popover. Faded out instead while any player's
   // popover is open, rather than trying to reconcile the two different centers.
   const anyPlayerPickerOpen = !!(controlsHost.openId?.startsWith('p1-') || controlsHost.openId?.startsWith('p2-'))
 
   // Orientation is derived live from how the phone is held (see useDeviceOrientation) now, not a
-  // per-round choice here — this row no longer takes orientationMode/orientationModeOptions/
+  // per-round choice here - this row no longer takes orientationMode/orientationModeOptions/
   // onOrientationModeChange at all.
   const sharedControlsRow = (
     <LoadoutSharedControls
@@ -471,7 +471,7 @@ export default function LoadoutScreen() {
       onTipoffModeChange={(value) => setSettings({ tipoffMode: value })}
       // Omitted (leaving LoadoutSharedControls' own actionsRow unrendered) whenever
       // showMetaInSharedBand is about to fold randomize/reset into its own merged header row below
-      // instead — otherwise both would render at once.
+      // instead - otherwise both would render at once.
       onRandomize={showMetaInSharedBand ? undefined : handleRandomizeMatchSettings}
       onReset={showMetaInSharedBand ? undefined : handleResetMatchSettings}
       accentColor={themeColors.tertiary}
@@ -481,7 +481,7 @@ export default function LoadoutScreen() {
     />
   )
 
-  // Only wrapped for showMetaInSharedBand (see its own comment above) — everywhere else back/
+  // Only wrapped for showMetaInSharedBand (see its own comment above) - everywhere else back/
   // settings stay in their usual top corners (CornerActionButtons below) and randomize/reset stay
   // in LoadoutSharedControls' own row above the trigger gauges. SharedActionBand owns the "is the
   // open popover actually one of mine" self-elevation check internally, given just the resolved
@@ -495,23 +495,23 @@ export default function LoadoutScreen() {
     sharedControlsRow
   )
 
-  // Always 'P1'/'P2', regardless of game mode — see ProfilePicker's own doc for why the trigger uses
-  // this instead of "Player" (Player stays as the menu's own row, just not the idle label — using
+  // Always 'P1'/'P2', regardless of game mode - see ProfilePicker's own doc for why the trigger uses
+  // this instead of "Player" (Player stays as the menu's own row, just not the idle label - using
   // the same word for both would make it impossible to tell "nothing selected yet" from "Player
   // deliberately selected" at a glance).
   // Pull/push "feel" preference, human slots only (a CPU has no finger on the glass to have a
-  // "feel" about — see useAIOpponent.ts, which cancels this setting's sign back out regardless of
+  // "feel" about - see useAIOpponent.ts, which cancels this setting's sign back out regardless of
   // what it's set to, so it's invisible to the CPU either way). PlayerSetupPanel itself has no
-  // opinion on this concept (see its own `secondPicker` doc) — this app constructs the same
+  // opinion on this concept (see its own `secondPicker` doc) - this app constructs the same
   // SectionedDropdown it always has and hands it in directly, sharing whichever host that panel's
   // own `host` prop below resolves to so its popover keeps participating in the same
   // open/elevate/press-away plumbing as the color picker beside it.
   const p1ControlSchemePicker = <SectionedDropdown id='p1-controlScheme' host={controlsHost} icon='arrow-collapse' accessibilityLabel='Controls' sections={[{ kind: 'single', id: 'controlScheme', options: CONTROL_SCHEME_OPTIONS, value: settings.controlScheme[1], onChange: handleP1ControlSchemeChange }]} accentColor={themeColors.tertiary} mutedColor={fgMuted} dark={dark} />
   // Both panels render inside a live @tastic/split-screen zone in two-player mode (unlike the
-  // cpuDifficulty picker below, which only ever renders outside one — see its own comment), so the
+  // cpuDifficulty picker below, which only ever renders outside one - see its own comment), so the
   // color picker's popover can overflow past the zone's own shared-row boundary into the other
   // player's half unless clamped the same way. Every seat (p1, and p2 whether human or CPU) always
-  // has a color picker — unlike cpuDifficultyAlignOverride, this is computed and passed
+  // has a color picker - unlike cpuDifficultyAlignOverride, this is computed and passed
   // unconditionally for both panels, never gated behind isHuman/p2IsHuman. Both panels pass the same
   // swatches={defaultColors}, so their content size is identical and computed once here.
   const { width: windowWidth } = useWindowDimensions()
@@ -519,14 +519,14 @@ export default function LoadoutScreen() {
   const p1ColorOpen = controlsHost.openId === getColorPopoverId('p1')
   const p1ColorAlignOverride = useZoneClampedAlign(p1ColorOpen, colorContentSize.width, colorContentSize.height)
   const p1Panel = <PlayerSetupPanel idPrefix='p1' host={controlsHost} color={p1Color} onColorChange={handleP1ColorChange} swatches={defaultColors} takenColor={p2Color} allowSwapTaken={gameMode === 'vsCpu'} colorAlignOverride={p1ColorAlignOverride} isHuman ready={ready[1]} onToggleReady={() => setReady((r) => ({ ...r, 1: !r[1] }))} dark={dark} showReadyButton={showReadyButton} secondPicker={p1ControlSchemePicker} secondPickerId='p1-controlScheme' profiles={profiles} selectedProfileId={lastSelected[1]} takenProfileId={p2IsHuman ? lastSelected[2] : null} guestLabel='P1' onProfileSelect={handleP1ProfileSelect} onManageProfiles={() => router.push('/profiles')} />
-  // CPU slot (vsCpu, !p2IsHuman) gets no second picker at all — matches the old isHuman-gated
+  // CPU slot (vsCpu, !p2IsHuman) gets no second picker at all - matches the old isHuman-gated
   // showControlScheme check that used to live inside PlayerSetupPanel itself.
   const p2ControlSchemePicker = p2IsHuman ? <SectionedDropdown id='p2-controlScheme' host={p2Host} icon='arrow-collapse' accessibilityLabel='Controls' sections={[{ kind: 'single', id: 'controlScheme', options: CONTROL_SCHEME_OPTIONS, value: settings.controlScheme[2], onChange: handleP2ControlSchemeChange }]} accentColor={themeColors.tertiary} mutedColor={fgMuted} dark={dark} /> : undefined
   // cpuDifficulty only ever renders for a non-human seat 2, which only exists in vsCpu mode, and
   // vsCpu always renders through the plain stacked (non-DualZoneLayout) branch below (gameMode ===
-  // 'twoPlayer' ? <DualZoneLayout .../> : <View style={styles.stackedZone}>...) — never inside a
+  // 'twoPlayer' ? <DualZoneLayout .../> : <View style={styles.stackedZone}>...) - never inside a
   // @tastic/split-screen zone. So useZoneBounds() is null here and useZoneClampedAlign is a
-  // documented no-op, falling straight back to useAutoAlign's own plain screen-edge placement —
+  // documented no-op, falling straight back to useAutoAlign's own plain screen-edge placement -
   // same conclusion LightCycles' own lobby.tsx already reached for its equivalent p2Panel, before
   // @tastic/hud had an alignOverride pass-through for this picker at all. Wired in anyway per
   // @tastic/hud@0.9.0's new cpuDifficultyAlignOverride prop: it costs nothing while inert, and if
@@ -567,26 +567,26 @@ export default function LoadoutScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: bg }]}>
-      {/* Everything below reads correctly no matter which way the phone is actually being held —
+      {/* Everything below reads correctly no matter which way the phone is actually being held -
       see @tastic/split-screen's FakeLandscapeView for why this is needed at all now that the app is
       portrait-locked at the OS level (no more real OS rotation to rely on). Driven by panelLayout
       (the same committed, already-fade-masked state DualZoneLayout itself renders from), not the
       live orientationMode/p1OnRight/upsideDown above, so the visual rotation change and the panel
       swap/reorder always land in the same fade-covered moment instead of one snapping ahead of the
-      other. SettingsDialog is deliberately left outside this wrapper — it renders as a centered
+      other. SettingsDialog is deliberately left outside this wrapper - it renders as a centered
       modal overlay via Portal, unaffected by (and not needing) this transform. */}
       <FakeLandscapeView orientationMode={panelLayout.orientationMode} p1OnRight={panelLayout.p1OnRight} upsideDown={panelLayout.upsideDown} style={styles.rotatable}>
         {/* Press-away overlays for the loadout screen's own popovers (color pickers, control
-        dropdowns) — see PressAwayOverlay's own comment for the paint-order trick that keeps real
+        dropdowns) - see PressAwayOverlay's own comment for the paint-order trick that keeps real
         controls directly tappable. P1's covers the whole screen (their own panel plus every shared
-        setting reads as "theirs" — see LoadoutSharedControls), while P2's is scoped to just their
+        setting reads as "theirs" - see LoadoutSharedControls), while P2's is scoped to just their
         own half (p2ZoneStyle) and, being a later sibling, takes priority over P1's within that rect.
 
-        P2's overlay has to mount whenever *either* host has something open, not just p2Host — P1's
+        P2's overlay has to mount whenever *either* host has something open, not just p2Host - P1's
         popover being open is exactly when P1's full-screen overlay is sitting underneath P2's zone
         too, and if P2's own overlay were absent then (p2Host closed), a tap anywhere on P2's side
         would fall straight through to P1's and close P1's dialog. Mounting it any time controlsHost
-        is open too — even though its own onPress (p2Host.close) is then a no-op — makes it "shield"
+        is open too - even though its own onPress (p2Host.close) is then a no-op - makes it "shield"
         P2's zone from P1's overlay unconditionally, which is what actually keeps P2's side exempt
         from P1's press-away regardless of whether P2 has anything open. */}
         <PressAwayOverlay active={controlsHost.openId !== null} onPress={controlsHost.close} />
@@ -606,7 +606,7 @@ export default function LoadoutScreen() {
             // Without these, a popover escaping its own zone (e.g. one of the shared row's own
             // dropdowns growing down into P1/P2's row below it) paints underneath whichever zone
             // happens to be the later DOM sibling, regardless of which one actually has something
-            // open — see DualZoneLayout's own p1Elevated/p2Elevated/sharedElevated doc for the
+            // open - see DualZoneLayout's own p1Elevated/p2Elevated/sharedElevated doc for the
             // stacking-context reason a zone can't just self-elevate the way
             // PlayerSetupPanel/LoadoutSharedControls already do internally. Same openId checks those
             // two components use for their own internal elevation, just re-run here for the outer
@@ -657,9 +657,9 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0
   },
-  // Only used by vsCpu's stacked (non-rotated) layout below — two-player's own DualZoneLayout
+  // Only used by vsCpu's stacked (non-rotated) layout below - two-player's own DualZoneLayout
   // handles p1/p2 spacing itself. Matches PlayerSetupPanel's own pickerRow gap (12), not some
-  // wider "these are two separate panels" gap — vsCpu's human slot (color + control scheme) and
+  // wider "these are two separate panels" gap - vsCpu's human slot (color + control scheme) and
   // CPU slot (color only) read as one evenly spaced row of triggers this way, rather than two
   // independently-centered blocks whose different widths throw off screen-edge symmetry.
   playersRow: {
@@ -669,15 +669,15 @@ const styles = StyleSheet.create({
   playersRowOpen: {
     zIndex: 100
   },
-  // See anyPlayerPickerOpen above — opacity 0 (not display:'none') so the button keeps its layout
+  // See anyPlayerPickerOpen above - opacity 0 (not display:'none') so the button keeps its layout
   // space and doesn't shift the row above it when it disappears/reappears. pointerEvents:'none' too
-  // — otherwise the sliver an open popover doesn't cover would still be a live, just-invisible tap
+  // - otherwise the sliver an open popover doesn't cover would still be a live, just-invisible tap
   // target underneath it.
   readyButtonHidden: {
     opacity: 0,
     pointerEvents: 'none'
   },
-  // Owns the flex-centering layout `container` used to apply directly — now one level deeper, since
+  // Owns the flex-centering layout `container` used to apply directly - now one level deeper, since
   // everything visible sits inside FakeLandscapeView, which needs a real (not shrink-wrapped)
   // full-bleed box to size its own absolutely-positioned children (PressAwayOverlay, back/settings
   // buttons) against correctly.

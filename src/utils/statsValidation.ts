@@ -7,10 +7,10 @@ import { AiDifficulty, BoardVariant, GoalTotals, MatchRecord, ProfileStats, Stat
 // environment.
 
 // A zeroed vsCpu/twoPlayer/variants/goals bucket, each built fresh on every call rather than kept as
-// a module-level constant — DEFAULT_PROFILE_STATS and DEFAULT_STATS below each need their own
+// a module-level constant - DEFAULT_PROFILE_STATS and DEFAULT_STATS below each need their own
 // independent set of nested objects, not two references to the same ones (every consumer only ever
 // spreads/reads these today, but a shared reference is a standing invitation for a future in-place
-// mutation to corrupt both at once — see DEFAULT_PROFILE_STATS/DEFAULT_STATS's own comment).
+// mutation to corrupt both at once - see DEFAULT_PROFILE_STATS/DEFAULT_STATS's own comment).
 function createDefaultVsCpu(): VsCpuStats {
   return {
     ...DEFAULT_OUTCOME_RECORD,
@@ -47,7 +47,7 @@ export const DEFAULT_PROFILE_STATS: ProfileStats = {
 }
 
 // vsCpu/twoPlayer/variants/goals are re-created here rather than spread straight from
-// DEFAULT_PROFILE_STATS, specifically so the two don't end up aliasing the same nested objects —
+// DEFAULT_PROFILE_STATS, specifically so the two don't end up aliasing the same nested objects -
 // see createDefaultVsCpu's own doc.
 export const DEFAULT_STATS: StatsState = {
   ...DEFAULT_PROFILE_STATS,
@@ -68,7 +68,7 @@ function isValidMatchRecord(value: unknown): value is MatchRecord {
   return typeof value.played === 'number' && typeof value.wins === 'number' && typeof value.losses === 'number' && typeof value.draws === 'number'
 }
 
-// Doesn't reject unrecognized keys — a stray/corrupted bucket key is an inert extra map entry, not
+// Doesn't reject unrecognized keys - a stray/corrupted bucket key is an inert extra map entry, not
 // a reason to discard the whole blob (same philosophy the colors map uses in LightCycles).
 function isValidRecordMap(value: unknown): boolean {
   if (!isRecord(value)) return false
@@ -101,7 +101,7 @@ function isValidProfileStats(value: unknown): value is ProfileStats {
 export function isValidStats(value: unknown): value is StatsState {
   if (!isValidProfileStats(value)) return false
   const v = value as Partial<StatsState>
-  // v.profiles === undefined is valid — see useGameStats.tsx's migrateStats, the only "migration"
+  // v.profiles === undefined is valid - see useGameStats.tsx's migrateStats, the only "migration"
   // a purely-additive field like this needs.
   const profilesOk = v.profiles === undefined || (isRecord(v.profiles) && Object.values(v.profiles).every(isValidProfileStats))
   return profilesOk && (v.firstGameResult === null || v.firstGameResult === 'win' || v.firstGameResult === 'loss' || v.firstGameResult === 'draw')

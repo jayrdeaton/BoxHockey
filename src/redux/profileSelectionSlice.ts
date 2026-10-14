@@ -2,7 +2,7 @@ import { createProfileSelectionSlice } from '@tastic/profile'
 
 import { Player } from '@/types'
 
-// Which profile each seat last picked — always local, never part of the shared App Group roster
+// Which profile each seat last picked - always local, never part of the shared App Group roster
 // (@tastic/profile's own profiles slice, see store.ts): who's selected on THIS device is naturally
 // a per-app, per-device thing, not something a sibling @tastic game should see or influence. This
 // was a hand-rolled Record<Player, string|null> reducer identical to 4 sibling apps' own copies

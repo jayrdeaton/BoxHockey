@@ -4,7 +4,7 @@ import { AiDifficulty, BoardVariant, GameMode, Player, Profile, ProfileStats, St
 import { DEFAULT_PROFILE_STATS } from '@/utils/statsValidation'
 
 // One finished match, as the stats layer sees it. Built by game.tsx the instant phase flips to
-// 'gameOver' — everything here is already on screen at that moment, so nothing extra is tracked
+// 'gameOver' - everything here is already on screen at that moment, so nothing extra is tracked
 // during play just to feed this.
 export interface MatchOutcome {
   winner: Player
@@ -21,7 +21,7 @@ export interface MatchContext {
   profileIds?: Partial<Record<Player, string>>
 }
 
-// BoxHockey has no draws — a match ends the instant one side reaches scoreToWin — so this only ever
+// BoxHockey has no draws - a match ends the instant one side reaches scoreToWin - so this only ever
 // returns 'win' or 'loss'. Routed through resultFor anyway so the rule lives in one place.
 function seatResult(outcome: MatchOutcome, seat: Player): RoundResult {
   return resultFor(outcome.winner, seat)
@@ -36,7 +36,7 @@ function goalsFor(outcome: MatchOutcome, seat: Player): { scored: number; conced
 // The per-seat half of a match update, shared by the device-wide pass and each profile's bucket.
 //
 // `deviceWide` is not cosmetic: twoPlayer.p1Wins/p2Wins mean two different things in the two
-// cases. Device-wide they're a SEAT tally — "how often has the player in seat 1 won" — which is
+// cases. Device-wide they're a SEAT tally - "how often has the player in seat 1 won" - which is
 // the only well-defined framing on a shared device where seat 2 is a different person each match.
 // In a profile's bucket they're that PROFILE's own wins, split by which seat they earned them
 // from, so p1Wins + p2Wins is always that person's own win count regardless of where they sat.
@@ -76,13 +76,13 @@ function bumpForSeat(prev: ProfileStats, outcome: MatchOutcome, context: MatchCo
   }
 }
 
-// `now` defaults to the real clock — overridable so tests can exercise day-boundary/streak logic
+// `now` defaults to the real clock - overridable so tests can exercise day-boundary/streak logic
 // without mocking the global Date.
 export function applyMatchOutcome(prev: StatsState, outcome: MatchOutcome, context: MatchContext, now: Date = new Date()): StatsState {
   const isFirstGameEver = prev.vsCpu.played + prev.twoPlayer.played === 0
   const firstGameResult = isFirstGameEver ? seatResult(outcome, 1) : prev.firstGameResult
 
-  // Device-wide totals are kept from seat 1's perspective — the same framing LightCycles uses, and
+  // Device-wide totals are kept from seat 1's perspective - the same framing LightCycles uses, and
   // the only well-defined one on a shared device where seat 2 is a different person each match.
   const base = bumpForSeat(prev, outcome, context, 1, now, true)
 
@@ -110,12 +110,12 @@ export function getOverallTotals(stats: ProfileStats): { played: number; wins: n
 
 // Synthesizes a full StatsState-shaped view from one profile's bucket, so the exact same
 // achievement predicates evaluate a profile's own record unchanged. `firstGameResult: null` is
-// never read through this view — the one achievement that touches it is scope:'device'.
+// never read through this view - the one achievement that touches it is scope:'device'.
 export function getProfileStatsView(profileStats: ProfileStats): StatsState {
   return { ...profileStats, profiles: {}, firstGameResult: null }
 }
 
-// How many of the three board variants have at least one win — the "win on every board" family.
+// How many of the three board variants have at least one win - the "win on every board" family.
 export function getVariantsWon(stats: ProfileStats): number {
   return countBucketsWithAWin(stats.variants)
 }
@@ -132,7 +132,7 @@ export interface ProfileRanking {
   winRate: number
 }
 
-// Sorted by wins, then win rate, both descending — a profile with nothing recorded yet still
+// Sorted by wins, then win rate, both descending - a profile with nothing recorded yet still
 // appears at played: 0, so a freshly created profile shows up immediately.
 export function getProfileRankings(profiles: Profile[], profileStats: Record<string, ProfileStats>): ProfileRanking[] {
   return profiles

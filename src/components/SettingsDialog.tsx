@@ -14,7 +14,7 @@ export interface SettingsDialogProps {
   // and fits the short edge however the phone is held. Defaults to 0 for a call site that doesn't
   // track one.
   rotation?: ViewRotation
-  // The persisted "next round" settings (not a round's own locked-in activeRoundSettings) — passed
+  // The persisted "next round" settings (not a round's own locked-in activeRoundSettings) - passed
   // in rather than read internally via useSettings() so this stays a pure adapter, matching the
   // cross-app SettingsDialog convention (see LightCycles' identical props-based contract). Each of
   // this component's three call sites (index.tsx, loadout.tsx, game.tsx) already has its own
@@ -27,7 +27,7 @@ export interface SettingsDialogProps {
   showHowToPlay?: boolean
 }
 
-// Thin adapter over @tastic/hud's shared settings shell — BoxHockey's own Settings (lock
+// Thin adapter over @tastic/hud's shared settings shell - BoxHockey's own Settings (lock
 // orientation, edge guard) is the only thing that varies here; everything else (sound, haptics,
 // appearance, update checking) is identical across every app using BaseSettingsDialog and lives
 // entirely inside that package now.

@@ -17,17 +17,17 @@ interface FaceoffControls {
 }
 
 // Drives all 'faceoff'-mode timing (countdown, hold, live window, CPU reaction, human timeout,
-// and the resolved-to-knock handoff) by dispatching through the plain callbacks above — no
+// and the resolved-to-knock handoff) by dispatching through the plain callbacks above - no
 // reducer or physics changes needed beyond what useGameState.ts already exposes, the same
 // "controls object driven by a timer chain" shape useAIOpponent.ts uses for CPU shots. 'coinFlip'
-// mode needs no timing at all — it's resolved synchronously inside the reducer itself (see
+// mode needs no timing at all - it's resolved synchronously inside the reducer itself (see
 // useGameState.ts's RESET/NEXT_ROUND cases), so this hook has nothing to do for it. `paused`
 // (settings/quit-confirm dialog open, or the app was backgrounded - see game.tsx) halts every timer
 // below and restarts the current draw once it clears (see the pause-resume effect near the bottom).
 export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Player | null, difficulty: AIDifficulty, paused: boolean, controls: FaceoffControls): void {
   const { faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart } = controls
 
-  // Mirrors game.tsx's puckRef pattern — the timeout-check timer below fires long after this
+  // Mirrors game.tsx's puckRef pattern - the timeout-check timer below fires long after this
   // effect's own closure was created, so it needs a way to read live tapAt rather than a stale
   // snapshot from when the countdown started.
   const stateRef = useRef(state)
@@ -36,13 +36,13 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
   })
 
   // True only on the game's first draw, before both players have signaled ready (see
-  // FaceoffState's doc comment in types/index.ts) — a primitive boolean rather than the whole
+  // FaceoffState's doc comment in types/index.ts) - a primitive boolean rather than the whole
   // `faceoff` object, so it only flips the two effects below when readiness itself actually
   // changes, not on every ordinary sub-action.
   const isReadyStage = state.faceoff?.stage === 'ready'
 
   // ─── CPU auto-ready ────────────────────────────────────────────────────────────────────────
-  // The CPU can't tap a "ready" zone the way a human does — it just signals ready on its own
+  // The CPU can't tap a "ready" zone the way a human does - it just signals ready on its own
   // after a short beat, so a vs-CPU game's first draw doesn't hang forever waiting for a press
   // that will never come.
   useEffect(() => {
@@ -56,7 +56,7 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
   // sub-action (each count tick, each tap), which would tear down and restart this whole chain
   // mid-flight. faceoffRound only bumps when a genuinely new draw begins (game start, post-goal
   // restart, or a restart after a pause - see the pause-resume effect below), so this effect
-  // runs exactly once per draw. Also gated on !isReadyStage — on the game's first draw the
+  // runs exactly once per draw. Also gated on !isReadyStage - on the game's first draw the
   // countdown must not start until FACEOFF_READY has flipped stage away from 'ready' (see
   // useGameState.ts), and isReadyStage flipping false is exactly what re-runs this effect at that
   // point, picking the chain up from a stage that's already 'countdown' with count reset to 3.
@@ -81,7 +81,7 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
       after(holdMs, () => {
         faceoffLive()
 
-        // The CPU doesn't get to "watch" the flash any more reliably than a human does — see
+        // The CPU doesn't get to "watch" the flash any more reliably than a human does - see
         // rollFaceoffWrongZone in aiOpponent.ts: Easy has a real chance of pressing the dot that
         // never colored, forfeiting exactly like a human who reacts to the wrong one. Reaction
         // *time* is still the separate axis below.
@@ -110,10 +110,10 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
   }, [state.phase, state.faceoffRound, isReadyStage, aiPlayer, difficulty, faceoffCount, faceoffHold, faceoffLive, faceoffTap, faceoffTimeout, paused])
 
   // ─── Resolved → knock ──────────────────────────────────────────────────────────────────────
-  // No announcement, no pause — the draw resolving launches the knock on the very next tick; the
+  // No announcement, no pause - the draw resolving launches the knock on the very next tick; the
   // puck's own movement is the only signal of who won (see game.tsx/Board.tsx's press-target
   // color flip). The loser always gets the next real turn off of it, hit or miss (see
-  // FACEOFF_LAUNCH's own comment in useGameState.ts) — the knock itself is the winner's entire
+  // FACEOFF_LAUNCH's own comment in useGameState.ts) - the knock itself is the winner's entire
   // reward for the draw.
   const result = state.faceoff?.result
   useEffect(() => {
@@ -127,7 +127,7 @@ export function useFaceoff(state: GameState, board: BoardLayout, aiPlayer: Playe
   // can't be trusted to resume with correct relative timing once the pause clears (a dialog
   // closing, or Resume on the Paused card), so restart the current draw from scratch instead of
   // trying to pick the old timers back up. Skipped while still in 'ready' (nothing was running to
-  // interrupt — a dialog can't even open mid-drag/mid-press since it captures the whole screen)
+  // interrupt - a dialog can't even open mid-drag/mid-press since it captures the whole screen)
   // and while 'resolved' (unreachable during a pause anyway, since the chain that would resolve it
   // never runs while paused).
   const prevPausedRef = useRef(paused)

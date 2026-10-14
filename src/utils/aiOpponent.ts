@@ -34,7 +34,7 @@ const TUNING: Record<AIDifficulty, DifficultyTuning> = {
 
 const SIM_MAX_STEPS = 500
 // Keep a margin above the cancel threshold so post-noise power never accidentally produces a shot
-// the reducer treats as "too short/slow, cancel the shot" — now TWO independent gates (distance
+// the reducer treats as "too short/slow, cancel the shot" - now TWO independent gates (distance
 // AND velocity, see MIN_SHOOT_DRAG/MIN_FLICK_VELOCITY's own comments in constants/game.ts), so this
 // takes whichever ratio is more restrictive rather than assuming distance always dominates.
 const MIN_POWER = 1.4 * Math.max(MIN_SHOOT_DRAG / MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY / MAX_FLICK_VELOCITY)
@@ -51,7 +51,7 @@ interface SimResult {
 }
 
 // Runs the exact same stepPhysics the real game loop uses, so "will this shot score" is answered
-// by replaying it rather than by a closed-form angle formula — the only way to account for wall
+// by replaying it rather than by a closed-form angle formula - the only way to account for wall
 // banks, obstacles and gravity wells without duplicating that logic.
 function simulateShot(puck: PuckState, board: BoardLayout, vx: number, vy: number, friction: number = FRICTION_LEVELS.medium): SimResult {
   let p: PuckState = { x: puck.x, y: puck.y, vx, vy }
@@ -80,10 +80,10 @@ export interface PlannedShot {
 
 // Picks a shot for `aiPlayer` by simulating a batch of candidate (angle, power) pairs and scoring
 // each by its outcome, then choosing among the top candidates and blurring the choice by
-// difficulty — the same search runs at every tier, only its breadth/accuracy differ.
+// difficulty - the same search runs at every tier, only its breadth/accuracy differ.
 export function planAIShot(puck: PuckState, board: BoardLayout, aiPlayer: Player, difficulty: AIDifficulty, friction: number = FRICTION_LEVELS.medium): PlannedShot {
   const tuning = TUNING[difficulty]
-  // Attacks the OPPONENT's goal, not the AI's own crease — see physics.ts's stepPhysics for the
+  // Attacks the OPPONENT's goal, not the AI's own crease - see physics.ts's stepPhysics for the
   // matching scored:1/2 convention this must stay in sync with.
   const targetY = aiPlayer === 1 ? board.y : board.y + board.height
   const ownGoalY = aiPlayer === 1 ? board.y + board.height : board.y
@@ -112,7 +112,7 @@ export function planAIShot(puck: PuckState, board: BoardLayout, aiPlayer: Player
       let score: number
       if (sim.scored === aiPlayer) {
         // Tie-broken toward the straightest scoring line (smallest deviation from dead-on)
-        // rather than left as an arbitrary generation-order tie — otherwise pickFromTopN below
+        // rather than left as an arbitrary generation-order tie - otherwise pickFromTopN below
         // can end up choosing only among the sweep's grazing edge angles instead of its center.
         const offDeg = (Math.abs(angleRad - baseAngle) * 180) / Math.PI
         score = 10000 - sim.bounces * 5 - offDeg * 0.1
@@ -128,7 +128,7 @@ export function planAIShot(puck: PuckState, board: BoardLayout, aiPlayer: Player
     }
   }
 
-  // Own-goal candidates (score <= -100000) are excluded whenever any safer option exists at all —
+  // Own-goal candidates (score <= -100000) are excluded whenever any safer option exists at all -
   // only fall back to them if literally everything sampled scores on the AI's own net.
   const viable = candidates.filter((c) => c.score > -100000)
   const pool = (viable.length > 0 ? viable : candidates).sort((a, b) => b.score - a.score).slice(0, Math.max(1, tuning.pickFromTopN))
@@ -146,11 +146,11 @@ export function randomAIThinkDelayMs(difficulty: AIDifficulty): number {
   return min + Math.random() * (max - min)
 }
 
-// Tip-off reaction time (ms after the live window opens) — a separate, much tighter tuning table
+// Tip-off reaction time (ms after the live window opens) - a separate, much tighter tuning table
 // from thinkMs above, since a faceoff tests raw reaction speed rather than shot planning. Easy is
 // slow and inconsistent; Hard is fast and tight, matching that tier's near-zero aimNoiseDeg/
 // powerNoise above. Grounded against real simple-reaction-time data (visual-stimulus reaction
-// averages ~200-250ms for an attentive adult; sub-150ms is elite/near the human floor) — the
+// averages ~200-250ms for an attentive adult; sub-150ms is elite/near the human floor) - the
 // original ranges bottomed out at 90ms for Hard, faster than any human can physically react, which
 // made even a genuinely quick real press feel unbeatable. Hard's window now straddles the human
 // average (still a sharp, attentive opponent, occasionally right at the floor of what's humanly
@@ -168,11 +168,11 @@ export function randomFaceoffReactionMs(difficulty: AIDifficulty): number {
 }
 
 // Reaction time before the CPU acts on a puck that's slowed into the interceptable band mid-slide
-// (see InterceptSpeed in types/index.ts) — a separate tuning table from thinkMs (normal shot
+// (see InterceptSpeed in types/index.ts) - a separate tuning table from thinkMs (normal shot
 // planning) and FACEOFF_REACTION_MS (tap-race reflexes), reusing the SAME ranges as the faceoff
 // table: both are "notice a state change and react" tasks, not shot-planning ones, so the same
 // grounding in real reaction-time data applies. Without this, the CPU would snipe an interceptable
-// puck the instant the threshold is crossed — code has no reaction lag, so a human would never
+// puck the instant the threshold is crossed - code has no reaction lag, so a human would never
 // beat it to a fast puck at the higher InterceptSpeed tiers.
 const INTERCEPT_REACTION_MS: Record<AIDifficulty, [number, number]> = FACEOFF_REACTION_MS
 
@@ -181,7 +181,7 @@ export function randomInterceptReactionMs(difficulty: AIDifficulty): number {
   return min + Math.random() * (max - min)
 }
 
-// Chance the AI misreads which of its two dots actually lit up and presses the wrong one — same
+// Chance the AI misreads which of its two dots actually lit up and presses the wrong one - same
 // forfeit consequence a human gets for the same mistake (see useGameState.ts's FACEOFF_TAP). Easy
 // should feel like a beginner who's still learning to watch the right spot, not just a slow-but-
 // flawless opponent; Hard stays perfect, matching its near-zero aim/power noise above.
@@ -195,13 +195,13 @@ export function rollFaceoffWrongZone(difficulty: AIDifficulty): boolean {
   return Math.random() < FACEOFF_WRONG_ZONE_CHANCE[difficulty]
 }
 
-// 'tripleTap' mode's CPU swipe planner — the CPU's own synthetic third-press drag, aimed roughly
+// 'tripleTap' mode's CPU swipe planner - the CPU's own synthetic third-press drag, aimed roughly
 // from its own zone at the opponent's goal, difficulty-scaled angle jitter and power. Same jitter-
 // model spirit as computeFaceoffKnock's own angle/power split (utils/faceoff.ts), but flat per-
-// difficulty rather than margin/reaction-driven — there's no analogous "how contested" signal here
+// difficulty rather than margin/reaction-driven - there's no analogous "how contested" signal here
 // (see TipoffMode's own doc comment: the launch vector is always just the plain sum of both
 // players' swipes, so the CPU's own contribution just needs to be a plausible drag, not a
-// procedurally "correct" one). Returns a raw {dx,dy} drag — the SAME resolveTripleTapSwipeVelocity
+// procedurally "correct" one). Returns a raw {dx,dy} drag - the SAME resolveTripleTapSwipeVelocity
 // math in useGameState.ts runs over this afterward, no shortcut.
 interface TripleTapSwipeTuning {
   aimJitterDeg: number
@@ -226,7 +226,7 @@ export function planTripleTapSwipe(board: BoardLayout, cpuPlayer: Player, diffic
   return { dx: Math.cos(angle) * magnitude, dy: Math.sin(angle) * magnitude }
 }
 
-// Flat, not difficulty-tiered — how long the CPU's synthetic drag takes barely matters for feel,
+// Flat, not difficulty-tiered - how long the CPU's synthetic drag takes barely matters for feel,
 // only its final direction/power (planTripleTapSwipe above) does. Just enough to separate the
 // swipe's touch-down (TRIPLE_TAP_SWIPE_START) from its release (TRIPLE_TAP_SWIPE_END) in
 // useTripleTap.ts's timer chain.

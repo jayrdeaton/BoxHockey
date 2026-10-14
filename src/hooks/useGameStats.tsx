@@ -10,7 +10,7 @@ import { applyMatchOutcome, getProfileStatsView, MatchContext, MatchOutcome } fr
 export interface RecordMatchResult {
   // Device-wide newly-unlocked achievements (bare-id keyed).
   device: AchievementDefinition[]
-  // Per-seat breakdown of what that seat's OWN saved profile newly unlocked — only seats with a
+  // Per-seat breakdown of what that seat's OWN saved profile newly unlocked - only seats with a
   // profile selected ever get an entry.
   profiles: Partial<Record<Player, AchievementDefinition[]>>
 }
@@ -19,7 +19,7 @@ interface GameStatsContextValue {
   stats: StatsState
   unlockedAchievements: UnlockedAchievementsState
   recordMatchOutcome: (outcome: MatchOutcome, context: MatchContext) => RecordMatchResult
-  // Wipes both stored keys back to defaults — irreversible, so callers confirm with the player
+  // Wipes both stored keys back to defaults - irreversible, so callers confirm with the player
   // first (see achievements.tsx's reset confirmation).
   resetAll: () => void
   // Drops one profile's stats bucket and its unlock history, so a deleted profile leaves nothing

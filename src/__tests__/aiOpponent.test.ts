@@ -2,7 +2,7 @@ import { BoardLayout } from '@/types'
 import { AIDifficulty, planAIShot, randomAIThinkDelayMs, randomInterceptReactionMs } from '@/utils/aiOpponent'
 import { stepPhysics } from '@/utils/physics'
 
-// A standard open board with no obstacles/wells — mirrors the fixture in physics.test.ts.
+// A standard open board with no obstacles/wells - mirrors the fixture in physics.test.ts.
 const openBoard: BoardLayout = {
   x: 10,
   y: 10,
@@ -56,7 +56,7 @@ describe('planAIShot', () => {
   })
 
   // Easy is deliberately blurrier than medium/hard, but a beginner tier still shouldn't whiff a
-  // dead-straight, wide-open net most of the time — only harder shots (bank angles, obstacles)
+  // dead-straight, wide-open net most of the time - only harder shots (bank angles, obstacles)
   // should be where the difficulty gap really shows up.
   const OPEN_SHOT_SUCCESS_RATE: Record<AIDifficulty, number> = { easy: 0.55, medium: 0.75, hard: 0.9 }
 
@@ -99,7 +99,7 @@ describe('randomAIThinkDelayMs', () => {
 
 describe('randomInterceptReactionMs', () => {
   it("stays within each difficulty's configured range", () => {
-    // Reuses FACEOFF_REACTION_MS's own ranges (see utils/aiOpponent.ts's own comment on why) —
+    // Reuses FACEOFF_REACTION_MS's own ranges (see utils/aiOpponent.ts's own comment on why) -
     // both are "notice a state change and react" tasks, not shot-planning ones.
     const ranges: Record<AIDifficulty, [number, number]> = { easy: [340, 620], medium: [230, 430], hard: [150, 280] }
     for (const [difficulty, [min, max]] of Object.entries(ranges) as [AIDifficulty, [number, number]][]) {

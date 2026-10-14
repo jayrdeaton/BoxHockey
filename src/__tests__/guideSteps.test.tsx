@@ -60,7 +60,7 @@ describe('getGuideSteps', () => {
         for (const word of step.title.split(/[\s-]+/)) {
           if (!SMALL_WORDS.has(word)) expect(word).toMatch(/^[A-Z0-9]/)
         }
-        expect(`${step.title} ${step.body}`).not.toMatch(/[—?]/)
+        expect(`${step.title} ${step.body}`).not.toMatch(/[\u2014?]/)
       }
     }
   })

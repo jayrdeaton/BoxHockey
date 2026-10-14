@@ -18,7 +18,7 @@ describe('DEFAULT_STATS', () => {
 })
 
 describe('isValidStats', () => {
-  it('accepts a blob with no profiles key — the additive-field case migrateStats backfills', () => {
+  it('accepts a blob with no profiles key - the additive-field case migrateStats backfills', () => {
     const { profiles: _dropped, ...withoutProfiles } = DEFAULT_STATS
     expect(isValidStats(withoutProfiles)).toBe(true)
   })

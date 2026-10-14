@@ -5,14 +5,14 @@ import { getOverallTotals, getVariantsWon } from '@/utils/statsEngine'
 
 export { ACHIEVEMENT_TIER_COLORS } from '@tastic/achievements'
 
-// Every board variant in constants/game.ts's own BOARD_VARIANTS — hardcoded rather than imported
+// Every board variant in constants/game.ts's own BOARD_VARIANTS - hardcoded rather than imported
 // so this stays a dependency-light, Jest-safe constants file.
 const TOTAL_BOARD_VARIANTS = 3
 
 const AI_DIFFICULTY_TIER: Record<AiDifficulty, AchievementTier> = { easy: 'bronze', medium: 'silver', hard: 'gold' }
 const AI_DIFFICULTY_LABEL: Record<AiDifficulty, string> = { easy: 'Easy', medium: 'Medium', hard: 'Hard' }
 
-// Three different predicates (one per difficulty), not one value against three thresholds — so
+// Three different predicates (one per difficulty), not one value against three thresholds - so
 // these are hand-written and carry no `progress`: "40% of the way to beating Hard once" is not a
 // meaningful fraction.
 function beatCpuFamily(): AchievementDefinition[] {
@@ -41,7 +41,7 @@ export const ACHIEVEMENT_CATALOG: AchievementDefinition[] = [
   {
     id: 'first_ever_win',
     title: 'First Blood',
-    description: 'Win a match — any match, any time.',
+    description: 'Win any match, any time.',
     tier: 'bronze',
     icon: 'star',
     isUnlocked: (stats) => getOverallTotals(stats).wins >= 1
