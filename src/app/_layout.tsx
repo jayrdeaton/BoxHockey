@@ -1,4 +1,5 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
+import { useHapticSettings } from '@rific/feedback-press'
 import { Toaster, ToastProvider } from '@rific/toaster'
 import { OrientationProvider, RotationAwareStatusBar, useThemedRootBackground } from '@tastic/core'
 import * as Haptics from 'expo-haptics'
@@ -75,6 +76,19 @@ function GatedApp({ children }: { children: ReactNode }) {
   )
 }
 
+// The toaster only gets expo-haptics while the player's Vibrate setting is on, so its haptic ticks
+// follow the same setting as every other haptic in the app. Today they can't fire anyway (the only
+// controls that tick, the history and clear buttons, are off below), but this keeps it that way if
+// either is ever shown. Must render inside Providers, whose FeedbackBridge provides the setting.
+function HapticGatedToastProvider({ children }: { children: ReactNode }) {
+  const { settings } = useHapticSettings()
+  return (
+    <ToastProvider haptics={settings.vibrate ? Haptics : undefined} paper={RNPaper}>
+      {children}
+    </ToastProvider>
+  )
+}
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
@@ -86,10 +100,10 @@ export default function RootLayout() {
                 <GameStatsProvider>
                   <GatedApp>
                     <OrientationBridge>
-                      <ToastProvider haptics={Haptics} paper={RNPaper}>
+                      <HapticGatedToastProvider>
                         {/* Wraps the stack (rather than sitting beside it like UpdateDialog) because
                         Home's useAutoShowGuide() and the Settings dialog's "How to Play" row reach
-                        it through context (see GuideHost). Inside ToastProvider and
+                        it through context (see GuideHost). Inside the toast provider and
                         OrientationBridge because the card renders through a Portal and rotates with
                         the shared reading, and inside the gate so it mounts together with Home rather
                         than before it. */}
@@ -104,7 +118,7 @@ export default function RootLayout() {
                         package's current default (3) so a future toaster release can't change it. */}
                         <Toaster historyButton={null} clearButton={null} limit={3} />
                         <UpdateDialog />
-                      </ToastProvider>
+                      </HapticGatedToastProvider>
                     </OrientationBridge>
                   </GatedApp>
                 </GameStatsProvider>
