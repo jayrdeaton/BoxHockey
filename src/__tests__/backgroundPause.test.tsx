@@ -42,21 +42,25 @@ const CONTROLS = DEFAULT_SETTINGS.controlScheme
 interface MatchProps {
   tipoffMode: TipoffMode
   aiPlayer: Player | null
-  // game.tsx drops the aim the moment a background pause lands (its aimCancel effect); false shows why it has to.
+  // game.tsx drops the aim the moment any pause lands (its aimCancel effect); false shows why it has to.
   cancelAimOnPause: boolean
+  // Settings or Quit Match? open. On desktop web the corner buttons stay up mid-shot, so this can
+  // land in the middle of a CPU windup too.
+  dialogOpen?: boolean
 }
 
 // GameScreen's pause wiring in miniature: the same game hooks, fed `paused` from the real
-// useBackgroundPause, with no dialog of their own open.
-function useMatch({ tipoffMode, aiPlayer, cancelAimOnPause }: MatchProps) {
-  const { backgroundPaused, resume } = useBackgroundPause(() => state.phase !== 'gameOver')
-  const controls = useGameState(board, DEFAULT_SETTINGS.scoreToWin, tipoffMode, FRICTION, CONTROLS, backgroundPaused, INTERCEPT)
+// useBackgroundPause plus a dialog flag standing in for settingsOpen/confirmVisible.
+function useMatch({ tipoffMode, aiPlayer, cancelAimOnPause, dialogOpen = false }: MatchProps) {
+  const { backgroundPaused, resume } = useBackgroundPause(() => state.phase !== 'gameOver' && !dialogOpen)
+  const paused = dialogOpen || backgroundPaused
+  const controls = useGameState(board, DEFAULT_SETTINGS.scoreToWin, tipoffMode, FRICTION, CONTROLS, paused, INTERCEPT)
   const { state, aimCancel } = controls
-  useAIOpponent(state, board, aiPlayer, 'hard', FRICTION, CONTROLS, backgroundPaused, INTERCEPT, controls)
-  useFaceoff(state, board, aiPlayer, 'hard', backgroundPaused, controls)
+  useAIOpponent(state, board, aiPlayer, 'hard', FRICTION, CONTROLS, paused, INTERCEPT, controls)
+  useFaceoff(state, board, aiPlayer, 'hard', paused, controls)
   useEffect(() => {
-    if (backgroundPaused && cancelAimOnPause) aimCancel()
-  }, [backgroundPaused, cancelAimOnPause, aimCancel])
+    if (paused && cancelAimOnPause) aimCancel()
+  }, [paused, cancelAimOnPause, aimCancel])
   return { ...controls, backgroundPaused, resume }
 }
 
@@ -113,15 +117,16 @@ describe('pausing when the app leaves the foreground mid-match', () => {
   // the moment the CPU commits to its windup (its release is still pending).
   function startCpuWindup(cancelAimOnPause: boolean) {
     const { result, rerender } = renderHook(useMatch, { initialProps: { tipoffMode: 'coinFlip', aiPlayer: null, cancelAimOnPause } })
-    rerender({ tipoffMode: 'coinFlip', aiPlayer: result.current.state.currentPlayer, cancelAimOnPause })
+    const aiPlayer = result.current.state.currentPlayer
+    rerender({ tipoffMode: 'coinFlip', aiPlayer, cancelAimOnPause })
     act(() => result.current.coinFlipDone())
     advanceUntil(() => result.current.state.phase === 'aiming')
     expect(result.current.state.phase).toBe('aiming')
-    return result
+    return { result, setDialogOpen: (dialogOpen: boolean) => rerender({ tipoffMode: 'coinFlip', aiPlayer, cancelAimOnPause, dialogOpen }) }
   }
 
   it('strands a CPU windup the pause interrupted in aiming if the aim is left alone', () => {
-    const result = startCpuWindup(false)
+    const { result } = startCpuWindup(false)
     act(() => emitAppState('inactive'))
     act(() => emitAppState('active'))
     act(() => result.current.resume())
@@ -130,7 +135,7 @@ describe('pausing when the app leaves the foreground mid-match', () => {
   })
 
   it('drops a CPU windup the pause interrupted, so the CPU plans and takes a fresh shot after Resume', () => {
-    const result = startCpuWindup(true)
+    const { result } = startCpuWindup(true)
     act(() => emitAppState('inactive'))
     expect(result.current.state.phase).toBe('idle')
     expect(result.current.state.aim).toBeNull()
@@ -142,6 +147,20 @@ describe('pausing when the app leaves the foreground mid-match', () => {
     act(() => result.current.resume())
     advanceUntil(() => result.current.state.phase !== 'idle' && result.current.state.phase !== 'aiming')
     // A flick shot goes straight to 'simulating', a pull/push one through the 'striking' swing.
+    expect(['striking', 'simulating']).toContain(result.current.state.phase)
+  })
+
+  it('drops a CPU windup a dialog opened over (desktop web), so the CPU takes a fresh shot once it closes', () => {
+    const { result, setDialogOpen } = startCpuWindup(true)
+    setDialogOpen(true)
+    expect(result.current.state.phase).toBe('idle')
+    expect(result.current.state.aim).toBeNull()
+    advance(5000)
+    // Nothing moves while the dialog is up.
+    expect(result.current.state.phase).toBe('idle')
+
+    setDialogOpen(false)
+    advanceUntil(() => result.current.state.phase !== 'idle' && result.current.state.phase !== 'aiming')
     expect(['striking', 'simulating']).toContain(result.current.state.phase)
   })
 })

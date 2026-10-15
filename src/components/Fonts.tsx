@@ -19,14 +19,16 @@ interface Props {
 // back until then happen in one place this way, same as the modern approach _layout.tsx now uses
 // for the 'settings'/'profiles' gates.
 export function Fonts({ children }: Props) {
-  const [loaded] = useFonts({ ...MaterialCommunityIcons.font })
+  // A failed load counts as ready too: `loaded` stays false forever after an error, which would hold
+  // the splash up for good, so the app opens on the system fallback font instead.
+  const [loaded, error] = useFonts({ ...MaterialCommunityIcons.font })
   return (
     <>
       {/* The web tab title, outside the gate so the static export's HTML has it too (fonts never load there) */}
       <Head>
         <title>{Constants.expoConfig?.name}</title>
       </Head>
-      <SplashGate gate='fonts' ready={loaded}>
+      <SplashGate gate='fonts' ready={loaded || !!error}>
         {children}
       </SplashGate>
     </>

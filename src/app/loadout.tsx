@@ -1,7 +1,7 @@
 import { defaultColors, getThirdColor, useAutoPaperTheme, useThemeSettings } from '@rific/auto-paper'
 import { FakeLandscapeView, getViewRotation, rotateInsets, useOrientationState } from '@tastic/core'
 import { CornerActionButtons, getColorPopoverId, getCpuDifficultyPopoverId, getInlineColorPickerContentSize, getLabeledDropdownContentHeight, LABELED_DROPDOWN_POPOVER_WIDTH, MenuOption, PlayerSetupPanel, PressAwayOverlay, ReadyButton, SectionedDropdown, SharedActionBand, usePopoverHost, useZoneClampedAlign } from '@tastic/hud'
-import type { Profile as BaseProfile } from '@tastic/profile'
+import { avoidSeatColorClash, type Profile as BaseProfile } from '@tastic/profile'
 import { DualZoneLayout, needsSharedNeutralZone, useDualZoneLayout } from '@tastic/split-screen'
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -12,7 +12,7 @@ import { useDispatch, useSelector } from 'react-redux'
 
 import { LOADOUT_SHARED_CONTROLS_IDS, LoadoutSharedControls } from '@/components/LoadoutSharedControls'
 import { SettingsDialog } from '@/components/SettingsDialog'
-import { LOADOUT_PANEL_SWAP_FADE_MS } from '@/constants/game'
+import { DEFAULT_P1_COLOR, DEFAULT_P2_COLOR, LOADOUT_PANEL_SWAP_FADE_MS } from '@/constants/game'
 import { useProfiles } from '@/hooks/useProfiles'
 import { useSettings } from '@/hooks/useSettings'
 import { liveplayActions } from '@/redux/liveplaySlice'
@@ -24,6 +24,10 @@ import { AI_DIFFICULTY_LABELS, AIDifficulty } from '@/utils/aiOpponent'
 import { BOARD_VARIANT_LABELS } from '@/utils/board'
 import { humanPlayersFor, parseGameMode } from '@/utils/gameMode'
 import { safeBack } from '@/utils/navigation'
+
+// What @tastic/profile's avoidSeatColorClash moves seat 2 to when both seats land on one color: a
+// profile picked for one seat can be saved as the other seat's color, with no swap step behind it.
+const SEAT_DEFAULT_COLORS = [DEFAULT_P1_COLOR, DEFAULT_P2_COLOR] as const
 
 const BOARD_VARIANT_DESCRIPTIONS: Record<BoardVariant, string> = {
   classic: 'Off-center holes',
@@ -203,7 +207,7 @@ export default function LoadoutScreen() {
   // "profiles finished loading" signal instead).
   useEffect(() => {
     const nextP1 = p1Profile ? (profileOverride[1] ?? p1Profile.color) : guestColors[1]
-    const nextP2 = p2Profile ? (profileOverride[2] ?? p2Profile.color) : p2IsHuman ? guestColors[2] : cpuColor
+    const nextP2 = avoidSeatColorClash(nextP1, p2Profile ? (profileOverride[2] ?? p2Profile.color) : p2IsHuman ? guestColors[2] : cpuColor, SEAT_DEFAULT_COLORS)
     if (nextP1.toLowerCase() === p1Color.toLowerCase() && nextP2.toLowerCase() === p2Color.toLowerCase()) return
     setThemeColor({ color: { primary: nextP1, secondary: nextP2, tertiary: getThirdColor(nextP1, nextP2) } })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -233,7 +237,7 @@ export default function LoadoutScreen() {
       const p2Prof = p2ProfileRef.current
       const override = profileOverrideRef.current
       const nextP1 = p1Prof ? (override[1] ?? p1Prof.color) : guest[1]
-      const nextP2 = p2Prof ? (override[2] ?? p2Prof.color) : p2IsHuman ? guest[2] : cpu
+      const nextP2 = avoidSeatColorClash(nextP1, p2Prof ? (override[2] ?? p2Prof.color) : p2IsHuman ? guest[2] : cpu, SEAT_DEFAULT_COLORS)
       setThemeColor({ color: { primary: nextP1, secondary: nextP2, tertiary: getThirdColor(nextP1, nextP2) } })
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [lastSelected[1], lastSelected[2], p2IsHuman, setThemeColor])
@@ -293,24 +297,34 @@ export default function LoadoutScreen() {
   // Typed against @tastic/profile's own base Profile, not this app's own extended one (@/types'
   // Profile, which adds controlScheme) - @tastic/hud's PlayerSetupPanel.onProfileSelect is typed
   // against the base shape, and neither handler reads anything beyond .id/.color anyway, so there's
-  // no real need for the extension here.
+  // no real need for the extension here. Picking the other seat's profile swaps the two (see
+  // @tastic/profile's select), so the other seat's override is cleared too: its profile changes
+  // without its own handler running, and the reactive effect above then re-resolves both seats.
   const handleP1ProfileSelect = useCallback(
     (profile: BaseProfile | null) => {
       dispatch(seatColorsActions.setProfileOverride({ seat: 1, color: null }))
+      if (profile && profile.id === lastSelected[2]) dispatch(seatColorsActions.setProfileOverride({ seat: 2, color: null }))
       selectProfile(1, profile?.id ?? null)
       const hex = profile ? profile.color : guestColors[1]
-      if (hex) setThemeColor({ color: { primary: hex, secondary: p2Color, tertiary: getThirdColor(hex, p2Color) } })
+      if (hex) {
+        const secondary = avoidSeatColorClash(hex, p2Color, SEAT_DEFAULT_COLORS)
+        setThemeColor({ color: { primary: hex, secondary, tertiary: getThirdColor(hex, secondary) } })
+      }
     },
-    [dispatch, selectProfile, guestColors, p2Color, setThemeColor]
+    [dispatch, lastSelected, selectProfile, guestColors, p2Color, setThemeColor]
   )
   const handleP2ProfileSelect = useCallback(
     (profile: BaseProfile | null) => {
       dispatch(seatColorsActions.setProfileOverride({ seat: 2, color: null }))
+      if (profile && profile.id === lastSelected[1]) dispatch(seatColorsActions.setProfileOverride({ seat: 1, color: null }))
       selectProfile(2, profile?.id ?? null)
       const hex = profile ? profile.color : guestColors[2]
-      if (hex) setThemeColor({ color: { primary: p1Color, secondary: hex, tertiary: getThirdColor(p1Color, hex) } })
+      if (hex) {
+        const secondary = avoidSeatColorClash(p1Color, hex, SEAT_DEFAULT_COLORS)
+        setThemeColor({ color: { primary: p1Color, secondary, tertiary: getThirdColor(p1Color, secondary) } })
+      }
     },
-    [dispatch, selectProfile, guestColors, p1Color, setThemeColor]
+    [dispatch, lastSelected, selectProfile, guestColors, p1Color, setThemeColor]
   )
 
   // Unlike color above, this one *does* keep syncing back to a currently-selected profile's own

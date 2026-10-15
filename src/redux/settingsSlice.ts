@@ -36,7 +36,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // Off by default, matching every variant's original, pre-rink-work behavior - see its own doc
   // comment on Settings.
   rink: false,
-  deferBottomEdgeGestures: false
+  deferBottomEdgeGestures: false,
+  keepAwake: true
 }
 
 const { actions, reducer } = createSettingsSlice<Settings, 'merge', never>('settings', {

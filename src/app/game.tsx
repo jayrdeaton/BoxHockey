@@ -3,8 +3,8 @@ import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
 import { broadcastDeviceUnlocks } from '@tastic/achievements'
 import { useBackgroundPause, useOrientationState, useRotation, useSettledWindowDimensions } from '@tastic/core'
-import { AchievementUnlockList, type AchievementUnlockOwner, ConfirmDialog, useQuitConfirmation } from '@tastic/hud'
-import { StatusBar } from 'expo-status-bar'
+import { AchievementUnlockList, type AchievementUnlockOwner, ConfirmDialog, OverlayBackdrop, OverlayCard, useOverlayCardColors, useQuitConfirmation } from '@tastic/hud'
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
@@ -173,11 +173,26 @@ export default function GameScreen() {
   // INPUT, so a plain-boolean argument computed from `scores` here would be a real circular render
   // dependency. Only asked once there's a real score to lose - 0-0 exits immediately, since there's
   // nothing yet for a confirmation to protect (mirrors LightCycles' identical quit-confirmation gate).
-  const { confirmVisible, requestBack, cancelBack } = useQuitConfirmation(() => scores[0] > 0 || scores[1] > 0, safeBack)
+  // Once the match is over (gameOver) its stats are already recorded and nothing is lost, so back
+  // exits at once, the same as the Game Over card's own buttons.
+  const { confirmVisible, requestBack, cancelBack } = useQuitConfirmation(() => phase !== 'gameOver' && (scores[0] > 0 || scores[1] > 0), safeBack)
   // Leaving the app mid-match (home, app switch, a phone call, Control Center) latches a pause that
   // only the Paused dialog's Resume clears - see @tastic/core's useBackgroundPause. Skipped once the
   // match is over, or while a dialog already holds the pause by itself.
   const { backgroundPaused, resume } = useBackgroundPause(() => phase !== 'gameOver' && !settingsOpen && !confirmVisible)
+  // Keeps the screen from dimming and locking while a match is up, unless Keep Awake is off in
+  // Settings (read live, so the toggle applies mid-match). Expo only does this by itself in
+  // development builds, and the OS auto-lock only counts screen touches, so tilt or keyboard steering,
+  // or watching the CPU, could let a release build lock mid-match. Failures are dropped: a browser
+  // without the Screen Wake Lock API (or one that refuses it) just keeps its own timeout.
+  const keepAwake = useSelector((state: RootState) => state.settings.keepAwake)
+  useEffect(() => {
+    if (!keepAwake) return undefined
+    activateKeepAwakeAsync('game').catch(() => {})
+    return () => {
+      deactivateKeepAwake('game').catch(() => {})
+    }
+  }, [keepAwake])
   const paused = settingsOpen || confirmVisible || backgroundPaused
 
   const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch, setInterceptTouch } = useGameState(board, scoreToWin, tipoffMode, friction, controlScheme, paused, interceptThreshold)
@@ -210,13 +225,15 @@ export default function GameScreen() {
   useFaceoff(state, board, aiPlayer, aiDifficulty, paused, { faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart })
   useTripleTap(state, board, aiPlayer, aiDifficulty, paused, { tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch })
 
-  // A background pause can land mid-way through a CPU windup or intercept (a dialog can't: the corner
-  // buttons are hidden for that whole window, see cornerButtonsVisible), and useAIOpponent's timer chain
-  // can't pick a half-finished windup back up. Dropping the aim returns the turn to 'idle', so the CPU
-  // plans a fresh shot once play resumes; a human's own drag already ended when the app left.
+  // A pause can land mid-way through a CPU windup or intercept: a background pause anywhere, and on
+  // desktop web a dialog too, since the corner buttons stay up through every phase there (see
+  // cornerButtonsVisible). useAIOpponent's timer chain can't pick a half-finished windup back up.
+  // Dropping the aim returns the turn to 'idle', so the CPU plans a fresh shot once play resumes. A
+  // human can't be mid-drag then: either the app left, or the one mouse just pressed a button. In
+  // every other phase this is a no-op (see AIM_CANCEL).
   useEffect(() => {
-    if (backgroundPaused) aimCancel()
-  }, [backgroundPaused, aimCancel])
+    if (paused) aimCancel()
+  }, [paused, aimCancel])
 
   // Mid-slide intercept derived values - computed early since several things below (the cancel-
   // zone haptic, gestureEnabled, Board's own props) all need them. `interceptAim` is only ever
@@ -274,9 +291,6 @@ export default function GameScreen() {
   // auto-paper's own (slightly tinted) background role.
   const bg = dark ? '#000000' : '#FFFFFF'
   const fg = dark ? '#FFFFFF' : '#000000'
-  const fgMuted = dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'
-  const cardBg = dark ? '#111111' : '#F2F2F2'
-  const cardBorder = dark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)'
   // Back/settings chip background - semi-opaque bg (not solid, and not fg-inverted like the rest
   // of this screen's chips) now that the walls/goal line they used to sit on read much thinner
   // (see WALL_THICKNESS/GOAL_LINE_STROKE_WIDTH in constants/game.ts): a solid opaque fg chip stood
@@ -933,16 +947,15 @@ export default function GameScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: bg }]}>
-      {/* Hidden only here, not on /loadout or the home screen. Originally gated on the rink pocket
-          setting alone (it borrows this real estate - see boardMarginTop's own doc comment), but
-          the board's top/bottom edges sit flush against insets.top/insets.bottom either way (see
+      {/* The OS status bar is hidden on this screen only (_layout.tsx's GAME_OPTIONS), not on
+          /loadout or the home screen. Originally gated on the rink pocket setting alone (it
+          borrows this real estate - see boardMarginTop's own doc comment), but the board's
+          top/bottom edges sit flush against insets.top/insets.bottom either way (see
           board.y/board.y+height), so the OS status bar was always overlapping the first couple
           pixels of the goal line there - harmless while that line was thin and just decorative,
           but it started visibly eating into the rink-off wall line's own edge once that line
-          needed to read as a solid boundary (see Board.tsx's goal-line color swap). Unconditional
-          now. expo-router remounts this component fresh per screen, so leaving is enough to
-          restore the bar elsewhere without an explicit cleanup call. */}
-      <StatusBar hidden />
+          needed to read as a solid boundary (see Board.tsx's goal-line color swap).
+          Unconditional now. */}
       {/* Board + gesture layer, starting right at the safe area unless the rink pocket setting is
           on (marginTop: board.boardMarginTop, which equals insets.top there - see its own doc
           comment on BoardLayout for why rink moves this up into the inset instead) - no score
@@ -1034,7 +1047,7 @@ export default function GameScreen() {
       {/* Back + settings chips moved into MatchOverlays below (see its own comment) - they need the
       same live rotation-in-place treatment as its dialogs, which only that component's isolated
       tilt subscription provides. */}
-      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} cardBg={cardBg} cardBorder={cardBorder} fgMuted={fgMuted} seatUnlocks={seatUnlocks} achievementOwners={achievementOwners} onResetGame={() => resetGame(board)} confirmVisible={confirmVisible} cancelBack={cancelBack} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} onBackPress={requestBack} backgroundPaused={backgroundPaused} onResume={resume} />
+      <MatchOverlays phase={phase} scores={scores} winner={winner} loser={loser} playerColor={playerColor} playerOnColor={playerOnColor} seatUnlocks={seatUnlocks} achievementOwners={achievementOwners} onResetGame={() => resetGame(board)} confirmVisible={confirmVisible} cancelBack={cancelBack} settingsOpen={settingsOpen} onSettingsDismiss={() => setSettingsOpen(false)} onSettingsOpen={() => setSettingsOpen(true)} settings={settings} setSettings={setSettings} board={board} insets={insets} boardAreaMarginTop={boardAreaMarginTop} fg={fg} cornerButtonBg={cornerButtonBg} desktopWeb={isDesktopWeb} onBackPress={requestBack} backgroundPaused={backgroundPaused} onResume={resume} />
     </View>
   )
 }
@@ -1046,9 +1059,6 @@ interface MatchOverlaysProps {
   loser: Player
   playerColor: Record<Player, string>
   playerOnColor: Record<Player, string>
-  cardBg: string
-  cardBorder: string
-  fgMuted: string
   // Pass-and-play's own achievement unlocks for the match that just ended (see GameScreen's own
   // seatUnlocks doc comment) - always {} for vsCpu, which keeps using showAchievementToast instead.
   // Rendered in the Game Over card below rather than a toast, since that card already rotates with
@@ -1078,6 +1088,10 @@ interface MatchOverlaysProps {
   boardAreaMarginTop: number
   fg: string
   cornerButtonBg: string
+  // GameScreen's isDesktopWeb. There the back/settings chips sit in the page's own top corners and
+  // stay up through every phase: both players share one screen and mouse, so there's no far seat
+  // for the centerline to stay neutral for, and no touch zone for a chip to sit inside.
+  desktopWeb: boolean
   onBackPress: () => void
   // GameScreen's useBackgroundPause latch and its resume, for the Paused dialog below.
   backgroundPaused: boolean
@@ -1094,8 +1108,11 @@ interface MatchOverlaysProps {
 // unrotated hit-zones already use. While Lock Orientation is on, this reading is frozen app-wide
 // (see _layout.tsx's OrientationProvider), so the overlays hold the locked angle along with the
 // board's own flip above.
-function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, cardBg, cardBorder, fgMuted, seatUnlocks, achievementOwners, onResetGame, confirmVisible, cancelBack, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, onBackPress, backgroundPaused, onResume }: MatchOverlaysProps) {
+function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColor, seatUnlocks, achievementOwners, onResetGame, confirmVisible, cancelBack, settingsOpen, onSettingsDismiss, onSettingsOpen, settings, setSettings, board, insets, boardAreaMarginTop, fg, cornerButtonBg, desktopWeb, onBackPress, backgroundPaused, onResume }: MatchOverlaysProps) {
   const rotation = useRotation()
+  // The Game Over card and the dialogs' score lines sit on @tastic/hud's OverlayCard, so their text
+  // takes its theme colors rather than this screen's literal black/white.
+  const { fg: cardFg, fgMuted } = useOverlayCardColors()
   const cardRotationStyle = rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }
   // The 180° upsideDown case also swaps which edge each chip sits on - a pure in-place spin isn't
   // enough there: back is coded at the LEFT edge pointing left, and turning only the glyph 180°
@@ -1114,18 +1131,22 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
   // useAIOpponent.ts) could otherwise get interrupted mid-flight by a just-opened dialog. With all
   // three phases covered, a dialog can only ever open while nothing in that chain is pending; a
   // background pause can still land mid-chain, so it cancels the aim instead (see the aimCancel
-  // effect in GameScreen).
+  // effect in GameScreen). Desktop web keeps them up through every phase (see desktopWeb's own doc),
+  // so a player can always back out; the same aimCancel effect covers a dialog opened mid-chain there.
   // 'simulating' is also just the puck actually moving - per explicit feedback, the chips should
   // stay out of the way for that whole stretch, not reappear the instant a shot is struck while the
   // puck is still in motion. Lives here (not GameScreen, where these buttons used to render) so the
   // fade and the `cardRotationStyle` rotation above can share the one live tilt subscription instead
   // of needing a second one back in GameScreen.
-  const cornerButtonsVisible = phase !== 'aiming' && phase !== 'striking' && phase !== 'simulating'
+  const cornerButtonsVisible = desktopWeb || (phase !== 'aiming' && phase !== 'striking' && phase !== 'simulating')
   const cornerButtonsOpacity = useSharedValue(1)
   useEffect(() => {
     cornerButtonsOpacity.value = withTiming(cornerButtonsVisible ? 1 : 0, { duration: 150 })
   }, [cornerButtonsVisible]) // eslint-disable-line react-hooks/exhaustive-deps
   const cornerButtonsStyle = useAnimatedStyle(() => ({ opacity: cornerButtonsOpacity.value }))
+  // Desktop web: the page's top corners, same spot as hud's CornerActionButtons on every other screen.
+  const backSlot = desktopWeb ? { top: 8 + insets.top, left: 8 + insets.left } : { top: boardAreaMarginTop + board.y, height: board.height, ...(swapSides ? { right: insets.right } : { left: insets.left }) }
+  const settingsSlot = desktopWeb ? { top: 8 + insets.top, right: 8 + insets.right } : { top: boardAreaMarginTop + board.y, height: board.height, ...(swapSides ? { left: insets.left } : { right: insets.right }) }
 
   const progressMessage = (
     <>
@@ -1143,8 +1164,8 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
           colored by loser/winner - same shell and button treatment as the quit confirmation below
           and as LightCycles' own round-over dialog, rather than a one-off layout of its own. */}
       {phase === 'gameOver' && (
-        <View style={styles.overlay}>
-          <View style={[styles.overlayCard, { backgroundColor: cardBg, borderColor: cardBorder }, cardRotationStyle]}>
+        <OverlayBackdrop>
+          <OverlayCard style={cardRotationStyle}>
             <Icon source='trophy' size={64} color={playerColor[winner]} />
             <Text variant='headlineLarge' style={[styles.overlayTitle, { color: playerColor[winner], fontFamily: MONO_FONT }]}>
               Wins!
@@ -1159,15 +1180,15 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
                 (seatUnlocks stays {} there, so this never renders for that mode). This card
                 already carries a single shared cardRotationStyle, so each row's owner avatar is
                 what tells the two seats' rows apart. */}
-            {<AchievementUnlockList unlocks={seatUnlocks} seats={SEATS} owners={achievementOwners} tierColors={ACHIEVEMENT_TIER_COLORS} fg={fg} />}
+            {<AchievementUnlockList unlocks={seatUnlocks} seats={SEATS} owners={achievementOwners} tierColors={ACHIEVEMENT_TIER_COLORS} fg={cardFg} />}
             <Button mode='contained' onPress={onResetGame} style={styles.overlayButton} buttonColor={playerColor[loser]} textColor={playerOnColor[loser]}>
               Play Again
             </Button>
             <Button mode='contained' onPress={safeBack} style={styles.overlayButton} buttonColor={playerColor[winner]} textColor={playerOnColor[winner]}>
               Quit
             </Button>
-          </View>
-        </View>
+          </OverlayCard>
+        </OverlayBackdrop>
       )}
 
       {/* Quit confirmation - now the fleet-shared @tastic/hud ConfirmDialog instead of a hand-rolled
@@ -1211,12 +1232,12 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
           stays fixed to the true screen edge, only the glyph inside turns to stay legible however
           the phone is actually being held (previously missing here, unlike Snake's/LightCycles' own
           chip buttons). */}
-      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.backButton, { top: boardAreaMarginTop + board.y, height: board.height, ...(swapSides ? { right: insets.right } : { left: insets.left }) }, cornerButtonsStyle]}>
+      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.backButton, backSlot, cornerButtonsStyle]}>
         <IconButton icon='arrow-left' iconColor={fg} containerColor={cornerButtonBg} style={[styles.chipButton, cardRotationStyle]} size={24} onPress={onBackPress} />
       </Animated.View>
 
       {/* Settings - mirrored on the opposite side edge, same centerline and chip treatment as the back button. swapSides also mirrors which edge each sits on for the 180° upsideDown case - see its own comment above. */}
-      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.settingsButton, { top: boardAreaMarginTop + board.y, height: board.height, ...(swapSides ? { left: insets.left } : { right: insets.right }) }, cornerButtonsStyle]}>
+      <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.settingsButton, settingsSlot, cornerButtonsStyle]}>
         <IconButton icon='cog' iconColor={fg} containerColor={cornerButtonBg} style={[styles.chipButton, cardRotationStyle]} size={24} onPress={onSettingsOpen} accessibilityLabel='Settings' />
       </Animated.View>
 
@@ -1247,24 +1268,7 @@ const styles = StyleSheet.create({
   // lineHeight matching height is what actually centers the glyph vertically - RN Text doesn't
   // auto-center a single line within a taller box on its own, textAlign only handles horizontal.
   keyHint: { fontSize: 15, fontWeight: 'bold', height: 24, lineHeight: 24, position: 'absolute', textAlign: 'center', width: 24 },
-  overlay: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.72)',
-    bottom: 0,
-    justifyContent: 'center',
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0
-  },
   overlayButton: { width: 160 },
-  overlayCard: {
-    alignItems: 'center',
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 16,
-    padding: 32
-  },
   overlayScore: {},
   overlayTitle: { fontWeight: 'bold' },
   root: { flex: 1 },

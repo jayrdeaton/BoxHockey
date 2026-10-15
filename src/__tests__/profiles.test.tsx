@@ -101,14 +101,17 @@ describe('ProfilesProvider seat selection', () => {
     expect(store.getState().profileSelection).toBe(before)
   })
 
-  // A failed native read reports an empty roster, so pruning this app's own per-profile data on a
-  // remote change could erase real players' settings for good. Only the seat selection is pruned.
-  it("keeps a removed profile's local control scheme", async () => {
+  // A failed native read used to report an empty roster, which emptied the roster, cleared both
+  // seats, and let the next profile create overwrite every app's shared profiles. Since
+  // @tastic/profile 0.12 it reports a failure and the foreground refresh skips it, so nothing
+  // changes, this app's own per-profile data included.
+  it('changes nothing when the shared read fails', async () => {
     writeShared([ada, bo])
     const store = await mountProfiles([ada, bo], { 1: ada.id, 2: bo.id })
     mockSharedStore.failRead = true
     await returnToForeground()
-    expect(store.getState().profileSelection).toEqual({ 1: null, 2: null })
+    expect(store.getState().profiles).toEqual([ada, bo])
+    expect(store.getState().profileSelection).toEqual({ 1: ada.id, 2: bo.id })
     expect(store.getState().profileExtensions).toEqual({ [bo.id]: { controlScheme: 'push' } })
   })
 })

@@ -162,6 +162,10 @@ export interface Settings {
   // Providers.tsx's EdgeGuardBridge) for @tastic/edge-guard's own config plugin swizzle of
   // preferredScreenEdgesDeferringSystemGestures to read at runtime.
   deferBottomEdgeGestures: boolean
+  // Keep Awake (Settings dialog): keeps the screen from dimming and locking while /game is up (see
+  // game.tsx). On by default, unlike Edge Guard: a screen that locks mid-match hits every player,
+  // not just the few who'd go looking for a fix.
+  keepAwake: boolean
 }
 
 export interface Obstacle {

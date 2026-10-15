@@ -1,7 +1,7 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { useHapticSettings } from '@rific/feedback-press'
 import { Toaster, ToastProvider } from '@rific/toaster'
-import { OrientationProvider, RotationAwareStatusBar, useThemedRootBackground } from '@tastic/core'
+import { OrientationProvider, useRotationAwareStatusBar, useThemedRootBackground } from '@tastic/core'
 import * as Haptics from 'expo-haptics'
 import { Stack } from 'expo-router'
 import { DeviceMotion } from 'expo-sensors'
@@ -30,9 +30,27 @@ import { SplashGate } from '@/utils/splashGate'
 // false disables iOS's swipe-back gesture: otherwise it competes with the game's own pan gestures on
 // /game and wins (confirmed on-device in LightCycles, where it kicked the player back to the title
 // screen mid-round instead of turning their cycle). Web has no such OS-level gesture.
+//
+// useRotationAwareStatusBar (@tastic/core) hides the OS status bar whenever the content is rotated
+// off portrait. It does it through screen options because that is the only way left: an app linked
+// against the iOS 27 SDK can't set the status bar app-wide, which is all React Native's StatusBar
+// (and expo-status-bar) does on iOS, and with @tastic/core's config plugin on, every mounted
+// StatusBar logs an error. So nothing in the app mounts one (Theme passes auto-paper's Provider
+// statusBar={false}). No `locked` argument: OrientationBridge already freezes the reading it
+// follows. /game hides the bar for the whole round, whatever the angle (a screen's own options win
+// over screenOptions); index is listed first so it stays the stack's first route.
+const GAME_OPTIONS = { statusBarHidden: true }
+
 function AppStack() {
   const { dark } = useAutoPaperTheme()
-  return <Stack screenOptions={useThemedRootBackground(dark, false)} />
+  const rootBackground = useThemedRootBackground(dark, false)
+  const statusBar = useRotationAwareStatusBar()
+  return (
+    <Stack screenOptions={{ ...rootBackground, ...statusBar }}>
+      <Stack.Screen name='index' />
+      <Stack.Screen name='game' options={GAME_OPTIONS} />
+    </Stack>
+  )
 }
 
 // Wires the persisted Lock Orientation setting into @tastic/core's OrientationProvider. Its own
@@ -110,9 +128,6 @@ export default function RootLayout() {
                         <GuideHost>
                           <AppStack />
                         </GuideHost>
-                        {/* Hides the OS status bar whenever the content is rotated off portrait. No
-                        `locked` prop: OrientationBridge already freezes the reading it follows. */}
-                        <RotationAwareStatusBar />
                         {/* historyButton/clearButton off: no game has a toast history to open, and a
                         control row for it above the toast stack would go nowhere. limit pins the
                         package's current default (3) so a future toaster release can't change it. */}

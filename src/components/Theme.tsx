@@ -1,4 +1,5 @@
 import { Provider as AutoPaperProvider, themeActions, ThemeSettings, useThemeBridgeProps } from '@rific/auto-paper'
+import * as ExpoBlur from 'expo-blur'
 import * as SplashScreen from 'expo-splash-screen'
 import { ReactNode, useCallback } from 'react'
 import { shallowEqual, useDispatch, useSelector } from 'react-redux'
@@ -49,5 +50,15 @@ export function Theme({ children }: Props) {
 
   const bridgeProps = useThemeBridgeProps({ initialValue: settings, onChange, onReady })
 
-  return <AutoPaperProvider {...bridgeProps}>{children}</AutoPaperProvider>
+  // expoBlur is what lets auto-paper's BlurView actually blur (the settings sheet, Paper menus and
+  // @tastic/hud's overlay cards) while the player's Blur setting is on. Without it they paint the
+  // theme's solid surface instead, and hud's Settings hides the Blur row.
+  // statusBar={false}: auto-paper renders no React Native StatusBar (here or in Appbar.Header). The
+  // status bar is set per screen (_layout.tsx's useRotationAwareStatusBar), and with @tastic/core's
+  // config plugin on, a mounted StatusBar logs an error (a red box in a dev build).
+  return (
+    <AutoPaperProvider {...bridgeProps} expoBlur={ExpoBlur} statusBar={false}>
+      {children}
+    </AutoPaperProvider>
+  )
 }

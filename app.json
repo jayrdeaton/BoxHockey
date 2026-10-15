@@ -71,10 +71,10 @@
           }
         }
       ],
-      "expo-status-bar",
       "expo-asset",
       "@tastic/edge-guard",
-      "@tastic/core"
+      "@tastic/core",
+      "./plugins/withSceneDelegate"
     ],
     "extra": {
       "router": {},
