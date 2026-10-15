@@ -503,10 +503,11 @@ export default function GameScreen() {
         // (seat 2 sits rotated 180° from seat 1 - see isUpsideDown above) would see it upside-down
         // even though it's their own achievement. Broadcasting into seatUnlocks instead lets the
         // Game Over card below (which already carries its own cardRotationStyle) show each seat's
-        // own unlocks once the match settles. Each seat also gets the device-wide unlocks that are
-        // really its own (all of them for a guest, only scope: 'device' ones for a profile; see
-        // @tastic/achievements' broadcastDeviceUnlocks).
-        const broadcast = broadcastDeviceUnlocks([1, 2] as Player[], result.profiles, result.device, profileIds)
+        // own unlocks once the match settles. The winner's seat also gets the device-wide unlocks
+        // that are really its own (all of them for a guest, only scope: 'device' ones for a
+        // profile; see @tastic/achievements' broadcastDeviceUnlocks). The loser's card shows only
+        // its own (audit F037).
+        const broadcast = broadcastDeviceUnlocks([1, 2] as Player[], result.profiles, result.device, profileIds, { winners: [matchWinner] })
         // eslint-disable-next-line react-hooks/set-state-in-effect -- a real one-shot transition guarded by prevPhaseRef above, not a render loop; the sibling vsCpu branch below fires showAchievementToast (which does the same thing inside @rific/toaster) unconditionally in this same effect
         setSeatUnlocks(broadcast)
       } else {
