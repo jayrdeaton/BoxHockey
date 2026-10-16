@@ -61,7 +61,7 @@ async function mountProfiles(local: BaseProfile[], selection: Record<Player, str
     reducer: combineReducers({ profiles: profilesReducer, profileExtensions, profileSelection }),
     preloadedState: { profiles: local, profileExtensions: { [bo.id]: { controlScheme: 'push' } }, profileSelection: selection }
   })
-  render(
+  await render(
     <Provider store={store}>
       <ProfilesProvider>{null}</ProfilesProvider>
     </Provider>

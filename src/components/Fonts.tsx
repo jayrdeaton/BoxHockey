@@ -24,7 +24,7 @@ export function Fonts({ children }: Props) {
   const [loaded, error] = useFonts({ ...MaterialCommunityIcons.font })
   return (
     <>
-      {/* The web tab title, outside the gate so the static export's HTML has it too (fonts never load there) */}
+      {/* The web tab title, outside the fonts gate. Since SDK 58 Head only sets it after hydration; the static export's HTML no longer carries it (see TODO.md) */}
       <Head>
         <title>{Constants.expoConfig?.name}</title>
       </Head>

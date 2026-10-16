@@ -136,10 +136,11 @@ describe('getGuideSteps', () => {
     expect(stepsFor(false, { tipoff: 'tripleTap' })).toHaveLength(2)
   })
 
-  it("renders every card's art without crashing, whatever the live settings", () => {
+  it("renders every card's art without crashing, whatever the live settings", async () => {
     for (const { steps } of everyGuide()) {
       for (const step of steps) {
-        expect(() => render(<View>{step.art}</View>).unmount()).not.toThrow()
+        const view = await render(<View>{step.art}</View>)
+        expect(() => view.unmount()).not.toThrow()
       }
     }
   })

@@ -64,17 +64,21 @@ function useMatch({ tipoffMode, aiPlayer, cancelAimOnPause, dialogOpen = false }
   return { ...controls, backgroundPaused, resume }
 }
 
-function advance(ms: number) {
-  act(() => {
+async function advance(ms: number) {
+  await act(async () => {
     jest.advanceTimersByTime(ms)
   })
 }
 
 // Steps the clock in small slices until `done` holds, so a test can stop at the exact moment a
 // randomized CPU delay lands instead of overshooting into the next step.
-function advanceUntil(done: () => boolean, maxMs = 5000) {
-  for (let elapsed = 0; elapsed < maxMs && !done(); elapsed += 10) advance(10)
+async function advanceUntil(done: () => boolean, maxMs = 5000) {
+  for (let elapsed = 0; elapsed < maxMs && !done(); elapsed += 10) await advance(10)
 }
+
+// Each 10ms clock step is its own awaited act (testing-library 14 renders asynchronously), and a CPU
+// windup can take a few hundred of them, so allow more than Jest's 5s default under a full parallel run.
+jest.setTimeout(30000)
 
 beforeEach(() => {
   jest.mocked(AppState.addEventListener).mockClear()
@@ -86,28 +90,28 @@ afterEach(() => {
 })
 
 describe('pausing when the app leaves the foreground mid-match', () => {
-  it('freezes a face-off countdown, keeps it frozen after the app comes back, and restarts the draw only on Resume', () => {
-    const { result } = renderHook(useMatch, { initialProps: { tipoffMode: 'faceoff', aiPlayer: null, cancelAimOnPause: true } })
-    act(() => {
+  it('freezes a face-off countdown, keeps it frozen after the app comes back, and restarts the draw only on Resume', async () => {
+    const { result } = await renderHook(useMatch, { initialProps: { tipoffMode: 'faceoff', aiPlayer: null, cancelAimOnPause: true } })
+    await act(async () => {
       result.current.faceoffReady(1)
       result.current.faceoffReady(2)
     })
-    advance(FACEOFF_COUNTDOWN_STEP_MS)
+    await advance(FACEOFF_COUNTDOWN_STEP_MS)
     expect(result.current.state.faceoff).toMatchObject({ stage: 'countdown', count: 2 })
     const round = result.current.state.faceoffRound
 
-    act(() => emitAppState('background'))
+    await act(async () => emitAppState('background'))
     expect(result.current.backgroundPaused).toBe(true)
-    advance(FACEOFF_COUNTDOWN_STEP_MS * 10)
+    await advance(FACEOFF_COUNTDOWN_STEP_MS * 10)
     // Coming back doesn't lift the pause or touch the draw: the Paused dialog waits for Resume.
-    act(() => emitAppState('active'))
-    advance(FACEOFF_COUNTDOWN_STEP_MS * 10)
+    await act(async () => emitAppState('active'))
+    await advance(FACEOFF_COUNTDOWN_STEP_MS * 10)
     expect(result.current.backgroundPaused).toBe(true)
     expect(result.current.state.faceoff).toMatchObject({ stage: 'countdown', count: 2 })
     expect(result.current.state.faceoffRound).toBe(round)
 
     // Resume restarts the draw from the ready check, never mid-count.
-    act(() => result.current.resume())
+    await act(async () => result.current.resume())
     expect(result.current.backgroundPaused).toBe(false)
     expect(result.current.state.faceoff).toMatchObject({ stage: 'ready', count: null })
     expect(result.current.state.faceoffRound).toBe(round + 1)
@@ -115,52 +119,52 @@ describe('pausing when the app leaves the foreground mid-match', () => {
 
   // Starts a vs-CPU coin-flip match with the CPU on whichever seat won the flip, and stops the clock
   // the moment the CPU commits to its windup (its release is still pending).
-  function startCpuWindup(cancelAimOnPause: boolean) {
-    const { result, rerender } = renderHook(useMatch, { initialProps: { tipoffMode: 'coinFlip', aiPlayer: null, cancelAimOnPause } })
+  async function startCpuWindup(cancelAimOnPause: boolean) {
+    const { result, rerender } = await renderHook(useMatch, { initialProps: { tipoffMode: 'coinFlip', aiPlayer: null, cancelAimOnPause } })
     const aiPlayer = result.current.state.currentPlayer
-    rerender({ tipoffMode: 'coinFlip', aiPlayer, cancelAimOnPause })
-    act(() => result.current.coinFlipDone())
-    advanceUntil(() => result.current.state.phase === 'aiming')
+    await rerender({ tipoffMode: 'coinFlip', aiPlayer, cancelAimOnPause })
+    await act(async () => result.current.coinFlipDone())
+    await advanceUntil(() => result.current.state.phase === 'aiming')
     expect(result.current.state.phase).toBe('aiming')
-    return { result, setDialogOpen: (dialogOpen: boolean) => rerender({ tipoffMode: 'coinFlip', aiPlayer, cancelAimOnPause, dialogOpen }) }
+    return { result, setDialogOpen: async (dialogOpen: boolean) => rerender({ tipoffMode: 'coinFlip', aiPlayer, cancelAimOnPause, dialogOpen }) }
   }
 
-  it('strands a CPU windup the pause interrupted in aiming if the aim is left alone', () => {
-    const { result } = startCpuWindup(false)
-    act(() => emitAppState('inactive'))
-    act(() => emitAppState('active'))
-    act(() => result.current.resume())
-    advance(5000)
+  it('strands a CPU windup the pause interrupted in aiming if the aim is left alone', async () => {
+    const { result } = await startCpuWindup(false)
+    await act(async () => emitAppState('inactive'))
+    await act(async () => emitAppState('active'))
+    await act(async () => result.current.resume())
+    await advance(5000)
     expect(result.current.state.phase).toBe('aiming')
   })
 
-  it('drops a CPU windup the pause interrupted, so the CPU plans and takes a fresh shot after Resume', () => {
-    const { result } = startCpuWindup(true)
-    act(() => emitAppState('inactive'))
+  it('drops a CPU windup the pause interrupted, so the CPU plans and takes a fresh shot after Resume', async () => {
+    const { result } = await startCpuWindup(true)
+    await act(async () => emitAppState('inactive'))
     expect(result.current.state.phase).toBe('idle')
     expect(result.current.state.aim).toBeNull()
-    act(() => emitAppState('active'))
-    advance(5000)
+    await act(async () => emitAppState('active'))
+    await advance(5000)
     // Nothing moves until Resume.
     expect(result.current.state.phase).toBe('idle')
 
-    act(() => result.current.resume())
-    advanceUntil(() => result.current.state.phase !== 'idle' && result.current.state.phase !== 'aiming')
+    await act(async () => result.current.resume())
+    await advanceUntil(() => result.current.state.phase !== 'idle' && result.current.state.phase !== 'aiming')
     // A flick shot goes straight to 'simulating', a pull/push one through the 'striking' swing.
     expect(['striking', 'simulating']).toContain(result.current.state.phase)
   })
 
-  it('drops a CPU windup a dialog opened over (desktop web), so the CPU takes a fresh shot once it closes', () => {
-    const { result, setDialogOpen } = startCpuWindup(true)
-    setDialogOpen(true)
+  it('drops a CPU windup a dialog opened over (desktop web), so the CPU takes a fresh shot once it closes', async () => {
+    const { result, setDialogOpen } = await startCpuWindup(true)
+    await setDialogOpen(true)
     expect(result.current.state.phase).toBe('idle')
     expect(result.current.state.aim).toBeNull()
-    advance(5000)
+    await advance(5000)
     // Nothing moves while the dialog is up.
     expect(result.current.state.phase).toBe('idle')
 
-    setDialogOpen(false)
-    advanceUntil(() => result.current.state.phase !== 'idle' && result.current.state.phase !== 'aiming')
+    await setDialogOpen(false)
+    await advanceUntil(() => result.current.state.phase !== 'idle' && result.current.state.phase !== 'aiming')
     expect(['striking', 'simulating']).toContain(result.current.state.phase)
   })
 })

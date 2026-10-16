@@ -73,8 +73,7 @@
       ],
       "expo-asset",
       "@tastic/edge-guard",
-      "@tastic/core",
-      "./plugins/withSceneDelegate"
+      "@tastic/core"
     ],
     "extra": {
       "router": {},

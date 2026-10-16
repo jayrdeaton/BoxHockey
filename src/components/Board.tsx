@@ -205,7 +205,7 @@ function paddlePath(cx: number, cy: number, angle: number, face: number, thickne
   const straightHalf = Math.max(0, face / 2 - capR)
   const cos = Math.cos(angle)
   const sin = Math.sin(angle)
-  const path = Skia.Path.Make()
+  const path = Skia.PathBuilder.Make()
   let started = false
   const point = (lx: number, ly: number) => {
     const px = cx + lx * cos - ly * sin
@@ -232,7 +232,7 @@ function paddlePath(cx: number, cy: number, angle: number, face: number, thickne
     point(-capR * Math.cos(t), -straightHalf - capR * Math.sin(t))
   }
   path.close()
-  return path
+  return path.detach()
 }
 
 // The faceoff zone circles only ever come in this one pair per player - flipping between them is
@@ -695,12 +695,12 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
       const py = p.ux
       const backX = p.x - p.ux * chevronDepth
       const backY = p.y - p.uy * chevronDepth
-      const path = Skia.Path.Make()
+      const path = Skia.PathBuilder.Make()
       path.moveTo(p.x, p.y)
       path.lineTo(backX + px * chevronWidth, backY + py * chevronWidth)
       path.lineTo(backX - px * chevronWidth, backY - py * chevronWidth)
       path.close()
-      placements.push(path)
+      placements.push(path.detach())
     }
     return placements
   }, [showTrajectoryTrail, puck.x, puck.y, puckRadius, liveVx, liveVy, board, previewLengthPx, chevPower, friction, shotInputMax])
@@ -1189,12 +1189,12 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
     const backY = tipY - uy * frontArrowDepth
     const px = -uy
     const py = ux
-    const path = Skia.Path.Make()
+    const path = Skia.PathBuilder.Make()
     path.moveTo(tipX, tipY)
     path.lineTo(backX + px * frontArrowWidth, backY + py * frontArrowWidth)
     path.lineTo(backX - px * frontArrowWidth, backY - py * frontArrowWidth)
     path.close()
-    return path
+    return path.detach()
   }, [showFrontArrow, puck.x, puck.y, puckRadius, x, y, width, height, liveDirX, liveDirY, stickOffset, frontArrowWidth, frontArrowDepth])
 
   return (
