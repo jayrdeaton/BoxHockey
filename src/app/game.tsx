@@ -1234,7 +1234,7 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
           the phone is actually being held (previously missing here, unlike Snake's/LightCycles' own
           chip buttons). */}
       <Animated.View pointerEvents={cornerButtonsVisible ? 'auto' : 'none'} style={[styles.backButton, backSlot, cornerButtonsStyle]}>
-        <IconButton icon='arrow-left' iconColor={fg} containerColor={cornerButtonBg} style={[styles.chipButton, cardRotationStyle]} size={24} onPress={onBackPress} />
+        <IconButton icon='arrow-left' iconColor={fg} containerColor={cornerButtonBg} style={[styles.chipButton, cardRotationStyle]} size={24} onPress={onBackPress} accessibilityLabel='Back' />
       </Animated.View>
 
       {/* Settings - mirrored on the opposite side edge, same centerline and chip treatment as the back button. swapSides also mirrors which edge each sits on for the 180° upsideDown case - see its own comment above. */}
