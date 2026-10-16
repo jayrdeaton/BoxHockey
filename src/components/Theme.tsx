@@ -1,3 +1,4 @@
+import MaskedView from '@react-native-masked-view/masked-view'
 import { Provider as AutoPaperProvider, themeActions, ThemeSettings, useThemeBridgeProps } from '@rific/auto-paper'
 import * as ExpoBlur from 'expo-blur'
 import * as SplashScreen from 'expo-splash-screen'
@@ -53,11 +54,14 @@ export function Theme({ children }: Props) {
   // expoBlur is what lets auto-paper's BlurView actually blur (the settings sheet, Paper menus and
   // @tastic/hud's overlay cards) while the player's Blur setting is on. Without it they paint the
   // theme's solid surface instead, and hud's Settings hides the Blur row.
+  // maskedView is what lets auto-paper's FadingScrollView fade scrolling rows out at their edges on
+  // iOS/Android (the Settings sheet's and Rules' rows above Done, @tastic/profile's dropdown lists
+  // above Manage); without it they just scroll with a hard edge. Web needs nothing.
   // statusBar={false}: auto-paper renders no React Native StatusBar (here or in Appbar.Header). The
   // status bar is set per screen (_layout.tsx's useRotationAwareStatusBar), and with @tastic/core's
   // config plugin on, a mounted StatusBar logs an error (a red box in a dev build).
   return (
-    <AutoPaperProvider {...bridgeProps} expoBlur={ExpoBlur} statusBar={false}>
+    <AutoPaperProvider {...bridgeProps} expoBlur={ExpoBlur} maskedView={MaskedView} statusBar={false}>
       {children}
     </AutoPaperProvider>
   )

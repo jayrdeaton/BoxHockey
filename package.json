@@ -30,6 +30,7 @@
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-masked-view/masked-view": "0.3.2",
     "@reduxjs/toolkit": "^2.12.0",
     "@rific/auto-paper": "^0.13.3",
     "@rific/core": "^0.3.1",
@@ -45,7 +46,7 @@
     "@tastic/hud": "^0.19.0",
     "@tastic/input": "^0.4.1",
     "@tastic/physics": "^0.3.1",
-    "@tastic/profile": "^0.13.0",
+    "@tastic/profile": "^0.14.1",
     "@tastic/split-screen": "^0.5.2",
     "@tastic/sprites": "^0.2.1",
     "expo": "~58.0.11",

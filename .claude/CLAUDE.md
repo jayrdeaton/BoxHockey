@@ -228,3 +228,9 @@ Why: an app linked against the iOS 27 SDK (Xcode 27) can't set the status bar th
 ## Expo SDK 58 (2026-10-16)
 
 Moved from SDK 57 the day SDK 58 went stable. SDK 58's native template adopts the UIScene life cycle that apps linked against the iOS 27 SDK need, so the SDK 57 workarounds are gone: `plugins/withSceneDelegate.js` (and its `app.json` entry) and the `macos-tahoe-26.5-xcode-26.6` image pins in `eas.json`. Builds use EAS's default image for SDK 58 and, locally, this Mac's Xcode 27. Tests need `@react-native/jest-preset` installed (jest-expo 58's peer; the fleet's `legacy-peer-deps` means npm never adds it). React Native 0.88's strict TypeScript types are deferred fleet-wide through `@infinitetoken/tsconfig` 0.6; the web tab title from `expo-router/head` is set after hydration only; see TODO.md.
+
+## @tastic/profile 0.14 and the scroll fade (2026-10-16)
+
+Carried over from Solitaire's player-button work.
+- **@tastic/profile 0.14.1:** the Profiles screen's color popover is no longer drawn under the rows after the one being edited (the edit row has a zIndex now; iOS stacked it the same way as web); 3-letter tags fit their chip (they were cut off on web); the profile dropdown's Manage label is plain white/black (its icon keeps the seat color) and Manage is pinned below the rows, which scroll with auto-paper's edge fade when the list doesn't fit (a seat's half of the loadout). Nothing here uses the new `colorSection` (Solitaire's one-button picker). Its `@rific/auto-paper` peer is now >= 0.13.
+- **`maskedView`:** `Theme.tsx` hands `@react-native-masked-view/masked-view` (now a direct dependency, 0.3.2 via `expo install`) to auto-paper's Provider, which is what lets `FadingScrollView` fade on iOS/Android: hud's Settings and Rules rows above Done, and the dropdowns above. Without it they scrolled with a hard edge; web fades either way. expo-router already depends on the same version, so it should already be in the native build.
