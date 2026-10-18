@@ -1,0 +1,15 @@
+{
+  "git": {
+    "deploymentEnabled": false
+  },
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "web-build",
+  "framework": null,
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/:game/:path*",
+      "destination": "/:game/index"
+    }
+  ]
+}
