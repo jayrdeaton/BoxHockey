@@ -1,5 +1,5 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
-import { useKeepAwake } from '@rific/core'
+import { callWorkletCallback, useKeepAwake, useWorkletCallback } from '@rific/core'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
 import { broadcastDeviceUnlocks } from '@tastic/achievements'
@@ -774,6 +774,18 @@ export default function GameScreen() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [stableFaceoffZoneTap, stableFaceoffReady, faceoff?.stage, phase])
 
+  // Gesture worklets must not call these callbacks through runOnJS directly: worklets holds a strong
+  // native reference to every runOnJS target for as long as the gesture (cached on this component)
+  // lives, which pinned this whole screen in memory. They go through callWorkletCallback by key
+  // instead, and the key's registered callback is refreshed to the latest on every render.
+  const aimStartKey = useWorkletCallback(stableAimStart)
+  const aimUpdateKey = useWorkletCallback(stableAimUpdate)
+  const shootKey = useWorkletCallback(stableShoot)
+  const aimCancelKey = useWorkletCallback(stableAimCancel)
+  const faceoffTouchKey = useWorkletCallback(stableFaceoffTouch)
+  const tripleTapReleaseKey = useWorkletCallback(stableTripleTapRelease)
+  const coinFlipTapKey = useWorkletCallback(stableCoinFlipTap)
+
   // Restricted to a single pointer so that a second finger touching down mid-drag makes this
   // gesture fail (RNGH's maxPointers behavior) rather than register as a second, conflicting
   // drag. Touches arrive in the board's own untransformed container, whose coordinate space
@@ -784,24 +796,20 @@ export default function GameScreen() {
     () =>
       Gesture.Pan()
         .maxPointers(1)
-        // eslint-disable-next-line react-hooks/refs -- stableAimStart reads a ref; this is a gesture event handler, never invoked during render
         .onStart((e) => {
-          runOnJS(stableAimStart)(e.x, e.y)
+          runOnJS(callWorkletCallback)(aimStartKey, e.x, e.y)
         })
-        // eslint-disable-next-line react-hooks/refs -- stableAimUpdate reads/writes flickGestureRef; this is a gesture event handler, never invoked during render
         .onChange((e) => {
-          runOnJS(stableAimUpdate)(e.x, e.y, e.velocityX, e.velocityY)
+          runOnJS(callWorkletCallback)(aimUpdateKey, e.x, e.y, e.velocityX, e.velocityY)
         })
-        // eslint-disable-next-line react-hooks/refs -- stableShoot writes flickGestureRef; this is a gesture event handler, never invoked during render
         .onEnd((e) => {
-          runOnJS(stableShoot)(e.translationX, e.translationY, e.velocityX, e.velocityY)
+          runOnJS(callWorkletCallback)(shootKey, e.translationX, e.translationY, e.velocityX, e.velocityY)
         })
-        // eslint-disable-next-line react-hooks/refs -- stableAimCancel writes flickGestureRef; this is a gesture event handler, never invoked during render
         .onFinalize(() => {
-          runOnJS(stableAimCancel)()
+          runOnJS(callWorkletCallback)(aimCancelKey)
         })
         .minDistance(0),
-    [stableAimStart, stableAimUpdate, stableShoot, stableAimCancel]
+    [aimStartKey, aimUpdateKey, shootKey, aimCancelKey]
   )
 
   // ─── Tip-off tap zones ─────────────────────────────────────────────────────
@@ -846,18 +854,16 @@ export default function GameScreen() {
   const p1TapGesture = useMemo(
     () =>
       Gesture.Tap()
-        // eslint-disable-next-line react-hooks/refs -- stableFaceoffTouch reads a ref; see panGesture's .onStart comment above
-        .onBegin((e) => runOnJS(stableFaceoffTouch)(1, e.absoluteX, e.absoluteY - boardAreaMarginTop))
+        .onBegin((e) => runOnJS(callWorkletCallback)(faceoffTouchKey, 1, e.absoluteX, e.absoluteY - boardAreaMarginTop))
         .enabled(phase === 'faceoff'),
-    [stableFaceoffTouch, phase, boardAreaMarginTop]
+    [faceoffTouchKey, phase, boardAreaMarginTop]
   )
   const p2TapGesture = useMemo(
     () =>
       Gesture.Tap()
-        // eslint-disable-next-line react-hooks/refs -- see p1TapGesture's own comment above
-        .onBegin((e) => runOnJS(stableFaceoffTouch)(2, e.absoluteX, e.absoluteY - boardAreaMarginTop))
+        .onBegin((e) => runOnJS(callWorkletCallback)(faceoffTouchKey, 2, e.absoluteX, e.absoluteY - boardAreaMarginTop))
         .enabled(phase === 'faceoff'),
-    [stableFaceoffTouch, phase, boardAreaMarginTop]
+    [faceoffTouchKey, phase, boardAreaMarginTop]
   )
 
   // ─── Triple-tap zones ────────────────────────────────────────────────────
@@ -888,30 +894,26 @@ export default function GameScreen() {
   const p2TripleTapLive = tripleTap !== null && (phase === 'tripleTap' || (tripleTap.clashUntil !== null && tripleTap.swipe[1] === null))
   const p1TripleTapGesture = useMemo(() => {
     const tap = Gesture.Tap()
-      // eslint-disable-next-line react-hooks/refs -- stableTripleTapRelease reads a ref; see panGesture's .onStart comment above
-      .onEnd(() => runOnJS(stableTripleTapRelease)(1, 0, 0, 0, 0))
+      .onEnd(() => runOnJS(callWorkletCallback)(tripleTapReleaseKey, 1, 0, 0, 0, 0))
       .enabled(p1TripleTapLive)
     const pan = Gesture.Pan()
       .maxPointers(1)
       .minDistance(0)
-      // eslint-disable-next-line react-hooks/refs -- see tap's own comment above
-      .onEnd((e) => runOnJS(stableTripleTapRelease)(1, e.translationX, e.translationY, e.velocityX, e.velocityY))
+      .onEnd((e) => runOnJS(callWorkletCallback)(tripleTapReleaseKey, 1, e.translationX, e.translationY, e.velocityX, e.velocityY))
       .enabled(p1TripleTapLive)
     return Gesture.Race(tap, pan)
-  }, [stableTripleTapRelease, p1TripleTapLive])
+  }, [tripleTapReleaseKey, p1TripleTapLive])
   const p2TripleTapGesture = useMemo(() => {
     const tap = Gesture.Tap()
-      // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
-      .onEnd(() => runOnJS(stableTripleTapRelease)(2, 0, 0, 0, 0))
+      .onEnd(() => runOnJS(callWorkletCallback)(tripleTapReleaseKey, 2, 0, 0, 0, 0))
       .enabled(p2TripleTapLive)
     const pan = Gesture.Pan()
       .maxPointers(1)
       .minDistance(0)
-      // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
-      .onEnd((e) => runOnJS(stableTripleTapRelease)(2, e.translationX, e.translationY, e.velocityX, e.velocityY))
+      .onEnd((e) => runOnJS(callWorkletCallback)(tripleTapReleaseKey, 2, e.translationX, e.translationY, e.velocityX, e.velocityY))
       .enabled(p2TripleTapLive)
     return Gesture.Race(tap, pan)
-  }, [stableTripleTapRelease, p2TripleTapLive])
+  }, [tripleTapReleaseKey, p2TripleTapLive])
 
   // Coin flip's own "go" tap - spans the whole board (no zones, no player-attribution, unlike the
   // faceoff pair above), and disables itself the instant it's used so this same tap can't
@@ -919,10 +921,9 @@ export default function GameScreen() {
   const coinFlipTapGesture = useMemo(
     () =>
       Gesture.Tap()
-        // eslint-disable-next-line react-hooks/refs -- stableCoinFlipTap reads a ref; see panGesture's .onStart comment above
-        .onBegin(() => runOnJS(stableCoinFlipTap)())
+        .onBegin(() => runOnJS(callWorkletCallback)(coinFlipTapKey))
         .enabled(phase === 'coinFlip' && !coinFlipStarted),
-    [stableCoinFlipTap, phase, coinFlipStarted]
+    [coinFlipTapKey, phase, coinFlipStarted]
   )
 
   // ─── Derived display values ───────────────────────────────────────────────
