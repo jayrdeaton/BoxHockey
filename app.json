@@ -4,7 +4,7 @@
     "slug": "BoxHockey",
     "version": "1.1.0",
     "scheme": "boxhockey",
-    "description": "A digital BoxHockey game",
+    "description": "Physics-driven tabletop box hockey. Flick the puck through the gaps and into the other player's goal, against the CPU or a friend across the table.",
     "orientation": "portrait",
     "platforms": [
       "ios",

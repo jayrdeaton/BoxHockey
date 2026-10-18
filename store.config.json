@@ -1,0 +1,65 @@
+{
+  "configVersion": 0,
+  "apple": {
+    "copyright": "2026 Infinite Token LLC",
+    "categories": [
+      [
+        "GAMES",
+        "GAMES_SPORTS",
+        "GAMES_CASUAL"
+      ]
+    ],
+    "info": {
+      "en-US": {
+        "title": "BoxHockeyTastic",
+        "subtitle": "Tabletop Box Hockey. No Ads.",
+        "promoText": "Flick the puck through the gaps and into the other player's goal. Play the CPU or a friend across the table, with no ads and no tracking.",
+        "description": "Physics-driven tabletop box hockey. Flick the puck through the gaps and into the other player's goal, against the CPU or a friend across the table. No ads, no accounts.\n\n• One Player against the CPU (Easy, Medium, or Hard), or Two Player face to face on one device\n• Take turns shooting, and choose how you shoot, from a fast flick to a slingshot pull\n• Three tip-offs: a Face-Off reaction race, a Coin Flip, or Triple Tap\n• Three boards: Classic, Gauntlet, and Gravity, plus a Rink option with rounded corners and a net behind each goal\n• Set the puck speed, the puck size, and the score to win\n• Player profiles, stats, and 33 achievements\n• Plays offline\n\nPart of the Tastic family of games. Your player profiles are shared with the other Tastic games on your device.\n\nOpen source on GitHub: https://github.com/jayrdeaton/BoxHockey",
+        "keywords": [
+          "air",
+          "puck",
+          "table",
+          "flick",
+          "physics",
+          "arcade",
+          "two player",
+          "multiplayer",
+          "local",
+          "versus",
+          "pass and play",
+          "offline"
+        ],
+        "marketingUrl": "https://games.infinitetoken.com/boxhockey",
+        "supportUrl": "https://games.infinitetoken.com/support",
+        "privacyPolicyUrl": "https://games.infinitetoken.com/privacy"
+      }
+    },
+    "advisory": {
+      "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+      "contests": "NONE",
+      "gamblingSimulated": "NONE",
+      "gunsOrOtherWeapons": "NONE",
+      "horrorOrFearThemes": "NONE",
+      "matureOrSuggestiveThemes": "NONE",
+      "medicalOrTreatmentInformation": "NONE",
+      "profanityOrCrudeHumor": "NONE",
+      "sexualContentGraphicAndNudity": "NONE",
+      "sexualContentOrNudity": "NONE",
+      "violenceCartoonOrFantasy": "NONE",
+      "violenceRealistic": "NONE",
+      "violenceRealisticProlongedGraphicOrSadistic": "NONE",
+      "advertising": false,
+      "ageAssurance": false,
+      "gambling": false,
+      "healthOrWellnessTopics": false,
+      "lootBox": false,
+      "messagingAndChat": false,
+      "parentalControls": false,
+      "unrestrictedWebAccess": false,
+      "userGeneratedContent": false,
+      "kidsAgeBand": null,
+      "ageRatingOverride": "NONE",
+      "koreaAgeRatingOverride": "NONE"
+    }
+  }
+}
