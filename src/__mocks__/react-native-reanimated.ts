@@ -24,7 +24,6 @@ const Animated = {
   cancelAnimation: jest.fn(),
   interpolate: passthrough,
   interpolateColor: () => '#000000',
-  runOnJS: (fn: (...args: unknown[]) => unknown) => fn,
   runOnUI: (fn: (...args: unknown[]) => unknown) => fn,
   useAnimatedRef: () => ({ current: null }),
   measure: () => ({ x: 0, y: 0, width: 0, height: 0, pageX: 0, pageY: 0 }),

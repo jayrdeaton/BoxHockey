@@ -9,8 +9,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { Icon, Text } from 'react-native-paper'
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 import { type EdgeInsets, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { scheduleOnRN } from 'react-native-worklets'
 import { useDispatch, useSelector } from 'react-redux'
 
 import Board from '@/components/BoardHost'
@@ -774,8 +775,8 @@ export default function GameScreen() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [stableFaceoffZoneTap, stableFaceoffReady, faceoff?.stage, phase])
 
-  // Gesture worklets must not call these callbacks through runOnJS directly: worklets holds a strong
-  // native reference to every runOnJS target for as long as the gesture (cached on this component)
+  // Gesture worklets must not call these callbacks through scheduleOnRN directly: worklets holds a strong
+  // native reference to every scheduleOnRN target for as long as the gesture (cached on this component)
   // lives, which pinned this whole screen in memory. They go through callWorkletCallback by key
   // instead, and the key's registered callback is refreshed to the latest on every render.
   const aimStartKey = useWorkletCallback(stableAimStart)
@@ -797,16 +798,16 @@ export default function GameScreen() {
       Gesture.Pan()
         .maxPointers(1)
         .onStart((e) => {
-          runOnJS(callWorkletCallback)(aimStartKey, e.x, e.y)
+          scheduleOnRN(callWorkletCallback, aimStartKey, e.x, e.y)
         })
         .onChange((e) => {
-          runOnJS(callWorkletCallback)(aimUpdateKey, e.x, e.y, e.velocityX, e.velocityY)
+          scheduleOnRN(callWorkletCallback, aimUpdateKey, e.x, e.y, e.velocityX, e.velocityY)
         })
         .onEnd((e) => {
-          runOnJS(callWorkletCallback)(shootKey, e.translationX, e.translationY, e.velocityX, e.velocityY)
+          scheduleOnRN(callWorkletCallback, shootKey, e.translationX, e.translationY, e.velocityX, e.velocityY)
         })
         .onFinalize(() => {
-          runOnJS(callWorkletCallback)(aimCancelKey)
+          scheduleOnRN(callWorkletCallback, aimCancelKey)
         })
         .minDistance(0),
     [aimStartKey, aimUpdateKey, shootKey, aimCancelKey]
@@ -854,14 +855,14 @@ export default function GameScreen() {
   const p1TapGesture = useMemo(
     () =>
       Gesture.Tap()
-        .onBegin((e) => runOnJS(callWorkletCallback)(faceoffTouchKey, 1, e.absoluteX, e.absoluteY - boardAreaMarginTop))
+        .onBegin((e) => scheduleOnRN(callWorkletCallback, faceoffTouchKey, 1, e.absoluteX, e.absoluteY - boardAreaMarginTop))
         .enabled(phase === 'faceoff'),
     [faceoffTouchKey, phase, boardAreaMarginTop]
   )
   const p2TapGesture = useMemo(
     () =>
       Gesture.Tap()
-        .onBegin((e) => runOnJS(callWorkletCallback)(faceoffTouchKey, 2, e.absoluteX, e.absoluteY - boardAreaMarginTop))
+        .onBegin((e) => scheduleOnRN(callWorkletCallback, faceoffTouchKey, 2, e.absoluteX, e.absoluteY - boardAreaMarginTop))
         .enabled(phase === 'faceoff'),
     [faceoffTouchKey, phase, boardAreaMarginTop]
   )
@@ -894,23 +895,23 @@ export default function GameScreen() {
   const p2TripleTapLive = tripleTap !== null && (phase === 'tripleTap' || (tripleTap.clashUntil !== null && tripleTap.swipe[1] === null))
   const p1TripleTapGesture = useMemo(() => {
     const tap = Gesture.Tap()
-      .onEnd(() => runOnJS(callWorkletCallback)(tripleTapReleaseKey, 1, 0, 0, 0, 0))
+      .onEnd(() => scheduleOnRN(callWorkletCallback, tripleTapReleaseKey, 1, 0, 0, 0, 0))
       .enabled(p1TripleTapLive)
     const pan = Gesture.Pan()
       .maxPointers(1)
       .minDistance(0)
-      .onEnd((e) => runOnJS(callWorkletCallback)(tripleTapReleaseKey, 1, e.translationX, e.translationY, e.velocityX, e.velocityY))
+      .onEnd((e) => scheduleOnRN(callWorkletCallback, tripleTapReleaseKey, 1, e.translationX, e.translationY, e.velocityX, e.velocityY))
       .enabled(p1TripleTapLive)
     return Gesture.Race(tap, pan)
   }, [tripleTapReleaseKey, p1TripleTapLive])
   const p2TripleTapGesture = useMemo(() => {
     const tap = Gesture.Tap()
-      .onEnd(() => runOnJS(callWorkletCallback)(tripleTapReleaseKey, 2, 0, 0, 0, 0))
+      .onEnd(() => scheduleOnRN(callWorkletCallback, tripleTapReleaseKey, 2, 0, 0, 0, 0))
       .enabled(p2TripleTapLive)
     const pan = Gesture.Pan()
       .maxPointers(1)
       .minDistance(0)
-      .onEnd((e) => runOnJS(callWorkletCallback)(tripleTapReleaseKey, 2, e.translationX, e.translationY, e.velocityX, e.velocityY))
+      .onEnd((e) => scheduleOnRN(callWorkletCallback, tripleTapReleaseKey, 2, e.translationX, e.translationY, e.velocityX, e.velocityY))
       .enabled(p2TripleTapLive)
     return Gesture.Race(tap, pan)
   }, [tripleTapReleaseKey, p2TripleTapLive])
@@ -921,7 +922,7 @@ export default function GameScreen() {
   const coinFlipTapGesture = useMemo(
     () =>
       Gesture.Tap()
-        .onBegin(() => runOnJS(callWorkletCallback)(coinFlipTapKey))
+        .onBegin(() => scheduleOnRN(callWorkletCallback, coinFlipTapKey))
         .enabled(phase === 'coinFlip' && !coinFlipStarted),
     [coinFlipTapKey, phase, coinFlipStarted]
   )
