@@ -1,10 +1,10 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
+import { useKeepAwake } from '@rific/core'
 import { Button, IconButton, useVibration } from '@rific/feedback-press'
 import { useToast } from '@rific/toaster'
 import { broadcastDeviceUnlocks } from '@tastic/achievements'
 import { useBackgroundPause, useOrientationState, useRotation, useSettledWindowDimensions } from '@tastic/core'
 import { AchievementUnlockList, type AchievementUnlockOwner, ConfirmDialog, OverlayBackdrop, OverlayCard, useOverlayCardColors, useQuitConfirmation } from '@tastic/hud'
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, StyleSheet, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
@@ -182,17 +182,10 @@ export default function GameScreen() {
   const { backgroundPaused, resume } = useBackgroundPause(() => phase !== 'gameOver' && !settingsOpen && !confirmVisible)
   // Keeps the screen from dimming and locking while a match is up, unless Keep Awake is off in
   // Settings (read live, so the toggle applies mid-match). Expo only does this by itself in
-  // development builds, and the OS auto-lock only counts screen touches, so tilt or keyboard steering,
-  // or watching the CPU, could let a release build lock mid-match. Failures are dropped: a browser
-  // without the Screen Wake Lock API (or one that refuses it) just keeps its own timeout.
-  const keepAwake = useSelector((state: RootState) => state.settings.keepAwake)
-  useEffect(() => {
-    if (!keepAwake) return undefined
-    activateKeepAwakeAsync('game').catch(() => {})
-    return () => {
-      deactivateKeepAwake('game').catch(() => {})
-    }
-  }, [keepAwake])
+  // development builds, and the OS auto-lock only counts screen touches, so tilt or keyboard
+  // steering, or watching the CPU, could let a release build lock mid-match. The setting and the
+  // expo-keep-awake module are @rific/core's, from Providers.tsx's KeepAwakeBridge.
+  useKeepAwake('game')
   const paused = settingsOpen || confirmVisible || backgroundPaused
 
   const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch, setInterceptTouch } = useGameState(board, scoreToWin, tipoffMode, friction, controlScheme, paused, interceptThreshold)

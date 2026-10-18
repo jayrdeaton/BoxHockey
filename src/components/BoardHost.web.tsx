@@ -1,4 +1,4 @@
-import { loadSkiaWeb } from '@tastic/hud'
+import { loadSkiaWeb } from '@tastic/hud/skia'
 import { lazy, Suspense } from 'react'
 
 import { BoardProps } from './Board'

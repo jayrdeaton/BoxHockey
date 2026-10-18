@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { combineReducers, configureStore, type Middleware } from '@reduxjs/toolkit'
 import { createThemeReducer, getThirdColor } from '@rific/auto-paper'
+import { keepAwakeReducer } from '@rific/core'
 import { defaultSoundSettings, hapticReducer, soundReducer, type SoundSettings } from '@rific/feedback-press'
 import { createReturningPlayerMigrate } from '@tastic/hud/guide'
 import { profilesReducer } from '@tastic/profile'
@@ -48,6 +49,9 @@ const rootReducer = combineReducers({
   theme: themeReducer,
   haptic: hapticReducer,
   sound: appSoundReducer,
+  // @rific/core's Keep Awake setting (see Providers.tsx's KeepAwakeBridge), under the namespace its
+  // REHYDRATE handling expects.
+  keepAwake: keepAwakeReducer,
   // The shared App Group roster (see @tastic/profile's resolveInitialProfiles/
   // useSharedProfilesSync, wired in hooks/useProfiles.tsx) is layered on top of this as a separate
   // sync target - this slice persisting normally via redux-persist, same as every other key here,
@@ -59,10 +63,10 @@ const rootReducer = combineReducers({
   // field is keyScheme) - deliberately outside the shared roster above; see
   // profileExtensionsSlice.ts's own doc comment.
   profileExtensions,
-  // /loadout's own dedicated guest/CPU "remember this color for next time" memory - see
-  // seatColorsSlice.ts's own doc comment for why this is separate from `theme` above (theme always
-  // reflects whatever's live RIGHT NOW, a selected profile's color included; this only ever holds
-  // the guest/CPU cases).
+  // /loadout's own dedicated "remember this color for next time" memory (guest, CPU, and each
+  // profile's pick in BoxHockey) - see seatColorsSlice.ts's own doc comment for why this is separate
+  // from `theme` above (theme always reflects whatever's live RIGHT NOW; this only holds what each
+  // source last picked).
   seatColors,
   // Which version of the how-to-play flow this player has finished or skipped: its own key rather
   // than a Settings field, so it survives the stats screen's reset and the loadout's match-settings

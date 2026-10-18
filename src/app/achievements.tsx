@@ -1,7 +1,7 @@
 import { useAutoPaperTheme } from '@rific/auto-paper'
 import { getAchievementCatalogRows } from '@tastic/achievements'
 import { FakeLandscapeView, rotateInsets, useRotation } from '@tastic/core'
-import { AchievementCatalogSection, ActivityStatSection, BaseStatsScreen, StatRow, StatSection, usePopoverHost } from '@tastic/hud'
+import { AchievementCatalogSection, ActivityStatSection, BaseStatsScreen, StatRow, StatSection, usePopoverHost, useWellColors } from '@tastic/hud'
 import { ProfileChip, ProfilePicker } from '@tastic/profile'
 import { useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -55,8 +55,9 @@ export default function AchievementsScreen() {
   const { stats, unlockedAchievements, resetAll } = useGameStats()
   const { profiles } = useProfiles()
   const profilePickerHost = usePopoverHost()
-  const fg = dark ? '#FFFFFF' : '#000000'
-  const fgMuted = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'
+  // The rankings' text sits in a StatSection well, so it takes the well's own colors (@tastic/hud's
+  // useWellColors: onSurface, onSurfaceVariant), the same ones hud's StatRow and AchievementRow default to.
+  const { fg, fgMuted } = useWellColors()
 
   // null = "All Profiles" (device-wide). Self-heals to null if the selected profile is deleted from
   // another still-mounted screen - effectiveProfileId simply stops matching any entry in `profiles`.

@@ -1,6 +1,8 @@
+import { keepAwakeActions, KeepAwakeProvider, type KeepAwakeSettings } from '@rific/core'
 import { FeedbackPressProvider, hapticActions, type HapticSettings, soundActions, type SoundSettings, useFeedbackBridgeProps } from '@rific/feedback-press'
 import { useAudioPool } from '@rific/feedback-press/audio'
 import { useEdgeGestureGuard } from '@tastic/edge-guard'
+import * as ExpoKeepAwake from 'expo-keep-awake'
 import { ReactNode, useCallback } from 'react'
 import * as RNPaper from 'react-native-paper'
 import { Provider as ReduxProvider, useDispatch, useSelector } from 'react-redux'
@@ -48,12 +50,28 @@ const EdgeGuardBridge = ({ children }: Props) => {
   return <>{children}</>
 }
 
+// @rific/core's Keep Awake setting (Settings dialog), persisted as the store's `keepAwake` slice.
+// Handing it expo-keep-awake is what turns the feature on: /game's useKeepAwake('game') and hud's
+// Keep Awake row both read the module from here.
+const KeepAwakeBridge = ({ children }: Props) => {
+  const keepAwake = useSelector((state: RootState) => state.keepAwake)
+  const dispatch = useDispatch()
+  const onChange = useCallback((settings: KeepAwakeSettings) => dispatch(keepAwakeActions.initialize(settings)), [dispatch])
+  return (
+    <KeepAwakeProvider expoKeepAwake={ExpoKeepAwake} initialValue={keepAwake} onChange={onChange}>
+      {children}
+    </KeepAwakeProvider>
+  )
+}
+
 export function Providers({ children }: Props) {
   return (
     <ReduxProvider store={store}>
       <PersistGate persistor={persistor}>
         <EdgeGuardBridge>
-          <FeedbackBridge>{children}</FeedbackBridge>
+          <FeedbackBridge>
+            <KeepAwakeBridge>{children}</KeepAwakeBridge>
+          </FeedbackBridge>
         </EdgeGuardBridge>
       </PersistGate>
     </ReduxProvider>

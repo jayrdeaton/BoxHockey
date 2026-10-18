@@ -36,8 +36,8 @@ export type ControlScheme = 'pull' | 'push' | 'flick'
 // A locally-saved player identity - name, color, and a short tag, entirely opt-in. A seat's own live
 // round color, while this profile's selected there, is derived FROM this (see loadout.tsx's own
 // profile-color effect) but never synced back TO it - a manual recolor or clash-swap made on that
-// seat is a transient, in-memory-only override for the rest of that screen session, not an edit to
-// the saved "favorite" (that's app/profiles.tsx's ProfilesManager's own job). Mirrors LightCycles' identically-
+// seat is kept as this profile's own pick in BoxHockey (redux/seatColorsSlice.ts's profileColors),
+// not an edit to the saved "favorite" (that's app/profiles.tsx's ProfilesManager's own job). Mirrors LightCycles' identically-
 // shaped Profile type (see @tastic/profile, the package both apps build this on), with controlScheme
 // standing in for LightCycles' keyScheme as this app's own per-profile control preference.
 export interface Profile {
@@ -162,10 +162,6 @@ export interface Settings {
   // Providers.tsx's EdgeGuardBridge) for @tastic/edge-guard's own config plugin swizzle of
   // preferredScreenEdgesDeferringSystemGestures to read at runtime.
   deferBottomEdgeGestures: boolean
-  // Keep Awake (Settings dialog): keeps the screen from dimming and locking while /game is up (see
-  // game.tsx). On by default, unlike Edge Guard: a screen that locks mid-match hits every player,
-  // not just the few who'd go looking for a fix.
-  keepAwake: boolean
 }
 
 export interface Obstacle {
