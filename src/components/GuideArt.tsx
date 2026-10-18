@@ -28,7 +28,7 @@ function Puck({ ringColor }: { ringColor: string }) {
 export function GuideShotArt({ scheme, touch }: { scheme: ControlScheme; touch: boolean }) {
   const { colors } = useAutoPaperTheme()
   const drag = CONTROL_SCHEME_SIGN[scheme] < 0 ? 'down' : 'up'
-  const gesture = touch && scheme === 'flick' ? 'Swipe' : 'Drag'
+  const gesture = scheme === 'stick' ? 'Swing' : touch && scheme === 'flick' ? 'Swipe' : 'Drag'
 
   return (
     <View accessible accessibilityLabel={`${gesture} ${drag} and the puck flies up`} style={styles.shotRow}>

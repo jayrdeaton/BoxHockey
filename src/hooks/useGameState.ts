@@ -2,13 +2,14 @@ import { useGameLoop } from '@tastic/core'
 import { useCallback, useEffect, useReducer, useRef } from 'react'
 
 import { AIM_VELOCITY_SMOOTHING_ALPHA, CONTROL_SCHEME_SIGN, FACEOFF_GUESS_BONUS_MS, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, TRIPLE_TAP_CLASH_WINDOW_MS, TRIPLE_TAP_TAPS } from '@/constants/game'
-import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, PuckState, TipoffMode, TripleTapState } from '@/types'
+import { AimIndicator, BoardLayout, ControlScheme, FaceoffState, GameState, Player, PuckState, TipoffMode, TripleTapState } from '@/types'
 import { centerPuck, faceoffZoneCenter } from '@/utils/board'
 import { computeAimVector, stepPhysics } from '@/utils/physics'
+import { clampBladeToBoard, isBladeClear, resolveStickContact } from '@/utils/stick'
 
 type Action =
   | { type: 'AIM_START'; x: number; y: number }
-  | { type: 'AIM_UPDATE'; x: number; y: number; vx: number; vy: number }
+  | { type: 'AIM_UPDATE'; x: number; y: number; vx: number; vy: number; board?: BoardLayout }
   | { type: 'AIM_CANCEL' }
   | { type: 'STRIKE'; dx: number; dy: number; vx: number; vy: number }
   | { type: 'APPLY_STRIKE' }
@@ -175,6 +176,20 @@ function makeInitialState(board: BoardLayout, tipoffMode: TipoffMode, coinFlipWi
   }
 }
 
+// One step of a 'stick' swing (see ControlScheme's own doc comment): moves the blade to where the
+// finger is now, both ends kept inside the walls (the touch-down point included, so a finger past
+// a wall starts on the ice too), and checks whether it hit the puck on the way. The blade has to
+// be clear of the puck at the START of the step to hit, so one landing on (or resting against) the
+// puck hits nothing until it leaves. The puck moved from puckFrom to puckTo over the same step (the
+// same point for an AIM_UPDATE, the physics step for an intercept, see PHYSICS_STEP).
+function stickSwing(aim: AimIndicator, toX: number, toY: number, bladeVx: number, bladeVy: number, puckFrom: { x: number; y: number }, puckTo: PuckState, board: BoardLayout): { aim: AimIndicator; hit: { vx: number; vy: number } | null } {
+  const bladeFrom = clampBladeToBoard(aim.currentX, aim.currentY, board)
+  const bladeTo = clampBladeToBoard(toX, toY, board)
+  const hit = isBladeClear(bladeFrom, puckFrom, board) ? resolveStickContact({ bladeFrom, bladeTo, bladeVx, bladeVy, puckFrom, puckTo, puckVx: puckTo.vx, puckVy: puckTo.vy }, board) : null
+  const { vx, vy } = smoothVelocity(aim.vx, aim.vy, bladeVx, bladeVy)
+  return { aim: { ...aim, currentX: bladeTo.x, currentY: bladeTo.y, vx, vy, stickClear: isBladeClear(bladeTo, puckTo, board) }, hit }
+}
+
 export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction: number, controlScheme: Record<Player, ControlScheme>, interceptThreshold: number) {
   return function reducer(state: GameState, action: Action): GameState {
     switch (action.type) {
@@ -199,6 +214,18 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
         return state
 
       case 'AIM_UPDATE':
+        // 'stick': the update itself can be the shot (see stickSwing) - a hit goes straight into
+        // play the way a flick release does, for a normal turn or an intercept alike.
+        if (action.board && state.phase === 'aiming' && state.aim && controlScheme[state.currentPlayer] === 'stick') {
+          const swing = stickSwing(state.aim, action.x, action.y, action.vx, action.vy, state.puck, state.puck, action.board)
+          if (swing.hit) return { ...state, phase: 'simulating', aim: null, pendingShot: null, puck: { ...state.puck, ...swing.hit } }
+          return { ...state, aim: swing.aim }
+        }
+        if (action.board && state.interceptAim && controlScheme[otherPlayer(state.currentPlayer)] === 'stick') {
+          const swing = stickSwing(state.interceptAim, action.x, action.y, action.vx, action.vy, state.puck, state.puck, action.board)
+          if (swing.hit) return { ...state, phase: 'simulating', aim: null, pendingShot: null, interceptAim: null, currentPlayer: otherPlayer(state.currentPlayer), puck: { ...state.puck, ...swing.hit } }
+          return { ...state, interceptAim: swing.aim }
+        }
         if (state.phase === 'aiming' && state.aim) {
           const { vx, vy } = smoothVelocity(state.aim.vx, state.aim.vy, action.vx, action.vy)
           return { ...state, aim: { ...state.aim, currentX: action.x, currentY: action.y, vx, vy } }
@@ -234,6 +261,10 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
       case 'STRIKE': {
         if (state.phase === 'aiming') {
           const scheme = controlScheme[state.currentPlayer]
+          // 'stick': letting go without a hit is a whiff - swing again, no turn lost (real box
+          // hockey). A fresh puck reference re-arms useAIOpponent's turn effect, which keys on it,
+          // so a CPU that whiffed swings again too.
+          if (scheme === 'stick') return { ...state, phase: 'idle', aim: null, puck: { ...state.puck } }
           const result = resolveStrikeVelocity(scheme, action.dx, action.dy, action.vx, action.vy)
           if (!result) return { ...state, phase: 'idle', aim: null } // too weak to count - same effect as AIM_CANCEL
           // flick has no stick-swing visual to animate (see ControlScheme's own doc comment) and no
@@ -258,6 +289,7 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
         if (state.interceptAim) {
           const interceptor = otherPlayer(state.currentPlayer)
           const scheme = controlScheme[interceptor]
+          if (scheme === 'stick') return { ...state, interceptAim: null } // a missed intercept swing: the puck just keeps going
           const result = resolveStrikeVelocity(scheme, action.dx, action.dy, action.vx, action.vy)
           if (!result) return { ...state, interceptAim: null } // true no-op, same as AIM_CANCEL's intercept branch
           if (scheme === 'flick') {
@@ -366,6 +398,23 @@ export function makeReducer(scoreToWin: number, tipoffMode: TipoffMode, friction
             goalDoorHitCount: result.goalDoorHit ? state.goalDoorHitCount + 1 : state.goalDoorHitCount,
             lastGoalDoorSide: result.goalDoorHit ?? state.lastGoalDoorSide
           }
+        }
+
+        // A 'stick' interceptor's blade is checked against the puck's own motion this step, so a
+        // blade held in the puck's path deflects it, not only one swung into it (see stickSwing).
+        // Uses the latest finger position the same way the interceptAim fold below does.
+        if (state.interceptAim && controlScheme[otherPlayer(state.currentPlayer)] === 'stick') {
+          const touch = action.interceptTouch ?? { x: state.interceptAim.currentX, y: state.interceptAim.currentY, vx: 0, vy: 0 }
+          const swing = stickSwing(state.interceptAim, touch.x, touch.y, touch.vx, touch.vy, state.puck, result, action.board)
+          const counters = {
+            bounceCount: result.bounced ? state.bounceCount + 1 : state.bounceCount,
+            wellEnterCount: result.enteredWell ? state.wellEnterCount + 1 : state.wellEnterCount,
+            lastWellPolarity: result.enteredWell ?? state.lastWellPolarity,
+            goalDoorHitCount: result.goalDoorHit ? state.goalDoorHitCount + 1 : state.goalDoorHitCount,
+            lastGoalDoorSide: result.goalDoorHit ?? state.lastGoalDoorSide
+          }
+          if (swing.hit) return { ...state, ...counters, puck: { x: result.x, y: result.y, ...swing.hit }, interceptAim: null, currentPlayer: otherPlayer(state.currentPlayer) }
+          return { ...state, ...counters, puck: result, interceptAim: swing.aim }
         }
 
         return {
@@ -725,12 +774,17 @@ export function useGameState(board: BoardLayout, scoreToWin: number, tipoffMode:
   // regardless of where the finger actually landed. Kept returning a boolean (always true) to
   // avoid touching the tryAimStart/AIControls call-site contract.
   const tryAimStart = useCallback((touchX: number, touchY: number) => {
+    // A new gesture never inherits the last one's finger: without this, an intercept's first
+    // physics step would fold in wherever the previous drag (often the shooter's own) left off,
+    // until this drag's first update - for a 'stick' interceptor, a bogus swing across the board.
+    interceptTouchRef.current = null
     dispatch({ type: 'AIM_START', x: touchX, y: touchY })
     return true
   }, [])
 
+  // Carries the live board for a 'stick' swing (see stickSwing), the same boardRef PHYSICS_STEP reads.
   const aimUpdate = useCallback((x: number, y: number, vx: number, vy: number) => {
-    dispatch({ type: 'AIM_UPDATE', x, y, vx, vy })
+    dispatch({ type: 'AIM_UPDATE', x, y, vx, vy, board: boardRef.current })
   }, [])
 
   const aimCancel = useCallback(() => {

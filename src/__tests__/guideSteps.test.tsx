@@ -10,7 +10,7 @@ import type { ControlScheme, GameMode, Player, TipoffMode } from '@/types'
 // around it still renders for real below.
 jest.mock('@tastic/hud/guide', () => ({ SwipeHint: () => require('react').createElement(require('react-native').View) }))
 
-const SCHEMES: ControlScheme[] = ['flick', 'push', 'pull']
+const SCHEMES: ControlScheme[] = ['flick', 'stick', 'push', 'pull']
 const TIPOFFS: TipoffMode[] = ['faceoff', 'coinFlip', 'tripleTap']
 const MODES: GameMode[] = ['twoPlayer', 'vsCpu']
 

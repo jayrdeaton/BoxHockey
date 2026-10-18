@@ -71,6 +71,7 @@ const SHOT_PREVIEW_LENGTH_OPTIONS: MenuOption<ShotPreviewLength>[] = [
 
 const CONTROL_SCHEME_OPTIONS: MenuOption<ControlScheme>[] = [
   { value: 'flick', label: 'Flick', description: 'Swipe fast: power comes from speed', icon: 'gesture-swipe' },
+  { value: 'stick', label: 'Stick', description: 'Swing into the puck to hit it', icon: 'hockey-sticks' },
   { value: 'pull', label: 'Pull', description: 'Drag back, release to fire', icon: 'arrow-collapse' },
   { value: 'push', label: 'Push', description: 'Drag toward your shot, release to fire', icon: 'arrow-expand' }
 ]

@@ -31,7 +31,14 @@ export type AiDifficulty = 'easy' | 'medium' | 'hard'
 // direction, same sign as 'push'. Board.tsx never shows the pulled-back stick for this scheme -
 // there's nothing to visually "pull back" when power comes from speed, not distance - though the
 // trajectory preview (chevron trail / front arrow, per ShotPreviewLength) still applies.
-export type ControlScheme = 'pull' | 'push' | 'flick'
+// 'stick' is a FOURTH mechanic, closest to real box hockey: the finger is the stick blade, and the
+// shot is whatever happens when it runs into the puck (utils/stick.ts) - no release, no "from
+// anywhere". The puck flies off along the line from where the blade hit it through its center,
+// as hard as the blade was moving into it, so a square hit is a full shot and a glancing one a soft
+// deflection. The blade stays inside the walls, so a puck in a corner can only be dug out from the
+// open side. Missing is free (swing again, like the real game); only the first hit counts. Works
+// mid-slide too (an intercept), where a blade held in the puck's path deflects it.
+export type ControlScheme = 'pull' | 'push' | 'flick' | 'stick'
 
 // A locally-saved player identity - name, color, and a short tag, entirely opt-in. A seat's own live
 // round color, while this profile's selected there, is derived FROM this (see loadout.tsx's own
@@ -275,6 +282,10 @@ export interface AimIndicator {
   // this field - see useGameState.ts's STRIKE case.
   vx: number
   vy: number
+  // 'stick' scheme only: whether the blade is clear of the puck right now (see utils/stick.ts). A
+  // blade that lands on the puck has to leave it before it can hit; Board.tsx shows the aim line
+  // only while it's clear.
+  stickClear?: boolean
 }
 
 export interface PendingShot {

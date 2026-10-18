@@ -74,12 +74,30 @@ export const MIN_SHOOT_DRAG = 28
 // already fired off the swipe's own early energy. First-pass value, not yet verified by feel.
 export const MAX_FLICK_GESTURE_MS = 200
 
+// 'stick' scheme ONLY (see ControlScheme in types/index.ts and utils/stick.ts): the finger is the
+// stick blade, and the shot is whatever the contact gives. All first-pass values, tune by feel on a
+// device.
+// The blade's own radius, as a fraction of the puck's. Generous on purpose: the finger covers the
+// puck, so a near miss should still connect.
+export const STICK_BLADE_RADIUS_RATIO = 0.6
+// How bouncy the blade is. A hit sends the puck off at (1 + this) times the blade's speed into it,
+// so a square hit at a modest swipe already reaches MAX_SPEED.
+export const STICK_RESTITUTION = 0.6
+// How much of the blade's sideways motion (along the contact, not into it) the puck picks up - a
+// little grip, so a glancing hit isn't a perfectly frictionless deflection.
+export const STICK_CARRY = 0.15
+// Blade speed into the puck (points/sec) below which a touch is a nudge that doesn't count: the
+// blade just rests against the puck, and has to leave and come back to hit it.
+export const STICK_MIN_HIT_SPEED = 120
+// Finger velocity (points/sec) to puck velocity (points per 60Hz physics step, see stepPhysics).
+export const STICK_VELOCITY_SCALE = 1 / 60
+
 // Sign applied to a shot's raw drag/flick vector before computeAimVector - see ControlScheme in
 // types/index.ts. 'pull' fires opposite the drag (slingshot); 'push' and 'flick' both fire along it
 // (same sign, different power model - see resolveStrikeVelocity in useGameState.ts for which). The
 // single place this is read is useGameState.ts's STRIKE case (and useAIOpponent.ts, which has to
 // cancel it back out so a CPU seat's own intended shot direction stays scheme-independent).
-export const CONTROL_SCHEME_SIGN: Record<ControlScheme, 1 | -1> = { pull: -1, push: 1, flick: 1 }
+export const CONTROL_SCHEME_SIGN: Record<ControlScheme, 1 | -1> = { pull: -1, push: 1, flick: 1, stick: 1 }
 
 // Per-round puck radius, as a fraction of board.width - see PuckSizeLevel in types/index.ts.
 // 'medium' is unchanged from the single fixed PUCK_RADIUS_RATIO constant this replaces, so a

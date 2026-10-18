@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
 
-import { CONTROL_SCHEME_SIGN, MAX_FLICK_VELOCITY, MAX_STICK_PULLBACK_PIXELS } from '@/constants/game'
+import { CONTROL_SCHEME_SIGN, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, STICK_VELOCITY_SCALE } from '@/constants/game'
 import { BoardLayout, ControlScheme, GameState, Player, PuckState } from '@/types'
 import { AIDifficulty, planAIShot, randomAIThinkDelayMs, randomInterceptReactionMs } from '@/utils/aiOpponent'
+import { planStickSwing } from '@/utils/stick'
 
 interface AIControls {
   tryAimStart: (touchX: number, touchY: number) => boolean
@@ -15,6 +16,38 @@ interface AIControls {
 // the same as a human one on Board.tsx (stick position + trajectory preview both come from `aim`).
 const WINDUP_STEP_MS = 90
 const RELEASE_PAUSE_MS = 180
+
+// 'stick' swing timing: a short pause at touch-down (the wind-up a player sees), then the blade
+// moves in STICK_SWING_STEP_MS steps, about one gesture event per frame, like a real finger.
+const STICK_SWING_PAUSE_MS = 150
+const STICK_SWING_STEP_MS = 16
+
+type After = (ms: number, fn: () => void) => void
+
+// Plays a 'stick' swing (see planStickSwing in utils/stick.ts) through the same tryAimStart/
+// aimUpdate/shoot contract a human finger uses: touch down behind the puck, swing through it, and
+// let go. The hit lands in the reducer during the swing (useGameState.ts's stickSwing); the final
+// shoot() is only reached on a whiff, which hands the turn back to 'idle' for another try. Blade
+// positions are placed relative to the puck's live position (getPuck), so a mid-slide intercept
+// swing tracks a moving puck, and its velocity adds the puck's own motion so the swing's speed
+// relative to the puck is the planned one.
+function scheduleStickSwing(after: After, getPuck: () => PuckState, fx: number, fy: number, power: number, board: BoardLayout, controls: AIControls): void {
+  const puck = getPuck()
+  const plan = planStickSwing(puck, fx, fy, power * MAX_SPEED, board)
+  const offsetX = plan.startX - puck.x
+  const offsetY = plan.startY - puck.y
+  if (!controls.tryAimStart(plan.startX, plan.startY)) return
+  const stepPx = (plan.bladeSpeed * STICK_SWING_STEP_MS) / 1000
+  const steps = Math.ceil(plan.travel / stepPx)
+  for (let i = 1; i <= steps; i++) {
+    const traveled = Math.min(i * stepPx, plan.travel)
+    after(STICK_SWING_PAUSE_MS + i * STICK_SWING_STEP_MS, () => {
+      const p = getPuck()
+      controls.aimUpdate(p.x + offsetX + plan.dirX * traveled, p.y + offsetY + plan.dirY * traveled, plan.dirX * plan.bladeSpeed + p.vx / STICK_VELOCITY_SCALE, plan.dirY * plan.bladeSpeed + p.vy / STICK_VELOCITY_SCALE)
+    })
+  }
+  after(STICK_SWING_PAUSE_MS + (steps + 2) * STICK_SWING_STEP_MS, () => controls.shoot(0, 0, 0, 0))
+}
 
 function otherPlayer(p: Player): Player {
   return p === 1 ? 2 : 1
@@ -80,6 +113,10 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
     }
 
     after(randomAIThinkDelayMs(difficulty), () => {
+      if (controlScheme[aiPlayer] === 'stick') {
+        scheduleStickSwing(after, () => puck, shot.fx, shot.fy, shot.power, board, { tryAimStart, aimUpdate, shoot })
+        return
+      }
       if (!tryAimStart(puck.x, puck.y)) return
       after(WINDUP_STEP_MS, () => aimUpdate(puck.x + dragX * 0.55, puck.y + dragY * 0.55, velX, velY))
       after(WINDUP_STEP_MS * 2, () => aimUpdate(targetX, targetY, velX, velY))
@@ -133,6 +170,10 @@ export function useAIOpponent(state: GameState, board: BoardLayout, aiPlayer: Pl
       // way, only the cosmetic paddle-pullback target below.
       const freshPuck: PuckState = puckRef.current
       const shot = planAIShot(freshPuck, board, aiPlayer, difficulty, friction)
+      if (controlScheme[aiPlayer] === 'stick') {
+        scheduleStickSwing(after, () => puckRef.current, shot.fx, shot.fy, shot.power, board, { tryAimStart, aimUpdate, shoot })
+        return
+      }
       const dragMag = shot.power * MAX_STICK_PULLBACK_PIXELS
       const velMag = shot.power * MAX_FLICK_VELOCITY
       const sign = CONTROL_SCHEME_SIGN[controlScheme[aiPlayer]]

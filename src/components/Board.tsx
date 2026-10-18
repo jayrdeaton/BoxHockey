@@ -11,6 +11,7 @@ import { AimIndicator, BoardLayout, ControlScheme, FaceoffState, GamePhase, Play
 import { faceoffZoneCenter, faceoffZoneRadius } from '@/utils/board'
 import { computeGoalWedges } from '@/utils/goalWedges'
 import { computeAimVector, computeTrajectory, TrajectoryPoint } from '@/utils/physics'
+import { stickBladeRadius } from '@/utils/stick'
 
 import { GravityWellMarker } from './GravityWellMarker'
 
@@ -609,6 +610,9 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // are whichever pair of caps actually applies, so every formula below can stay written once, in
   // terms of these, rather than re-branching on scheme at each step.
   const isFlick = controlScheme === 'flick'
+  // 'stick' has no release to preview (the shot is the contact, see utils/stick.ts), so none of the
+  // pull/push/flick aiming visuals below apply; it draws its own blade and aim line instead.
+  const isStick = controlScheme === 'stick'
   const shotInputX = isFlick ? (aim?.vx ?? 0) : rawAimDx
   const shotInputY = isFlick ? (aim?.vy ?? 0) : rawAimDy
   const shotInputMin = isFlick ? MIN_FLICK_VELOCITY : MIN_SHOOT_DRAG
@@ -634,7 +638,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // why that scheme needs both). Gates the chevron trail below, and now also the stick and front
   // arrow further down: none of the three aiming indicators should show while a release right now
   // would just cancel, since none of them represent a real committed shot yet.
-  const pastCancelZone = isAimingSized && !!aim && rawAimDist >= MIN_SHOOT_DRAG && (!isFlick || liveSpeed >= MIN_FLICK_VELOCITY)
+  const pastCancelZone = !isStick && isAimingSized && !!aim && rawAimDist >= MIN_SHOOT_DRAG && (!isFlick || liveSpeed >= MIN_FLICK_VELOCITY)
   // 0 right at the cancel-zone boundary, 1 at shotInputMax - drives the stick's own length
   // (paddleFace below) and the front arrow's sharpness: for 'pull'/'push' this is a plain
   // drag-distance ratio (more pull = a longer stick/sharper arrow, the original mechanic); for
@@ -1153,7 +1157,19 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   // needs to skip a null `aim`, the near-zero-speed instant right at touch-down (liveDirX/Y default
   // to 0 there, which would otherwise draw a degenerate zero-direction arrow), and any tier other
   // than 'short' (see above).
-  const showFrontArrow = isAimingSized && !!aim && liveSpeed > 0.001 && shotPreviewLength === 'short'
+  // 'stick' aim line: from the puck's edge, straight away from the blade, previewLengthPx long.
+  const stickAimLine = (() => {
+    if (!isStick || !aim) return null
+    const dx = puck.x - aim.currentX
+    const dy = puck.y - aim.currentY
+    const d = Math.hypot(dx, dy)
+    if (d < 0.001) return null
+    const ux = dx / d
+    const uy = dy / d
+    return { x0: puck.x + ux * puckRadius, y0: puck.y + uy * puckRadius, x1: puck.x + ux * (puckRadius + Math.max(previewLengthPx, puckRadius * 2)), y1: puck.y + uy * (puckRadius + Math.max(previewLengthPx, puckRadius * 2)) }
+  })()
+
+  const showFrontArrow = !isStick && isAimingSized && !!aim && liveSpeed > 0.001 && shotPreviewLength === 'short'
 
   // The arrow always FACES the true shot direction (no rotation) - what changes with pull is its
   // own sharpness, not its orientation. Right at the cancel-zone boundary it's wide with real body
@@ -1433,7 +1449,7 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             anchor - showing this then would read as a static ghost drifting away from the real
             puck rather than a cancel-zone cue, so it's simply hidden for the isIntercepting case
             (the paddle/chevrons below still track the drag either way). */}
-          {phase === 'aiming' && aim && (
+          {phase === 'aiming' && aim && !isStick && (
             <Group opacity={0.3}>
               <Circle cx={aim.startX} cy={aim.startY} r={puckRadius} color='#000000' />
               <Circle cx={aim.startX} cy={aim.startY} r={puckRadius} style='stroke' strokeWidth={2} color='#FFFFFF' />
@@ -1455,8 +1471,19 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             comes from swipe speed, not distance, so a stick here would show a pulled-back position
             that has no bearing on the actual shot. The front arrow/chevron trail below are NOT
             gated the same way - that preview stays meaningful for 'flick' too. */}
-          {!isFlick && isAimingSized && aim && shotPreviewLength !== 'off' && <Path path={aimingPaddlePath} color={activePlayerColor} opacity={cancelZoneFadeOpacity} />}
+          {!isFlick && !isStick && isAimingSized && aim && shotPreviewLength !== 'off' && <Path path={aimingPaddlePath} color={activePlayerColor} opacity={cancelZoneFadeOpacity} />}
           {!isFlick && phase === 'striking' && <Path path={strikingPaddlePath} color={activePlayerColor} />}
+
+          {/* Stick blade - where the finger's blade actually is (kept inside the walls by the
+            reducer, see utils/stick.ts), at every preview tier: it's the stick, not an aiming aid.
+            Above 'off', a faint line from the puck shows where a square hit from here would send
+            it (straight away from the blade), once the blade is clear of the puck. */}
+          {isStick && isAimingSized && aim && (
+            <Group>
+              {shotPreviewLength !== 'off' && aim.stickClear && stickAimLine && <Line p1={vec(stickAimLine.x0, stickAimLine.y0)} p2={vec(stickAimLine.x1, stickAimLine.y1)} color={activePlayerColor} style='stroke' strokeWidth={2} strokeCap='round' opacity={0.35} />}
+              <Circle cx={aim.currentX} cy={aim.currentY} r={stickBladeRadius(board)} color={activePlayerColor} opacity={0.85} />
+            </Group>
+          )}
 
           {/* Front power arrow - see the frontArrowPath comment above. Mirrors the paddle onto the
             puck's opposite side at the identical pulled-back distance, so the two always read as

@@ -25,6 +25,12 @@ const SHOOT_BODY: Record<ControlScheme, { touch: string; desktop: string }> = {
   pull: {
     touch: 'Drag from anywhere and let go. The puck flies the opposite way. Longer drags hit harder.',
     desktop: 'Drag from anywhere and let go. The puck flies the opposite way. Longer drags hit harder.'
+  },
+  // 'stick' is contact, not a gesture from anywhere (utils/stick.ts): the puck flies along the line
+  // from the hit point through its center, so away from the finger, as hard as the swing was.
+  stick: {
+    touch: 'Swing your finger into the puck. It flies away from your finger. Faster swings hit harder.',
+    desktop: 'Swing the mouse into the puck. It flies away from the mouse. Faster swings hit harder.'
   }
 }
 
@@ -33,10 +39,12 @@ const SHOOT_BODY: Record<ControlScheme, { touch: string; desktop: string }> = {
 const SHOOT_GESTURE: Record<ControlScheme, { touch: string; desktop: string }> = {
   flick: { touch: 'fast swipe', desktop: 'fast drag' },
   push: { touch: 'drag', desktop: 'drag' },
-  pull: { touch: 'drag', desktop: 'drag' }
+  pull: { touch: 'drag', desktop: 'drag' },
+  stick: { touch: 'finger', desktop: 'mouse' }
 }
 
 function seatShot(player: Player, scheme: ControlScheme, input: 'touch' | 'desktop'): string {
+  if (scheme === 'stick') return `away from player ${player}’s ${SHOOT_GESTURE[scheme][input]}`
   return `${CONTROL_SCHEME_SIGN[scheme] > 0 ? 'along' : 'against'} player ${player}’s ${SHOOT_GESTURE[scheme][input]}`
 }
 
@@ -49,7 +57,9 @@ function seatShot(player: Player, scheme: ControlScheme, input: 'touch' | 'deskt
 function shootBody(touch: boolean, controls: Record<Player, ControlScheme>, mode: GameMode): string {
   const input = touch ? 'touch' : 'desktop'
   if (mode === 'vsCpu' || controls[1] === controls[2]) return SHOOT_BODY[controls[1]][input]
-  return `Start anywhere. The puck flies ${seatShot(1, controls[1], input)} and ${seatShot(2, controls[2], input)}.`
+  // "Start anywhere" is false for a 'stick' seat, which has to reach the puck.
+  const start = controls[1] === 'stick' || controls[2] === 'stick' ? '' : 'Start anywhere. '
+  return `${start}The puck flies ${seatShot(1, controls[1], input)} and ${seatShot(2, controls[2], input)}.`
 }
 
 // The tip-off card follows the live tipoffMode, since each one starts the game a different way and a

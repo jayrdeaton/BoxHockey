@@ -376,7 +376,8 @@ export default function GameScreen() {
   // during an intercept.
   const aimActive = !!displayAim
   const aimDragDist = displayAim ? Math.hypot(displayAim.currentX - displayAim.startX, displayAim.currentY - displayAim.startY) : 0
-  const inCancelZone = aimActive && aimDragDist < MIN_SHOOT_DRAG
+  // 'stick' has no cancel zone (missing is just a whiff, see useGameState.ts's STRIKE), so no tick.
+  const inCancelZone = aimActive && controlScheme[aimingPlayer] !== 'stick' && aimDragDist < MIN_SHOOT_DRAG
   const prevAimActiveRef = useRef(aimActive)
   const prevInCancelZoneRef = useRef(inCancelZone)
   useEffect(() => {
@@ -389,6 +390,22 @@ export default function GameScreen() {
       vibrationRef.current.short()
     }
   }, [aimActive, inCancelZone])
+
+  // 'stick' hit feedback: the contact itself is the shot (useGameState.ts's stickSwing), so the
+  // haptic and sound land on the hit, not on a release. A normal turn's hit takes 'aiming' straight
+  // to 'simulating'; an intercept's ends the interceptAim and hands the puck to the interceptor.
+  // Read off the transition rather than a reducer counter, for a CPU swing too.
+  const prevStickRef = useRef({ phase, isIntercepting, currentPlayer })
+  useEffect(() => {
+    const prev = prevStickRef.current
+    prevStickRef.current = { phase, isIntercepting, currentPlayer }
+    const normalHit = prev.phase === 'aiming' && phase === 'simulating' && controlScheme[currentPlayer] === 'stick'
+    const interceptHit = prev.isIntercepting && !isIntercepting && currentPlayer !== prev.currentPlayer && controlScheme[currentPlayer] === 'stick'
+    if (normalHit || interceptHit) {
+      vibrationRef.current.medium()
+      soundRef.current.playBounce()
+    }
+  }, [phase, isIntercepting, currentPlayer, controlScheme])
 
   // ─── Flick auto-commit: a swipe has to be a short, decisive gesture ────────
   // Written by stableAimStart/stableAimUpdate below on every raw gesture event (never the
