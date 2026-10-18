@@ -132,7 +132,7 @@ describe('getGuideSteps', () => {
   it('follows the live tip-off, and leaves out the one a desktop player cannot pick', () => {
     expect(stepsFor(true, { tipoff: 'coinFlip' })[2].body).toMatch(/^Tap anywhere to flip a coin/)
     expect(stepsFor(false, { tipoff: 'coinFlip' })[2].body).toMatch(/^Click anywhere to flip a coin/)
-    expect(stepsFor(true, { tipoff: 'tripleTap' })[2].title).toBe('Tap, Tap, Swipe')
+    expect(stepsFor(true, { tipoff: 'tripleTap' })[2].title).toBe('Tap Together, Then Swipe')
     expect(stepsFor(false, { tipoff: 'tripleTap' })).toHaveLength(2)
   })
 

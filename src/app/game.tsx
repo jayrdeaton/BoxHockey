@@ -20,7 +20,7 @@ import { COIN_FLIP_TOTAL_MS, DESKTOP_WEB_MIN_WIDTH, FRICTION_LEVELS, GOAL_LINE_S
 import { useAIOpponent } from '@/hooks/useAIOpponent'
 import { useFaceoff } from '@/hooks/useFaceoff'
 import { useGameSound } from '@/hooks/useGameSound'
-import { passesFlickShotGate, useGameState } from '@/hooks/useGameState'
+import { canTripleTap, passesFlickShotGate, useGameState } from '@/hooks/useGameState'
 import { useGameStats } from '@/hooks/useGameStats'
 import { useProfiles } from '@/hooks/useProfiles'
 import { useSettings } from '@/hooks/useSettings'
@@ -188,7 +188,7 @@ export default function GameScreen() {
   useKeepAwake('game')
   const paused = settingsOpen || confirmVisible || backgroundPaused
 
-  const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch, setInterceptTouch } = useGameState(board, scoreToWin, tipoffMode, friction, controlScheme, paused, interceptThreshold)
+  const { state, tryAimStart, aimUpdate, aimCancel, shoot, applyStrike, nextRound, resetGame, coinFlipDone, faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart, tripleTapPress, tripleTapSwipe, tripleTapClashEnd, setInterceptTouch } = useGameState(board, scoreToWin, tipoffMode, friction, controlScheme, paused, interceptThreshold)
   const { phase, puck, aim, interceptAim, currentPlayer, scores, bounceCount, lastScoredGoal, wellEnterCount, lastWellPolarity, goalDoorHitCount, lastGoalDoorSide, faceoff, tripleTap } = state
 
   // Mirrors "an actual live shot attempt (aiming/striking/simulating), not paused" up to
@@ -216,7 +216,7 @@ export default function GameScreen() {
 
   useAIOpponent(state, board, aiPlayer, aiDifficulty, friction, controlScheme, paused, interceptThreshold, { tryAimStart, aimUpdate, shoot })
   useFaceoff(state, board, aiPlayer, aiDifficulty, paused, { faceoffCount, faceoffHold, faceoffLive, faceoffReady, faceoffTap, faceoffTimeout, faceoffLaunch, faceoffRestart })
-  useTripleTap(state, board, aiPlayer, aiDifficulty, paused, { tripleTapPress, tripleTapSwipeStart, tripleTapSwipeEnd, tripleTapLaunch })
+  useTripleTap(state, aiPlayer, aiDifficulty, paused, { tripleTapPress, tripleTapSwipe, tripleTapClashEnd })
 
   // A pause can land mid-way through a CPU windup or intercept: a background pause anywhere, and on
   // desktop web a dialog too, since the corner buttons stay up through every phase there (see
@@ -688,47 +688,43 @@ export default function GameScreen() {
   // Mirrors faceoffRef above - read live tripleTap state through a ref instead of closing over
   // `tripleTap` directly, for the same reason: it's a new object on every sub-action (each press,
   // each swipe), and closing over it would tear down/remount p1TripleTapGesture/p2TripleTapGesture
-  // below on every one of them.
+  // below on every one of them. phaseRef tells a tap during the draw from a swipe in the clash
+  // window after it, when tripleTap is still set but the puck is already moving.
   const tripleTapRef = useRef(tripleTap)
+  const phaseRef = useRef(phase)
   useEffect(() => {
     tripleTapRef.current = tripleTap
+    phaseRef.current = phase
   })
 
-  // The third press's touch-down - only meaningful once that player's own 2 taps are already in
-  // and they haven't already started this draw's swipe (both re-checked against live state, not
-  // assumed from the gesture's own call site). Fires TRIPLE_TAP_SWIPE_START, which is what supplies
-  // the "who went first" timestamp - see TripleTapState's own doc comment in types/index.ts.
-  const stableTripleTapSwipeStart = useCallback(
-    (player: Player) => {
-      const tt = tripleTapRef.current
-      if (!tt || tt.tapCount[player - 1] !== 2 || tt.swipeStartedAt[player - 1] !== null) return
-      tripleTapSwipeStart(player, Date.now())
-      vibrationRef.current.short()
-    },
-    [tripleTapSwipeStart]
-  )
+  // Bumped on every release in a player's triple-tap zone, counted or not, and threaded onto that
+  // zone's GestureDetector `key` - see tripleTapKeys' use below for why the detector has to remount
+  // after every press. A counted tap alone isn't enough: an early tap (the other player hasn't
+  // caught up yet) changes nothing in the reducer, and the tap after it would be dropped.
+  const [tripleTapKeys, setTripleTapKeys] = useState<[number, number]>([0, 0])
 
-  // The third press's release - or, for either of the first two presses, just a plain tap. Which
-  // one this is is decided entirely by that player's own live tapCount, not by how far the touch
-  // actually moved (see TipoffMode's own doc comment: any press-release counts toward the first 2,
-  // regardless of movement - only the 3rd press's real drag vector matters). tx/ty is
-  // e.translationX/Y (a displacement VECTOR from this drag's own start point) - same negate-not-
-  // reflect treatment under isUpsideDown as stableShoot's own tx/ty above, not the reflect-around-
-  // extent treatment a position gets.
-  const stableTripleTapPressOrSwipeEnd = useCallback(
-    (player: Player, tx: number, ty: number) => {
+  // A release in a player's own half. While a tap would count (canTripleTap: taps left, not ahead
+  // of the other player) it's a tap, however far it moved; otherwise it's a swipe, which the
+  // reducer judges like a flick shot (a stray tap after all the taps are in is just ignored). Only
+  // a counted tap, or a swipe strong enough to count, buzzes, so an ignored early tap reads as
+  // "wait for the other player". tx/ty and vx/vy are a displacement and a velocity, so both are
+  // negated (not reflected) under isUpsideDown, same as stableShoot's own tx/ty above.
+  const stableTripleTapRelease = useCallback(
+    (player: Player, tx: number, ty: number, vx: number, vy: number) => {
+      setTripleTapKeys((k) => (player === 1 ? [k[0] + 1, k[1]] : [k[0], k[1] + 1]))
       const tt = tripleTapRef.current
       if (!tt) return
-      const [ptx, pty] = isUpsideDown ? [-tx, -ty] : [tx, ty]
-      if (tt.tapCount[player - 1] < 2) {
+      const sign = isUpsideDown ? -1 : 1
+      if (phaseRef.current === 'tripleTap' && canTripleTap(tt, player)) {
         tripleTapPress(player, Date.now())
       } else {
-        tripleTapSwipeEnd(player, ptx, pty)
+        if (!passesFlickShotGate(Math.hypot(tx, ty), Math.hypot(vx, vy))) return
+        tripleTapSwipe(player, sign * tx, sign * ty, sign * vx, sign * vy, Date.now())
       }
       vibrationRef.current.short()
       soundRef.current.playSelect()
     },
-    [tripleTapPress, tripleTapSwipeEnd, isUpsideDown]
+    [tripleTapPress, tripleTapSwipe, isUpsideDown]
   )
 
   // Keyboard path (web only) - a shared touchscreen lets two people press two different spots at
@@ -849,73 +845,56 @@ export default function GameScreen() {
 
   // ─── Triple-tap zones ────────────────────────────────────────────────────
   // Same disjoint bottom/top-half split as p1TapGesture/p2TapGesture above (P1 = bottom, P2 = top -
-  // see that pair's own comment), rendered on separate views at the identical position rather than
-  // composed onto the same gesture object, since only one of the two tip-off modes is ever
-  // 'enabled' at once. There's only one zone per player (no hidden target, so no position hit-test
-  // is needed at all: unlike stableFaceoffTouch, these never read e.absoluteX/Y).
+  // see that pair's own comment): a player's whole half is their tap and swipe zone, rendered on
+  // separate views at the identical position rather than composed onto the same gesture object,
+  // since only one of the two tip-off modes is ever live at once. No position hit-test is needed
+  // (unlike stableFaceoffTouch, these never read e.absoluteX/Y).
+  //
+  // Live during the draw, and for the player who didn't launch, through the clash window after it
+  // (TripleTapState.clashUntil), so a swipe that started before the other player's launch isn't
+  // cut off by it. Keyed on these booleans, not `phase`, so the launch itself doesn't rebuild the
+  // trailing player's gesture mid-drag.
   //
   // Gesture.Race(Tap, Pan), not a bare Pan - a genuine UIPanGestureRecognizer (what Gesture.Pan()
   // wraps) fundamentally detects MOVEMENT; a true near-zero-movement tap doesn't reliably activate
   // it at all (confirmed empirically: onEnd simply never fired for a stationary touch, .minDistance
-  // (0) notwithstanding - that only lowers how much movement is REQUIRED to activate, it doesn't
-  // make a movement-detecting recognizer fire for NO movement). Presses 1-2 are ordinary taps, so
-  // they need a real Gesture.Tap() to catch them; the 3rd press is a real drag, which Pan still
-  // handles. Racing the two lets whichever one actually matches the physical gesture win: a quick,
-  // near-stationary touch resolves as Tap (Pan's own distance requirement never activates in time to
-  // preempt it), a real drag resolves as Pan (Tap fails once movement/duration exceeds its own
-  // thresholds). Both gestures' onBegin call stableTripleTapSwipeStart unconditionally - safe (and
-  // necessary) since that callback's own tapCount===2 guard makes it a no-op for presses 1-2
-  // regardless of which recognizer's onBegin fires first, and it's what guarantees swipeStartedAt is
-  // set before EITHER recognizer's onEnd can dispatch a TRIPLE_TAP_SWIPE_END for the 3rd press, even
-  // on the rare case where a fast/short 3rd press resolves via Tap rather than Pan.
+  // (0) notwithstanding). Taps need a real Gesture.Tap() to catch them; the swipe is a real drag,
+  // which Pan handles. Racing the two lets whichever one matches the physical gesture win.
   //
-  // p1TripleTapKey/p2TripleTapKey: a player's own tapCount, threaded onto the GestureDetector's own
-  // JSX `key` below - forces React to fully unmount and remount the detector (tearing down and
-  // recreating the underlying native recognizers from scratch) after every press, rather than
-  // reusing the same long-lived recognizer instance across multiple, separate, discrete touch
-  // sequences. Confirmed empirically necessary: without this, only a zone's FIRST tap of a draw
-  // ever registered - the second (and any later) tap on the same still-mounted recognizer was
-  // silently dropped, on both the Tap and Pan sides of the race alike, and on both real taps and
-  // real swipes. The faceoff mode's own zones never hit this, since each of THEIR zones only ever
-  // needs exactly one successful tap per draw, never a second one on an already-used recognizer.
-  const p1TripleTapKey = tripleTap?.tapCount[0] ?? 0
-  const p2TripleTapKey = tripleTap?.tapCount[1] ?? 0
+  // tripleTapKeys: threaded onto each GestureDetector's JSX `key` below - forces React to fully
+  // unmount and remount the detector (recreating the native recognizers from scratch) after every
+  // press, rather than reusing one long-lived recognizer across separate touch sequences.
+  // Confirmed empirically necessary: without it, only a zone's FIRST tap of a draw ever
+  // registered - later taps on the same still-mounted recognizer were silently dropped, on both
+  // the Tap and Pan sides of the race alike.
+  const p1TripleTapLive = tripleTap !== null && (phase === 'tripleTap' || (tripleTap.clashUntil !== null && tripleTap.swipe[0] === null))
+  const p2TripleTapLive = tripleTap !== null && (phase === 'tripleTap' || (tripleTap.clashUntil !== null && tripleTap.swipe[1] === null))
   const p1TripleTapGesture = useMemo(() => {
-    const tripleTapEnabled = phase === 'tripleTap'
     const tap = Gesture.Tap()
-      // eslint-disable-next-line react-hooks/refs -- stableTripleTapSwipeStart reads a ref; see panGesture's .onStart comment above
-      .onBegin(() => runOnJS(stableTripleTapSwipeStart)(1))
-      // eslint-disable-next-line react-hooks/refs -- stableTripleTapPressOrSwipeEnd reads a ref; see panGesture's .onStart comment above
-      .onEnd(() => runOnJS(stableTripleTapPressOrSwipeEnd)(1, 0, 0))
-      .enabled(tripleTapEnabled)
+      // eslint-disable-next-line react-hooks/refs -- stableTripleTapRelease reads a ref; see panGesture's .onStart comment above
+      .onEnd(() => runOnJS(stableTripleTapRelease)(1, 0, 0, 0, 0))
+      .enabled(p1TripleTapLive)
     const pan = Gesture.Pan()
       .maxPointers(1)
       .minDistance(0)
       // eslint-disable-next-line react-hooks/refs -- see tap's own comment above
-      .onBegin(() => runOnJS(stableTripleTapSwipeStart)(1))
-      // eslint-disable-next-line react-hooks/refs -- see tap's own comment above
-      .onEnd((e) => runOnJS(stableTripleTapPressOrSwipeEnd)(1, e.translationX, e.translationY))
-      .enabled(tripleTapEnabled)
+      .onEnd((e) => runOnJS(stableTripleTapRelease)(1, e.translationX, e.translationY, e.velocityX, e.velocityY))
+      .enabled(p1TripleTapLive)
     return Gesture.Race(tap, pan)
-  }, [stableTripleTapSwipeStart, stableTripleTapPressOrSwipeEnd, phase])
+  }, [stableTripleTapRelease, p1TripleTapLive])
   const p2TripleTapGesture = useMemo(() => {
-    const tripleTapEnabled = phase === 'tripleTap'
     const tap = Gesture.Tap()
       // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
-      .onBegin(() => runOnJS(stableTripleTapSwipeStart)(2))
-      // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
-      .onEnd(() => runOnJS(stableTripleTapPressOrSwipeEnd)(2, 0, 0))
-      .enabled(tripleTapEnabled)
+      .onEnd(() => runOnJS(stableTripleTapRelease)(2, 0, 0, 0, 0))
+      .enabled(p2TripleTapLive)
     const pan = Gesture.Pan()
       .maxPointers(1)
       .minDistance(0)
       // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
-      .onBegin(() => runOnJS(stableTripleTapSwipeStart)(2))
-      // eslint-disable-next-line react-hooks/refs -- see p1TripleTapGesture's own comment above
-      .onEnd((e) => runOnJS(stableTripleTapPressOrSwipeEnd)(2, e.translationX, e.translationY))
-      .enabled(tripleTapEnabled)
+      .onEnd((e) => runOnJS(stableTripleTapRelease)(2, e.translationX, e.translationY, e.velocityX, e.velocityY))
+      .enabled(p2TripleTapLive)
     return Gesture.Race(tap, pan)
-  }, [stableTripleTapSwipeStart, stableTripleTapPressOrSwipeEnd, phase])
+  }, [stableTripleTapRelease, p2TripleTapLive])
 
   // Coin flip's own "go" tap - spans the whole board (no zones, no player-attribution, unlike the
   // faceoff pair above), and disables itself the instant it's used so this same tap can't
@@ -993,13 +972,13 @@ export default function GameScreen() {
         </GestureDetector>
 
         {/* Triple-tap zones - same bottom/top-half positions as the faceoff pair above (see
-            p1TripleTapGesture's own comment), only ever pointer-active during 'tripleTap'. `key`
-            forces a full remount (see p1TripleTapKey's own comment) after every press. */}
-        <GestureDetector key={`p1-${p1TripleTapKey}`} gesture={p1TripleTapGesture}>
-          <View style={isUpsideDown ? styles.faceoffZoneTop : styles.faceoffZoneBottom} pointerEvents={phase === 'tripleTap' ? 'auto' : 'none'} />
+            p1TripleTapGesture's own comment), pointer-active only while that player's zone is live.
+            `key` forces a full remount (see tripleTapKeys) after every press. */}
+        <GestureDetector key={`p1-${tripleTapKeys[0]}`} gesture={p1TripleTapGesture}>
+          <View style={isUpsideDown ? styles.faceoffZoneTop : styles.faceoffZoneBottom} pointerEvents={p1TripleTapLive ? 'auto' : 'none'} />
         </GestureDetector>
-        <GestureDetector key={`p2-${p2TripleTapKey}`} gesture={p2TripleTapGesture}>
-          <View style={isUpsideDown ? styles.faceoffZoneBottom : styles.faceoffZoneTop} pointerEvents={phase === 'tripleTap' ? 'auto' : 'none'} />
+        <GestureDetector key={`p2-${tripleTapKeys[1]}`} gesture={p2TripleTapGesture}>
+          <View style={isUpsideDown ? styles.faceoffZoneBottom : styles.faceoffZoneTop} pointerEvents={p2TripleTapLive ? 'auto' : 'none'} />
         </GestureDetector>
 
         {/* Coin flip's "go" tap zone - the whole board, not split into halves like the faceoff

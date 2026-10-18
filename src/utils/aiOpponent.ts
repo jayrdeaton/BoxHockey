@@ -1,6 +1,5 @@
-import { FRICTION_LEVELS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, TRIPLE_TAP_MAX_DRAG_PIXELS } from '@/constants/game'
+import { FRICTION_LEVELS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/constants/game'
 import { BoardLayout, Player, PuckState } from '@/types'
-import { tripleTapZoneCenter } from '@/utils/board'
 import { stepPhysics } from '@/utils/physics'
 
 export type AIDifficulty = 'easy' | 'medium' | 'hard'
@@ -195,17 +194,16 @@ export function rollFaceoffWrongZone(difficulty: AIDifficulty): boolean {
   return Math.random() < FACEOFF_WRONG_ZONE_CHANCE[difficulty]
 }
 
-// 'tripleTap' mode's CPU swipe planner - the CPU's own synthetic third-press drag, aimed roughly
-// from its own zone at the opponent's goal, difficulty-scaled angle jitter and power. Same jitter-
-// model spirit as computeFaceoffKnock's own angle/power split (utils/faceoff.ts), but flat per-
-// difficulty rather than margin/reaction-driven - there's no analogous "how contested" signal here
-// (see TipoffMode's own doc comment: the launch vector is always just the plain sum of both
-// players' swipes, so the CPU's own contribution just needs to be a plausible drag, not a
-// procedurally "correct" one). Returns a raw {dx,dy} drag - the SAME resolveTripleTapSwipeVelocity
-// math in useGameState.ts runs over this afterward, no shortcut.
+// 'tripleTap' mode's CPU swipe planner - the CPU's own synthetic swipe off the center dot, aimed
+// roughly at the opponent's goal with difficulty-scaled angle jitter and power. Same jitter-model
+// spirit as computeFaceoffKnock's own angle/power split (utils/faceoff.ts), but flat per
+// difficulty. Returns a raw flick gesture (drag {dx,dy} plus release {vx,vy}); the SAME
+// resolveStrikeVelocity('flick', ...) gate and math in useGameState.ts runs over it afterward, no
+// shortcut, so the drag is sized comfortably past MIN_SHOOT_DRAG and the speed past
+// MIN_FLICK_VELOCITY.
 interface TripleTapSwipeTuning {
   aimJitterDeg: number
-  powerMin: number // fraction of TRIPLE_TAP_MAX_DRAG_PIXELS
+  powerMin: number // fraction of MAX_FLICK_VELOCITY
   powerMax: number
 }
 const TRIPLE_TAP_SWIPE_TUNING: Record<AIDifficulty, TripleTapSwipeTuning> = {
@@ -214,22 +212,20 @@ const TRIPLE_TAP_SWIPE_TUNING: Record<AIDifficulty, TripleTapSwipeTuning> = {
   hard: { aimJitterDeg: 6, powerMin: 0.7, powerMax: 1.0 }
 }
 
-export function planTripleTapSwipe(board: BoardLayout, cpuPlayer: Player, difficulty: AIDifficulty): { dx: number; dy: number } {
+export function planTripleTapSwipe(cpuPlayer: Player, difficulty: AIDifficulty): { dx: number; dy: number; vx: number; vy: number } {
   const tuning = TRIPLE_TAP_SWIPE_TUNING[difficulty]
-  const zone = tripleTapZoneCenter(board, cpuPlayer)
-  const targetY = cpuPlayer === 1 ? board.y : board.y + board.height
-  const goalCenterX = board.x + (board.goalLeft + board.goalRight) / 2
-  const baseAngle = Math.atan2(targetY - zone.y, goalCenterX - zone.x)
+  // P1 shoots up at the top goal, P2 down at the bottom one; the puck sits on the goals' own X.
+  const baseAngle = cpuPlayer === 1 ? -Math.PI / 2 : Math.PI / 2
   const noiseRad = ((Math.random() * 2 - 1) * tuning.aimJitterDeg * Math.PI) / 180
   const angle = baseAngle + noiseRad
-  const magnitude = (tuning.powerMin + Math.random() * (tuning.powerMax - tuning.powerMin)) * TRIPLE_TAP_MAX_DRAG_PIXELS
-  return { dx: Math.cos(angle) * magnitude, dy: Math.sin(angle) * magnitude }
+  const speed = Math.max(MIN_FLICK_VELOCITY * 1.5, (tuning.powerMin + Math.random() * (tuning.powerMax - tuning.powerMin)) * MAX_FLICK_VELOCITY)
+  const drag = MIN_SHOOT_DRAG * 3
+  return { dx: Math.cos(angle) * drag, dy: Math.sin(angle) * drag, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed }
 }
 
 // Flat, not difficulty-tiered - how long the CPU's synthetic drag takes barely matters for feel,
-// only its final direction/power (planTripleTapSwipe above) does. Just enough to separate the
-// swipe's touch-down (TRIPLE_TAP_SWIPE_START) from its release (TRIPLE_TAP_SWIPE_END) in
-// useTripleTap.ts's timer chain.
+// only its final direction/power (planTripleTapSwipe above) does. Added onto the CPU's reaction
+// time in useTripleTap.ts, since a swipe lands at its release, not its touch-down.
 export function randomTripleTapDragDurationMs(): number {
   return 80 + Math.random() * 100
 }

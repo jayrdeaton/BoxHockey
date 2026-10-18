@@ -221,16 +221,12 @@ export const FACEOFF_PRESS_RIPPLE_DURATION_MS = 280
 export const FACEOFF_GUESS_BONUS_MS = 60
 
 // 'tripleTap' mode (see TipoffMode's own doc comment in types/index.ts and useTripleTap.ts).
-// Radius (as a fraction of board width) of each player's own single press/swipe zone - a bit
-// larger than FACEOFF_ZONE_RADIUS_RATIO since this is one non-paired target, not two to
-// distinguish between.
-export const TRIPLE_TAP_ZONE_RADIUS_RATIO = 0.2
-// The third press's real power cap - drag distance (finger's net displacement from touch-down to
-// release) up to this many pixels maps linearly to swipe power, same distance-based mechanic
-// MAX_STICK_PULLBACK_PIXELS drives for the ordinary 'pull'/'push' shot - reusing that exact value
-// as this mode's starting point rather than an unrelated new number, tunable independently by feel
-// once this is in front of a real device.
-export const TRIPLE_TAP_MAX_DRAG_PIXELS = MAX_STICK_PULLBACK_PIXELS
+// Taps each player makes, in step with the other, before the swipe race.
+export const TRIPLE_TAP_TAPS = 3
+// How long after the first swipe launches the puck the other player's swipe still clashes with it
+// (adds onto the moving puck). Long enough for a near-tie to count, short enough that a player who
+// waits to see where the puck went can't steer it. First-pass value, tune by feel on a device.
+export const TRIPLE_TAP_CLASH_WINDOW_MS = 250
 // Expand+fade duration (ms) of Board.tsx's directional swipe-captured flash - longer than
 // FACEOFF_PRESS_RIPPLE_DURATION_MS since this is showing a whole direction+power, not just a
 // reaction-speed blip.

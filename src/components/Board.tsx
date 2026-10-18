@@ -6,9 +6,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { cancelAnimation, Easing, interpolateColor, SharedValue, useDerivedValue, useFrameCallback, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated'
 
-import { COIN_FLIP_BASE_HALF_TURNS, COIN_FLIP_FADE_MS, COIN_FLIP_HOLD_MS, COIN_FLIP_MIN_SCALE_X, COIN_FLIP_SPIN_MS, COIN_FLIP_TRAVEL_MS, COLORS, CONTROL_SCHEME_SIGN, FACEOFF_COUNTDOWN_STEP_MS, FACEOFF_PRESS_RIPPLE_DURATION_MS, GOAL_BOARD_FLASH_DECAY_MS, GOAL_BOARD_FLASH_PEAK_OPACITY, GOAL_CREASE_FLASH_PEAK_OPACITY, GOAL_LINE_STROKE_WIDTH, GOAL_WEDGE_FLASH_FINAL_BLINKS, GOAL_WEDGE_FLASH_FINAL_MS, GOAL_WEDGE_FLASH_SEG_MS, GOAL_WEDGE_FLASH_STEP_MS, GOAL_WEDGE_SWEEP_BUDGET_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, PUCK_BURST_DURATION_MS, PUCK_BURST_MAX_DIST_RATIO, PUCK_BURST_SHARD_COUNT, PUCK_SCORE_FADE_DELAY_MS, PUCK_SCORE_FADE_MS, STRIKE_DURATION_MS, TRIPLE_TAP_SWIPE_FLASH_DURATION_MS } from '@/constants/game'
+import { COIN_FLIP_BASE_HALF_TURNS, COIN_FLIP_FADE_MS, COIN_FLIP_HOLD_MS, COIN_FLIP_MIN_SCALE_X, COIN_FLIP_SPIN_MS, COIN_FLIP_TRAVEL_MS, COLORS, CONTROL_SCHEME_SIGN, FACEOFF_COUNTDOWN_STEP_MS, FACEOFF_PRESS_RIPPLE_DURATION_MS, GOAL_BOARD_FLASH_DECAY_MS, GOAL_BOARD_FLASH_PEAK_OPACITY, GOAL_CREASE_FLASH_PEAK_OPACITY, GOAL_LINE_STROKE_WIDTH, GOAL_WEDGE_FLASH_FINAL_BLINKS, GOAL_WEDGE_FLASH_FINAL_MS, GOAL_WEDGE_FLASH_SEG_MS, GOAL_WEDGE_FLASH_STEP_MS, GOAL_WEDGE_SWEEP_BUDGET_MS, MAX_FLICK_VELOCITY, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, PUCK_BURST_DURATION_MS, PUCK_BURST_MAX_DIST_RATIO, PUCK_BURST_SHARD_COUNT, PUCK_SCORE_FADE_DELAY_MS, PUCK_SCORE_FADE_MS, STRIKE_DURATION_MS, TRIPLE_TAP_SWIPE_FLASH_DURATION_MS, TRIPLE_TAP_TAPS } from '@/constants/game'
 import { AimIndicator, BoardLayout, ControlScheme, FaceoffState, GamePhase, Player, PuckState, ShotPreviewLength, TripleTapState } from '@/types'
-import { faceoffZoneCenter, faceoffZoneRadius, tripleTapZoneCenter, tripleTapZoneRadius } from '@/utils/board'
+import { faceoffZoneCenter, faceoffZoneRadius } from '@/utils/board'
 import { computeGoalWedges } from '@/utils/goalWedges'
 import { computeAimVector, computeTrajectory, TrajectoryPoint } from '@/utils/physics'
 
@@ -922,33 +922,26 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   const p1RippleO = useDerivedValue(() => (1 - p1RippleProgress.value) * 0.85)
   const p2RippleO = useDerivedValue(() => (1 - p2RippleProgress.value) * 0.85)
 
-  // ─── Triple-tap zones ───────────────────────────────────────────────────────
-  // One zone per player (not a pair like faceoff's own - see tripleTapZoneCenter's own comment in
-  // utils/board.ts: no hidden target, so no zoneIndex dimension) - this mirrors the faceoff block's
-  // techniques above (pulsing ring, latched press ripple) at that simpler cardinality.
-  const tripleTapRadius = tripleTapZoneRadius(board)
-  const tripleTapCenters: { cx: number; cy: number; color: string; player: Player }[] = ([1, 2] as Player[]).map((player) => {
-    const c = tripleTapZoneCenter(board, player)
-    return { cx: c.x, cy: c.y, color: player === 1 ? p1Color : p2Color, player }
-  })
-  // Dot radius (as a fraction of tripleTapRadius) grows with tapCount - 0/1/2 - so the dot itself
-  // doubles as a "how many presses landed" cue with no separate counter UI, the same "the drawing
-  // itself is the state" spirit as faceoffDotRadius's live/resting split above.
-  const TRIPLE_TAP_DOT_RADII = [0.14, 0.24, 0.34] as const
+  // ─── Triple-tap cues ────────────────────────────────────────────────────────
+  // No zone of its own: a player taps anywhere in their half (see game.tsx), and the cue is drawn
+  // on that player's two existing face-off circles (faceoffCenters above), which fill a little more
+  // with each counted tap, ripple on every tap, and breathe once all TRIPLE_TAP_TAPS are in. A row
+  // of small pips between the two circles counts the taps. Live only during the draw itself; the
+  // ripple and swipe streak below are latched so they finish after the puck's launched.
+  const tripleTapDrawing = tripleTap !== null && phase === 'tripleTap'
+  const tripleTapPipRadius = faceoffRadius * 0.12
+  const tripleTapPipGap = tripleTapPipRadius * 3.2
 
-  // "Armed, go for it" breathing invite once a player's own 2 taps are in and they haven't swiped
-  // yet - same withRepeat/ping-pong shape as p1ReadyPulse/p2ReadyPulse above, just gated on
-  // tapCount reaching 2 instead of "hasn't readied yet". Safe to derive live (never needs to
-  // survive `tripleTap` going null the way the ripple/flash below do) since this is a live "is this
-  // still true right now" cue, not a moment to preserve.
+  // "All taps in, go for it" breathing invite - same withRepeat/ping-pong shape as
+  // p1ReadyPulse/p2ReadyPulse above, gated on a player having every tap in and not having swiped.
   const p1TripleTapArmedPulse = useSharedValue(0)
   const p2TripleTapArmedPulse = useSharedValue(0)
-  const p1TripleTapArmed = tripleTap !== null && tripleTap.tapCount[0] === 2 && tripleTap.swipe[0] === null
-  const p2TripleTapArmed = tripleTap !== null && tripleTap.tapCount[1] === 2 && tripleTap.swipe[1] === null
+  const p1TripleTapArmed = tripleTapDrawing && tripleTap.tapCount[0] === TRIPLE_TAP_TAPS && tripleTap.swipe[0] === null
+  const p2TripleTapArmed = tripleTapDrawing && tripleTap.tapCount[1] === TRIPLE_TAP_TAPS && tripleTap.swipe[1] === null
   useEffect(() => {
     if (p1TripleTapArmed) {
       p1TripleTapArmedPulse.value = 0
-      p1TripleTapArmedPulse.value = withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }), -1, true)
+      p1TripleTapArmedPulse.value = withRepeat(withTiming(1, { duration: 450, easing: Easing.inOut(Easing.sin) }), -1, true)
     } else {
       cancelAnimation(p1TripleTapArmedPulse)
       p1TripleTapArmedPulse.value = 0
@@ -957,16 +950,16 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
   useEffect(() => {
     if (p2TripleTapArmed) {
       p2TripleTapArmedPulse.value = 0
-      p2TripleTapArmedPulse.value = withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }), -1, true)
+      p2TripleTapArmedPulse.value = withRepeat(withTiming(1, { duration: 450, easing: Easing.inOut(Easing.sin) }), -1, true)
     } else {
       cancelAnimation(p2TripleTapArmedPulse)
       p2TripleTapArmedPulse.value = 0
     }
   }, [p2TripleTapArmed]) // eslint-disable-line react-hooks/exhaustive-deps
-  const p1TripleTapRingOpacity = useDerivedValue(() => 0.3 + p1TripleTapArmedPulse.value * 0.3)
-  const p2TripleTapRingOpacity = useDerivedValue(() => 0.3 + p2TripleTapArmedPulse.value * 0.3)
+  const p1TripleTapArmedOpacity = useDerivedValue(() => 0.25 + p1TripleTapArmedPulse.value * 0.35)
+  const p2TripleTapArmedOpacity = useDerivedValue(() => 0.25 + p2TripleTapArmedPulse.value * 0.35)
 
-  // Press ripple - fires on EVERY press (taps 1, 2, and the swipe's own touch-down alike, see
+  // Press ripple - fires on EVERY counted press (each tap, and the swipe alike, see
   // TripleTapState.pressFlash's own doc comment), latched into local boolean state rather than
   // derived live from `tripleTap.pressFlash !== null` for the exact reason the faceoff ripple above
   // latches its own zone: tripleTap goes null the instant TRIPLE_TAP_LAUNCH fires, so a live
@@ -993,9 +986,8 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
       p2TripleTapRippleProgress.value = withTiming(1, { duration: FACEOFF_PRESS_RIPPLE_DURATION_MS, easing: Easing.out(Easing.cubic) })
     }
   }, [tripleTap?.pressFlash]) // eslint-disable-line react-hooks/exhaustive-deps
-  const tripleTapRippleExpand = tripleTapRadius * 0.85
-  const p1TripleTapRippleR = useDerivedValue(() => tripleTapRadius + p1TripleTapRippleProgress.value * tripleTapRippleExpand)
-  const p2TripleTapRippleR = useDerivedValue(() => tripleTapRadius + p2TripleTapRippleProgress.value * tripleTapRippleExpand)
+  const p1TripleTapRippleR = useDerivedValue(() => faceoffRadius + p1TripleTapRippleProgress.value * faceoffRippleExpand)
+  const p2TripleTapRippleR = useDerivedValue(() => faceoffRadius + p2TripleTapRippleProgress.value * faceoffRippleExpand)
   const p1TripleTapRippleO = useDerivedValue(() => (1 - p1TripleTapRippleProgress.value) * 0.85)
   const p2TripleTapRippleO = useDerivedValue(() => (1 - p2TripleTapRippleProgress.value) * 0.85)
 
@@ -1023,7 +1015,8 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
       p2SwipeFlashProgress.value = withTiming(1, { duration: TRIPLE_TAP_SWIPE_FLASH_DURATION_MS, easing: Easing.out(Easing.cubic) })
     }
   }, [tripleTap?.swipe]) // eslint-disable-line react-hooks/exhaustive-deps
-  const tripleTapFlashLength = tripleTapRadius * 1.6
+  // Drawn from the center dot, where the puck sat when it was hit.
+  const tripleTapFlashLength = faceoffRadius * 2.4
   const p1SwipeFlashO = useDerivedValue(() => (1 - p1SwipeFlashProgress.value) * 0.9)
   const p2SwipeFlashO = useDerivedValue(() => (1 - p2SwipeFlashProgress.value) * 0.9)
 
@@ -1283,40 +1276,51 @@ export default function Board({ board, puck, aim, phase, currentPlayer, aimingPl
             )
           })}
 
-          {/* Triple-tap zones - see the comment above (tripleTapCenters). One zone per player: the
-            ring dims/brightens with the armed pulse once tapCount reaches 2, the center dot grows
-            with tapCount so it reads as a "how many left" cue on its own, the ripple fires on every
-            press (all 3), and a brief directional streak marks the swipe's own captured angle. */}
-          {tripleTap &&
-            tripleTapCenters.map((c) => {
-              const idx = c.player - 1
-              const dotRadius = tripleTapRadius * TRIPLE_TAP_DOT_RADII[tripleTap.tapCount[idx]]
+          {/* Triple-tap cues on the face-off circles - see the comment above (tripleTapDrawing):
+            a fill that deepens with each counted tap (breathing once all are in), a ripple on each
+            tap, the tap pips between the circles, and a streak from center along each swipe. */}
+          {tripleTapDrawing &&
+            faceoffCenters.map((c, i) => {
+              const taps = tripleTap.tapCount[c.player - 1]
               const armed = c.player === 1 ? p1TripleTapArmed : p2TripleTapArmed
-              const ringOpacity = c.player === 1 ? p1TripleTapRingOpacity : p2TripleTapRingOpacity
-              const rippleActive = c.player === 1 ? p1TripleTapRippleActive : p2TripleTapRippleActive
-              const rippleR = c.player === 1 ? p1TripleTapRippleR : p2TripleTapRippleR
-              const rippleO = c.player === 1 ? p1TripleTapRippleO : p2TripleTapRippleO
-              const flashAngle = c.player === 1 ? p1SwipeFlashAngle : p2SwipeFlashAngle
-              const flashO = c.player === 1 ? p1SwipeFlashO : p2SwipeFlashO
+              const armedOpacity = c.player === 1 ? p1TripleTapArmedOpacity : p2TripleTapArmedOpacity
               return (
-                <Group key={c.player}>
-                  <Group opacity={armed ? ringOpacity : 1}>
-                    <Circle cx={c.cx} cy={c.cy} r={tripleTapRadius} style='stroke' strokeWidth={1.5} color={c.color} />
-                  </Group>
-                  <Circle cx={c.cx} cy={c.cy} r={dotRadius} color={c.color} />
-                  {rippleActive && (
-                    <Group opacity={rippleO}>
-                      <Circle cx={c.cx} cy={c.cy} r={rippleR} style='stroke' strokeWidth={2.5} color={c.color} />
-                    </Group>
-                  )}
-                  {flashAngle !== null && (
-                    <Group opacity={flashO}>
-                      <Line p1={vec(c.cx, c.cy)} p2={vec(c.cx + Math.cos(flashAngle) * tripleTapFlashLength, c.cy + Math.sin(flashAngle) * tripleTapFlashLength)} color={c.color} style='stroke' strokeWidth={3} strokeCap='round' />
-                    </Group>
-                  )}
+                <Group key={`tt-fill-${i}`} opacity={armed ? armedOpacity : (taps / TRIPLE_TAP_TAPS) * 0.35}>
+                  <Circle cx={c.cx} cy={c.cy} r={faceoffRadius} color={c.color} />
                 </Group>
               )
             })}
+          {faceoffCenters.map((c, i) => {
+            const rippleActive = c.player === 1 ? p1TripleTapRippleActive : p2TripleTapRippleActive
+            if (!rippleActive) return null
+            const rippleR = c.player === 1 ? p1TripleTapRippleR : p2TripleTapRippleR
+            const rippleO = c.player === 1 ? p1TripleTapRippleO : p2TripleTapRippleO
+            return (
+              <Group key={`tt-ripple-${i}`} opacity={rippleO}>
+                <Circle cx={c.cx} cy={c.cy} r={rippleR} style='stroke' strokeWidth={2.5} color={c.color} />
+              </Group>
+            )
+          })}
+          {tripleTapDrawing &&
+            ([1, 2] as Player[]).map((player) => {
+              const [a, b] = faceoffCenters.filter((c) => c.player === player)
+              const cx = (a.cx + b.cx) / 2
+              const taps = tripleTap.tapCount[player - 1]
+              return Array.from({ length: TRIPLE_TAP_TAPS }, (_, k) => {
+                const px = cx + (k - (TRIPLE_TAP_TAPS - 1) / 2) * tripleTapPipGap
+                return k < taps ? <Circle key={`tt-pip-${player}-${k}`} cx={px} cy={a.cy} r={tripleTapPipRadius} color={a.color} /> : <Circle key={`tt-pip-${player}-${k}`} cx={px} cy={a.cy} r={tripleTapPipRadius} style='stroke' strokeWidth={1.5} color={a.color} />
+              })
+            })}
+          {([1, 2] as Player[]).map((player) => {
+            const flashAngle = player === 1 ? p1SwipeFlashAngle : p2SwipeFlashAngle
+            if (flashAngle === null) return null
+            const flashO = player === 1 ? p1SwipeFlashO : p2SwipeFlashO
+            return (
+              <Group key={`tt-flash-${player}`} opacity={flashO}>
+                <Line p1={vec(board.centerX, board.centerY)} p2={vec(board.centerX + Math.cos(flashAngle) * tripleTapFlashLength, board.centerY + Math.sin(flashAngle) * tripleTapFlashLength)} color={player === 1 ? p1Color : p2Color} style='stroke' strokeWidth={3} strokeCap='round' />
+              </Group>
+            )
+          })}
 
           {/* Zone lines - see the comment above. Shared @tastic/sprites/hockey ZoneLine (confirmed
             identical zoneLineFraction=0.72 geometry, same default 4px strokeWidth/0.5 opacity - two

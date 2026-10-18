@@ -70,15 +70,15 @@ const SHOT_PREVIEW_LENGTH_OPTIONS: MenuOption<ShotPreviewLength>[] = [
 ]
 
 const CONTROL_SCHEME_OPTIONS: MenuOption<ControlScheme>[] = [
+  { value: 'flick', label: 'Flick', description: 'Swipe fast: power comes from speed', icon: 'gesture-swipe' },
   { value: 'pull', label: 'Pull', description: 'Drag back, release to fire', icon: 'arrow-collapse' },
-  { value: 'push', label: 'Push', description: 'Drag toward your shot, release to fire', icon: 'arrow-expand' },
-  { value: 'flick', label: 'Flick', description: 'Swipe fast: power comes from speed', icon: 'gesture-swipe' }
+  { value: 'push', label: 'Push', description: 'Drag toward your shot, release to fire', icon: 'arrow-expand' }
 ]
 
 const ALL_TIPOFF_MODE_OPTIONS: MenuOption<TipoffMode>[] = [
   { value: 'coinFlip', label: 'Coin Flip', description: 'Random pick starts, loser gets the puck', icon: 'hand-coin-outline' },
   { value: 'faceoff', label: 'Face-Off', description: 'Race the tap on every score', icon: 'hockey-puck' },
-  { value: 'tripleTap', label: 'Triple Tap', description: 'Two taps, then swipe to launch', icon: 'gesture-double-tap' }
+  { value: 'tripleTap', label: 'Triple Tap', description: 'Tap 3 times together, then race to swipe', icon: 'gesture-double-tap' }
 ]
 // 'tripleTap' is touch/mobile only - no keyboard equivalent (see game.tsx), so it's hidden from the
 // picker entirely on web rather than offered and left unplayable there. Computed once at module

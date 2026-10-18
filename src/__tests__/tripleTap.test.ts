@@ -1,13 +1,13 @@
-// 'tripleTap' tip-off mode (see TipoffMode's own doc comment in types/index.ts): each player
-// presses their own single zone twice, then their third press is a swipe whose vector is captured.
-// The launch velocity is the plain vector SUM of both players' swipes (combineAndClampVelocity, the
-// same clamp-to-MAX_SPEED helper the ordinary shot mechanic already uses) - there is no shared
-// countdown/beat and no timeout, so the reducer just waits until both swipes land, however long
-// that takes and in whatever order the two players' gesture threads happen to dispatch in.
+// 'tripleTap' tip-off mode (see TipoffMode's own doc comment in types/index.ts): both players tap
+// their own half TRIPLE_TAP_TAPS times in step (a tap only counts while you aren't already ahead),
+// then race to swipe. The first real swipe (judged like a flick shot) launches the puck at once;
+// the other player's swipe within TRIPLE_TAP_CLASH_WINDOW_MS is added onto the moving puck
+// (combineAndClampVelocity, the same clamp-to-MAX_SPEED helper the ordinary shot mechanic uses).
 
-import { FRICTION_LEVELS, MAX_SPEED } from '@/constants/game'
-import { combineAndClampVelocity, makeReducer } from '@/hooks/useGameState'
+import { FRICTION_LEVELS, MAX_SPEED, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, TRIPLE_TAP_CLASH_WINDOW_MS, TRIPLE_TAP_TAPS } from '@/constants/game'
+import { canTripleTap, combineAndClampVelocity, makeReducer } from '@/hooks/useGameState'
 import { BoardLayout, ControlScheme, GameState, Player, TripleTapState } from '@/types'
+import { planTripleTapSwipe } from '@/utils/aiOpponent'
 
 // Same synthetic board faceoff.test.ts/turnAlternation.test.ts use.
 const board: BoardLayout = {
@@ -69,9 +69,8 @@ describe('tripleTap reducer sequencing', () => {
     const tripleTap: TripleTapState = {
       tapCount: [0, 0],
       pressFlash: [null, null],
-      swipeStartedAt: [null, null],
       swipe: [null, null],
-      result: null,
+      clashUntil: null,
       ...overrides
     }
     return {
@@ -95,162 +94,92 @@ describe('tripleTap reducer sequencing', () => {
     }
   }
 
-  it('waits patiently - one player finishes all 3 inputs, the other has not even started: no result yet, phase unchanged', () => {
+  const armed = (): GameState => makeLiveTripleTapState({ tapCount: [TRIPLE_TAP_TAPS, TRIPLE_TAP_TAPS] })
+  // A clearly-real flick, straight up (toward P2's goal at the top).
+  const UP = { dx: 0, dy: -MIN_SHOOT_DRAG * 3, vx: 0, vy: -900 }
+  const swipe = (player: Player, atMs: number, g = UP) => ({ type: 'TRIPLE_TAP_SWIPE' as const, player, atMs, ...g })
+
+  it('keeps the taps in step: a player can lead by one tap, then further taps are ignored until the other catches up', () => {
     let s = makeLiveTripleTapState()
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
+    const ahead = s
     s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 200 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 50, dy: -50 })
-    expect(s.tripleTap?.result).toBeNull()
-    expect(s.phase).toBe('tripleTap')
-    expect(s.tripleTap?.swipe[0]).not.toBeNull()
-    expect(s.tripleTap?.swipe[1]).toBeNull()
+    expect(s).toBe(ahead)
+    expect(s.tripleTap?.tapCount).toEqual([1, 0])
+    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 160 })
+    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 170 })
+    expect(s.tripleTap?.tapCount).toEqual([2, 1])
   })
 
-  it('winner is whichever player initiated their own swipe first - P1 first, even though P1s SWIPE_END is dispatched last', () => {
+  it('counts exactly TRIPLE_TAP_TAPS taps per player, and no more', () => {
     let s = makeLiveTripleTapState()
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 120 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 170 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 200 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 2, atMs: 250 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 2, dx: 10, dy: -10 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 20, dy: -20 })
-    expect(s.tripleTap?.result?.winner).toBe(1)
-  })
-
-  it('winner is whichever player initiated their own swipe first - P2 first', () => {
-    let s = makeLiveTripleTapState()
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 120 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 170 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 2, atMs: 200 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 250 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 10, dy: -10 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 2, dx: 10, dy: 10 })
-    expect(s.tripleTap?.result?.winner).toBe(2)
-  })
-
-  it('winner reflects stored swipeStartedAt timestamps, not which order the two SWIPE_END actions are dispatched in', () => {
-    const runWithOrder = (resolveWithPlayer1Last: boolean) => {
-      let s = makeLiveTripleTapState()
-      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
-      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 120 })
-      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 170 })
-      s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 200 }) // P1 genuinely first
-      s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 2, atMs: 300 })
-      if (resolveWithPlayer1Last) {
-        s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 2, dx: 5, dy: -5 })
-        s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 5, dy: -5 })
-      } else {
-        s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 5, dy: -5 })
-        s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 2, dx: 5, dy: -5 })
-      }
-      return s
+    for (let i = 0; i < TRIPLE_TAP_TAPS + 2; i++) {
+      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: i * 10 })
+      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: i * 10 + 5 })
     }
-    expect(runWithOrder(true).tripleTap?.result?.winner).toBe(1)
-    expect(runWithOrder(false).tripleTap?.result?.winner).toBe(1)
+    expect(s.tripleTap?.tapCount).toEqual([TRIPLE_TAP_TAPS, TRIPLE_TAP_TAPS])
+    expect(canTripleTap(s.tripleTap!, 1)).toBe(false)
   })
 
-  it('an exact tie in swipeStartedAt breaks toward whichever player dispatched the resolving SWIPE_END', () => {
-    let s = makeLiveTripleTapState()
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 120 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 170 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 200 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 2, atMs: 200 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 5, dy: -5 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 2, dx: 5, dy: 5 })
-    expect(s.tripleTap?.result?.winner).toBe(2)
+  it('ignores a swipe until BOTH players have every tap in, even the player who finished first', () => {
+    const s = makeLiveTripleTapState({ tapCount: [TRIPLE_TAP_TAPS, TRIPLE_TAP_TAPS - 1] })
+    expect(reducer(s, swipe(1, 100))).toBe(s)
   })
 
-  it('result.vx/vy is the vector sum of both players own captured swipes, clamped to MAX_SPEED', () => {
-    let s = makeLiveTripleTapState()
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 120 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 170 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 200 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 2, atMs: 250 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 30, dy: 0 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 2, dx: 0, dy: 30 })
-    const [p1Swipe, p2Swipe] = s.tripleTap!.swipe
-    const expected = combineAndClampVelocity(p1Swipe!.vx, p1Swipe!.vy, p2Swipe!.vx, p2Swipe!.vy)
-    expect(s.tripleTap!.result!.vx).toBeCloseTo(expected.vx)
-    expect(s.tripleTap!.result!.vy).toBeCloseTo(expected.vy)
+  it('ignores a swipe too short or too slow to be a flick, so a stray extra tap never launches a dud', () => {
+    const s = armed()
+    expect(reducer(s, swipe(1, 100, { dx: 0, dy: -(MIN_SHOOT_DRAG - 1), vx: 0, vy: -900 }))).toBe(s)
+    expect(reducer(s, swipe(1, 100, { dx: 0, dy: -MIN_SHOOT_DRAG * 3, vx: 0, vy: -(MIN_FLICK_VELOCITY - 1) }))).toBe(s)
   })
 
-  it('TRIPLE_TAP_PRESS past tapCount 2 is a true no-op (same state reference)', () => {
-    let s = makeLiveTripleTapState()
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-    expect(s.tripleTap?.tapCount[0]).toBe(2)
-    const next = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 200 })
-    expect(next).toBe(s)
+  it('the first real swipe launches at once: puck moving its way, swiper is currentPlayer, clash window open', () => {
+    const s = reducer(armed(), swipe(2, 1000))
+    expect(s.phase).toBe('simulating')
+    expect(s.currentPlayer).toBe(2)
+    expect(s.puck.vy).toBeLessThan(0)
+    expect(s.puck.vx).toBeCloseTo(0)
+    expect(s.tripleTap?.clashUntil).toBe(1000 + TRIPLE_TAP_CLASH_WINDOW_MS)
   })
 
-  it('a duplicate TRIPLE_TAP_SWIPE_START once already started is a no-op - the first timestamp is never overwritten', () => {
-    let s = makeLiveTripleTapState()
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 200 })
-    const next = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 999 })
-    expect(next).toBe(s)
-    expect(next.tripleTap?.swipeStartedAt[0]).toBe(200)
+  it('a late swipe inside the window clashes: it adds onto the moving puck and knocks it off its line', () => {
+    let s = reducer(armed(), swipe(1, 1000))
+    const before = s.puck
+    s = reducer(s, swipe(2, 1000 + TRIPLE_TAP_CLASH_WINDOW_MS, { dx: MIN_SHOOT_DRAG * 3, dy: 0, vx: 900, vy: 0 }))
+    expect(s.puck.vx).toBeGreaterThan(0)
+    const expected = combineAndClampVelocity(before.vx, before.vy, s.tripleTap!.swipe[1]!.vx, s.tripleTap!.swipe[1]!.vy)
+    expect(s.puck.vx).toBeCloseTo(expected.vx)
+    expect(s.puck.vy).toBeCloseTo(expected.vy)
+    expect(s.currentPlayer).toBe(1)
+    expect(s.tripleTap?.clashUntil).toBeNull()
   })
 
-  it('a duplicate TRIPLE_TAP_SWIPE_END once already captured is a no-op - the first swipe is never overwritten', () => {
-    let s = makeLiveTripleTapState()
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
-    s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 200 })
-    s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 10, dy: -10 })
-    const next = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 999, dy: 999 })
-    expect(next).toBe(s)
+  it('a swipe after the window is too late and changes nothing', () => {
+    const launched = reducer(armed(), swipe(1, 1000))
+    expect(reducer(launched, swipe(2, 1001 + TRIPLE_TAP_CLASH_WINDOW_MS))).toBe(launched)
   })
 
-  it('TRIPLE_TAP_SWIPE_START before tapCount reaches 2 is rejected', () => {
-    const s = makeLiveTripleTapState({ tapCount: [1, 0] })
-    const next = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 500 })
-    expect(next).toBe(s)
+  it('the launcher cannot clash with their own shot', () => {
+    const launched = reducer(armed(), swipe(1, 1000))
+    expect(reducer(launched, swipe(1, 1050))).toBe(launched)
   })
 
-  it('TRIPLE_TAP_SWIPE_END before tapCount reaches 2 is rejected', () => {
-    const s = makeLiveTripleTapState({ tapCount: [1, 0] })
-    const next = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 10, dy: -10 })
-    expect(next).toBe(s)
+  it('TRIPLE_TAP_CLASH_END clears the leftover draw once the puck is in play, but never a fresh draw', () => {
+    const launched = reducer(armed(), swipe(1, 1000))
+    expect(reducer(launched, { type: 'TRIPLE_TAP_CLASH_END' }).tripleTap).toBeNull()
+    const fresh = makeLiveTripleTapState()
+    expect(reducer(fresh, { type: 'TRIPLE_TAP_CLASH_END' })).toBe(fresh)
   })
 
-  describe('TRIPLE_TAP_LAUNCH', () => {
-    it('only transitions once result is set', () => {
-      const s = makeLiveTripleTapState()
-      const next = reducer(s, { type: 'TRIPLE_TAP_LAUNCH', vx: 1, vy: 1 })
-      expect(next).toBe(s)
-    })
-
-    it('sets the combined velocity, hands currentPlayer to the winner, and clears tripleTap', () => {
-      let s = makeLiveTripleTapState()
-      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 100 })
-      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 150 })
-      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 120 })
-      s = reducer(s, { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 170 })
-      s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 200 })
-      s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_START', player: 2, atMs: 250 })
-      s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: 40, dy: -40 })
-      s = reducer(s, { type: 'TRIPLE_TAP_SWIPE_END', player: 2, dx: 40, dy: -40 })
-      const result = s.tripleTap?.result
-      expect(result).not.toBeNull()
-      const next = reducer(s, { type: 'TRIPLE_TAP_LAUNCH', vx: result!.vx, vy: result!.vy })
-      expect(next.phase).toBe('simulating')
-      expect(next.currentPlayer).toBe(result!.winner)
-      expect(next.tripleTap).toBeNull()
-      expect(next.puck.vx).toBeCloseTo(result!.vx)
-      expect(next.puck.vy).toBeCloseTo(result!.vy)
-    })
+  it("the CPU's planned swipe always passes the flick gate and heads for the opponent's goal", () => {
+    for (const difficulty of ['easy', 'medium', 'hard'] as const) {
+      for (let i = 0; i < 50; i++) {
+        const p1 = planTripleTapSwipe(1, difficulty)
+        const p2 = planTripleTapSwipe(2, difficulty)
+        expect(reducer(armed(), swipe(1, 0, p1)).phase).toBe('simulating')
+        expect(p1.vy).toBeLessThan(0)
+        expect(p2.vy).toBeGreaterThan(0)
+      }
+    }
   })
 })
 
@@ -272,28 +201,7 @@ function mulberry32(seed: number) {
   }
 }
 
-type Rng = () => number
 type Reducer = ReturnType<typeof makeReducer>
-type TripleTapAction = { type: 'TRIPLE_TAP_PRESS'; player: Player; atMs: number } | { type: 'TRIPLE_TAP_SWIPE_START'; player: Player; atMs: number } | { type: 'TRIPLE_TAP_SWIPE_END'; player: Player; dx: number; dy: number }
-
-// Randomly riffles two ordered streams together, preserving each stream's own internal order -
-// unlike a plain full shuffle, this can never reorder ONE player's own 3 actions relative to each
-// other (a single player's own presses/swipe are always strictly sequential in real play, driven
-// by the same finger one gesture at a time; only the RELATIVE order between the two different
-// players' independent streams is genuinely arbitrary - see TripleTapState's own doc comment on
-// why the reducer has to read stored timestamps rather than trust dispatch order for exactly that
-// between-players case).
-function interleave<T>(a: T[], b: T[], rng: Rng): T[] {
-  const result: T[] = []
-  let i = 0
-  let j = 0
-  while (i < a.length || j < b.length) {
-    if (i >= a.length) result.push(b[j++])
-    else if (j >= b.length) result.push(a[i++])
-    else result.push(rng() < 0.5 ? a[i++] : b[j++])
-  }
-  return result
-}
 
 function driveTripleTapFuzzRun(totalDraws: number, seed: number): { draws: number; goals: number; misses: number } {
   const reducer: Reducer = makeReducer(999, 'tripleTap', FRICTION_LEVELS.medium, CONTROL_SCHEME, 0)
@@ -307,34 +215,24 @@ function driveTripleTapFuzzRun(totalDraws: number, seed: number): { draws: numbe
     let state = reducer({ phase: 'idle', currentPlayer: 1, scores: [0, 0], puck: { x: 0, y: 0, vx: 0, vy: 0 }, aim: null, interceptAim: null, pendingShot: null, bounceCount: 0, lastScoredGoal: null, wellEnterCount: 0, lastWellPolarity: null, goalDoorHitCount: 0, lastGoalDoorSide: null, faceoff: null, faceoffRound: 0, tripleTap: null, tripleTapRound: 0 }, { type: 'RESET', board, coinFlipWinner: 1, zoneIndex: 0, faceoffZones: [0, 1], faceoffReadyGuess: [0, 1] })
     if (state.phase !== 'tripleTap') throw new Error(`expected 'tripleTap' after RESET, got '${state.phase}'`)
 
-    const p1Angle = rng() * Math.PI * 2
-    const p2Angle = rng() * Math.PI * 2
-    const p1Mag = 20 + rng() * 100
-    const p2Mag = 20 + rng() * 100
-    const p1Actions: TripleTapAction[] = [
-      { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 10 },
-      { type: 'TRIPLE_TAP_PRESS', player: 1, atMs: 20 },
-      { type: 'TRIPLE_TAP_SWIPE_START', player: 1, atMs: 100 + rng() * 200 },
-      { type: 'TRIPLE_TAP_SWIPE_END', player: 1, dx: Math.cos(p1Angle) * p1Mag, dy: Math.sin(p1Angle) * p1Mag }
-    ]
-    const p2Actions: TripleTapAction[] = [
-      { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 15 },
-      { type: 'TRIPLE_TAP_PRESS', player: 2, atMs: 25 },
-      { type: 'TRIPLE_TAP_SWIPE_START', player: 2, atMs: 100 + rng() * 200 },
-      { type: 'TRIPLE_TAP_SWIPE_END', player: 2, dx: Math.cos(p2Angle) * p2Mag, dy: Math.sin(p2Angle) * p2Mag }
-    ]
-    // The relative order BETWEEN the two players' own streams must not affect the outcome - see
-    // the dedicated dispatch-order-independence test above; this fuzz hammers that invariant across
-    // many random interleavings too.
-    for (const a of interleave(p1Actions, p2Actions, rng)) state = reducer(state, a)
-
-    if (!state.tripleTap?.result) {
-      throw new Error(`tripleTap draw did not resolve after all 8 actions. Final tripleTap: ${JSON.stringify(state.tripleTap)}`)
+    // Taps in step, either player first on each beat.
+    for (let beat = 0; beat < TRIPLE_TAP_TAPS; beat++) {
+      const first: Player = rng() < 0.5 ? 1 : 2
+      state = reducer(state, { type: 'TRIPLE_TAP_PRESS', player: first, atMs: beat * 100 })
+      state = reducer(state, { type: 'TRIPLE_TAP_PRESS', player: other(first), atMs: beat * 100 + 10 })
     }
-    const winner = state.tripleTap.result.winner
-    state = reducer(state, { type: 'TRIPLE_TAP_LAUNCH', vx: state.tripleTap.result.vx, vy: state.tripleTap.result.vy })
-    if (state.phase !== 'simulating') throw new Error(`TRIPLE_TAP_LAUNCH did not enter 'simulating' (phase: ${state.phase})`)
-    if (state.currentPlayer !== winner) throw new Error(`currentPlayer (${state.currentPlayer}) !== tripleTap winner (${winner}) right after launch`)
+    // Then the race: random order, the second swipe sometimes inside the clash window, sometimes not.
+    const winner: Player = rng() < 0.5 ? 1 : 2
+    const flick = () => {
+      const angle = rng() * Math.PI * 2
+      const speed = MIN_FLICK_VELOCITY + rng() * 1200
+      return { dx: Math.cos(angle) * MIN_SHOOT_DRAG * 2, dy: Math.sin(angle) * MIN_SHOOT_DRAG * 2, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed }
+    }
+    state = reducer(state, { type: 'TRIPLE_TAP_SWIPE', player: winner, atMs: 1000, ...flick() })
+    if (state.phase !== 'simulating') throw new Error(`the first swipe did not enter 'simulating' (phase: ${state.phase})`)
+    if (state.currentPlayer !== winner) throw new Error(`currentPlayer (${state.currentPlayer}) !== first swiper (${winner}) right after launch`)
+    state = reducer(state, { type: 'TRIPLE_TAP_SWIPE', player: other(winner), atMs: 1000 + rng() * TRIPLE_TAP_CLASH_WINDOW_MS * 2, ...flick() })
+    if (state.currentPlayer !== winner) throw new Error('a clash changed currentPlayer')
 
     draws++
     const scoresBeforeLaunch = state.scores

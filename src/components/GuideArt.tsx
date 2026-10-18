@@ -122,13 +122,13 @@ export function GuideCoinArt() {
   )
 }
 
-// "Tap, Tap, Swipe": two taps, then a swipe (touch only: the Triple Tap tip-off is hidden on web,
+// "Tap Together, Then Swipe": three taps, then a swipe (touch only: the Triple Tap tip-off is hidden on web,
 // see loadout.tsx's TIPOFF_MODE_OPTIONS).
 export function GuideTripleTapArt() {
   const { colors } = useAutoPaperTheme()
 
   return (
-    <View accessible accessibilityLabel='Tap twice, then swipe' style={styles.shotRow}>
+    <View accessible accessibilityLabel='Tap three times, then swipe' style={styles.shotRow}>
       <Icon source='gesture-double-tap' size={48} color={colors.primary} />
       <SwipeHint direction='up' length={48} />
     </View>

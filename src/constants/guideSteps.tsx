@@ -81,13 +81,14 @@ function getTipoffStep(tipoff: TipoffMode, touch: boolean): GuideStep | null {
         body: touch ? 'Tap anywhere to flip a coin. After a goal, the player who was scored on shoots next.' : 'Click anywhere to flip a coin. After a goal, the player who was scored on shoots next.',
         art: <GuideCoinArt />
       }
-    // Two presses in your own half, then a swipe; once both players' swipes are in, their sum launches
-    // the puck (useGameState.ts's TRIPLE_TAP_* cases).
+    // TRIPLE_TAP_TAPS (3) taps in your own half, kept in step with the other player (a tap only counts
+    // once they've caught up, solo against the CPU too), then a swipe race: the first real swipe hits
+    // the puck off center (useGameState.ts's TRIPLE_TAP_* cases). The late-swipe clash isn't taught.
     case 'tripleTap':
       return touch
         ? {
-            title: 'Tap, Tap, Swipe',
-            body: 'Tap your own half twice, then swipe. Both swipes add up to launch the puck.',
+            title: 'Tap Together, Then Swipe',
+            body: 'Tap your own half 3 times in step, then race to swipe. First swipe hits the puck.',
             art: <GuideTripleTapArt />
           }
         : null
