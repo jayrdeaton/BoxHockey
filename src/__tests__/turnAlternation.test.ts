@@ -416,15 +416,11 @@ describe('turn alternation fuzz - reducer level (no React, no timers)', () => {
   it('faceoff mode: never lets the same player take two consecutive plain shots without a faceoff win or goal in between (300+ shots)', () => {
     const summary = driveFuzzRun('faceoff', 320, 12345)
     expect(summary.shots).toBeGreaterThanOrEqual(300)
-    // eslint-disable-next-line no-console
-    console.log('faceoff mode fuzz summary:', JSON.stringify(summary, null, 2))
   })
 
   it('coinFlip mode: also never lets the same player take two consecutive plain shots without a goal in between (100+ shots)', () => {
     const summary = driveFuzzRun('coinFlip', 120, 67890)
     expect(summary.shots).toBeGreaterThanOrEqual(100)
-    // eslint-disable-next-line no-console
-    console.log('coinFlip mode fuzz summary:', JSON.stringify(summary, null, 2))
   })
 
   it('faceoff mode: a second, differently-seeded run also holds (defense against a seed-specific fluke)', () => {
@@ -438,8 +434,6 @@ describe('turn alternation fuzz - reducer level (no React, no timers)', () => {
   it("flick scheme: turn alternation still holds when STRIKE alone (not STRIKE+APPLY_STRIKE) reaches 'simulating' (300+ shots)", () => {
     const summary = driveFuzzRun('faceoff', 320, 24680, { 1: 'flick', 2: 'flick' })
     expect(summary.shots).toBeGreaterThanOrEqual(300)
-    // eslint-disable-next-line no-console
-    console.log('flick scheme fuzz summary:', JSON.stringify(summary, null, 2))
   })
 })
 

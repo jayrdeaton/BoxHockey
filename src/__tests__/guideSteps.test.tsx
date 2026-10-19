@@ -137,11 +137,17 @@ describe('getGuideSteps', () => {
   })
 
   it("renders every card's art without crashing, whatever the live settings", async () => {
+    // One render per guide (any card that throws fails it), each unmount awaited: RNTL's unmount is
+    // async, and starting the next render before it settles overlaps two act() calls.
     for (const { steps } of everyGuide()) {
-      for (const step of steps) {
-        const view = await render(<View>{step.art}</View>)
-        expect(() => view.unmount()).not.toThrow()
-      }
+      const view = await render(
+        <View>
+          {steps.map((step) => (
+            <View key={step.title}>{step.art}</View>
+          ))}
+        </View>
+      )
+      await view.unmount()
     }
   })
 })

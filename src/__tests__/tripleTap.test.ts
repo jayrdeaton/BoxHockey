@@ -266,8 +266,6 @@ describe('turn alternation fuzz - tipoffMode: tripleTap (reducer level, no React
   it('never gives the launch winner a follow-up turn, hit or miss, across 60 independent draws, in randomized dispatch order', () => {
     const summary = driveTripleTapFuzzRun(60, 424242)
     expect(summary.draws).toBe(60)
-    // eslint-disable-next-line no-console
-    console.log('tripleTap fuzz summary:', JSON.stringify(summary, null, 2))
   })
 
   it('a second, differently-seeded run also holds (defense against a seed-specific fluke)', () => {
