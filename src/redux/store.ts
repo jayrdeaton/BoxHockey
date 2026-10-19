@@ -80,6 +80,12 @@ const rootReducer = combineReducers({
 
 const persistConfig = {
   key: 'root',
+  // On web every Tastic game shares one origin (games.infinitetoken.com) and so one localStorage, where AsyncStorage
+  // keeps this state under keyPrefix + key: the default prefix would make every game's state the same persist:root.
+  // REHYDRATE still reports key 'root', so guideSlice's persistKey is unchanged. It applies on native too; a save under
+  // the old persist:root is left in storage, never read (no shipped build had a root store, see LEGACY_STORAGE_KEYS).
+  // This is the only key the app writes itself (the shared profile roster is @tastic/profile's, shared on purpose).
+  keyPrefix: 'boxhockey:',
   storage: AsyncStorage,
   // redux-persist defaults `timeout` to 5000ms: a failsafe setTimeout scheduled on every PERSIST
   // dispatch to force-resolve rehydrate if storage never responds. It's never cleared once

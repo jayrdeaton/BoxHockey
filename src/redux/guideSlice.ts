@@ -36,4 +36,9 @@ export default slice.reducer
 // change if today's code ever renames a key. Today's build no longer writes boxhockey.settings at all
 // (settings live in the Redux store since 2026-10-07), so a fresh install can't have it when the
 // migrate runs.
+//
+// The root store itself moved from persist:root to boxhockey:root on 2026-10-19 (store.ts's keyPrefix:
+// a colon, so it can never be one of these dotted keys). persist:root is deliberately not listed: no
+// shipped build wrote it, and on the web it is the key every game on games.infinitetoken.com used to
+// share, so finding it says nothing about this player having played BoxHockey.
 export const LEGACY_STORAGE_KEYS: readonly string[] = ['boxhockey.appearance', 'boxhockey.playerColors', 'boxhockey.settings', 'boxhockey.sound', 'boxhockey.vibrate']
