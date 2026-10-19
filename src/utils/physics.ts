@@ -145,6 +145,20 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
   // collision block runs at all, not after.
   const wasBehindTop = y0 + r < board.y
   const wasBehindBottom = y0 - r > board.y + board.height
+  // Settings.rink only: a puck whose CENTER is already past a goal line OUTSIDE the goal's own
+  // x-range at the start of this step went past that line wide of the net (or is rising out of the
+  // pocket behind it), so it can't score on this step either, even though it isn't FULLY behind.
+  // Without this, a puck sliding along just behind the line beside a post could rise into "not fully
+  // behind" by a fraction of a pixel with its center still outside the posts, carry its center into
+  // the goal's x-range on the next step, and get shoved back past the line by that post (the post
+  // loop below only skips a puck that's FULLY behind) - which the score checks read as a fresh
+  // crossing: a goal from behind the net. The Hard CPU plans by replaying stepPhysics, so it found
+  // and took those (seen on Gravity with Rink, 2026-10-18 - see gravityRink.test.ts). Only the score
+  // checks use this; the posts and the one-way door keep wasBehindTop/wasBehindBottom. With rink off
+  // the line outside the mouth is a solid wall, so there's no pocket beside the net to come from.
+  const besideNet = board.behindGoalDepth > 0 && !centerInGoalX0
+  const cameFromBehindTop = wasBehindTop || (besideNet && y0 < board.y)
+  const cameFromBehindBottom = wasBehindBottom || (besideNet && y0 > board.y + board.height)
 
   // A puck that has ALREADY fully cleared the line this frame - BEFORE any corner/goalpost/wall
   // correction below ever touches it - is an unambiguous, already-complete score: return
@@ -155,8 +169,8 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
   // "fully cleared" (y + r < board.y), and a goalpost's own collision radius is puckRadius +
   // postRadius - strictly LARGER than puckRadius alone - so a puck can be both fully cleared and
   // still within a post's collision distance at the same time.
-  if (centerInGoalX && y + r < board.y && !wasBehindTop) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
-  if (centerInGoalX && y - r > board.y + board.height && !wasBehindBottom) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
+  if (centerInGoalX && y + r < board.y && !cameFromBehindTop) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
+  if (centerInGoalX && y - r > board.y + board.height && !cameFromBehindBottom) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
 
   // Settings.rink only (board.cornerRadius === 0 when it's off, so this is always null then): near
   // one of the 4 rounded outer corners, a single concave arc check replaces BOTH the flat
@@ -268,13 +282,14 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
     }
   }
 
-  // wasBehindTop/wasBehindBottom (hoisted above, alongside the early clean-score return) are what
-  // guard the score check below against a puck reaching the goal from BEHIND (wrapped around via a
-  // corner, only reachable when Settings.rink is on) - that must never score, that's where the
-  // net is, even though nothing is physically rendered there. Only a FRESH crossing (wasn't already
-  // fully behind a moment ago) counts. With rink off this is a no-op: the only way to ever get y0
-  // already past the line there is by having already scored the instant it happened, so a live puck
-  // can never start a step already in that state.
+  // cameFromBehindTop/cameFromBehindBottom (hoisted above, alongside the early clean-score return)
+  // are what guard the score check below against a puck reaching the goal from BEHIND (wrapped
+  // around via a corner, or rising out of the pocket beside the net, only reachable when
+  // Settings.rink is on) - that must never score, that's where the net is, even though nothing is
+  // physically rendered there. Only a FRESH crossing (wasn't already fully behind a moment ago, and
+  // wasn't already past the line beside the net) counts. With rink off this is a no-op: the only way
+  // to ever get y0 already past the line there is by having already scored the instant it happened,
+  // so a live puck can never start a step already in that state.
 
   // Settings.rink only: a one-way door at the goal mouth. Open front-to-back - entering (whether it
   // scores on a fresh crossing or continues past into the pocket) is always unobstructed - but
@@ -322,8 +337,8 @@ function stepPhysicsOnce(puck: PuckState, board: BoardLayout, dt: number, fricti
   // Same check as the early return above, run again here: the one-way door just above can push a
   // puck that was behind the line back toward (or past) it, which the early check - evaluated
   // before the whole collision block ran - couldn't have seen yet.
-  if (centerInGoalX && y + r < board.y && !wasBehindTop) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
-  if (centerInGoalX && y - r > board.y + board.height && !wasBehindBottom) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
+  if (centerInGoalX && y + r < board.y && !cameFromBehindTop) return { x, y, vx, vy, scored: 1, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
+  if (centerInGoalX && y - r > board.y + board.height && !cameFromBehindBottom) return { x, y, vx, vy, scored: 2, stopped: false, bounced: false, enteredWell: null, goalDoorHit: null }
 
   if (!corner) {
     if (x - r < board.x) {
@@ -392,10 +407,20 @@ const SUBSTEP_MAX_COUNT = 30
 // Friction composes cleanly across the split (frictionFactor = friction^dt, and
 // friction^(dt/n) raised to the n-th power is exactly friction^dt again), so an ordinary
 // non-tunneling frame behaves identically to before, just resolved in finer-grained steps.
+//
+// A slow frame is also split into steps of at most one nominal 60 Hz frame (dt <= 1), however
+// slowly the puck is moving: the gravity wells, friction and STOP_THRESHOLD are all tuned per 60 Hz
+// frame, and a well's pull grows with dt while STOP_THRESHOLD doesn't. Without this, at a steady dt
+// of about 1.25 or more (40 fps or slower: a dropped-frame simulator, a slow web tab) gravity's
+// center attractor, whose center sits on classic's divider, held a puck touching the divider in a
+// pull-in, bounce-out cycle above STOP_THRESHOLD forever: it looked still, but 'simulating' never
+// ended, so neither seat could shoot. At dt 1 that cycle settles under the threshold and the puck
+// stops. See gravityRink.test.ts.
 export function stepPhysics(puck: PuckState, board: BoardLayout, dt = 1, friction: number = FRICTION_LEVELS.medium): PhysicsResult {
   const speed = Math.hypot(puck.vx, puck.vy)
   const safeMaxDisplacement = board.puckRadius * SUBSTEP_MAX_DISPLACEMENT_RATIO
-  const substeps = speed * dt > safeMaxDisplacement ? Math.min(SUBSTEP_MAX_COUNT, Math.ceil((speed * dt) / safeMaxDisplacement)) : 1
+  const displacementSubsteps = speed * dt > safeMaxDisplacement ? Math.min(SUBSTEP_MAX_COUNT, Math.ceil((speed * dt) / safeMaxDisplacement)) : 1
+  const substeps = Math.max(displacementSubsteps, Math.ceil(dt))
   if (substeps <= 1) return stepPhysicsOnce(puck, board, dt, friction)
 
   const subDt = dt / substeps
@@ -475,6 +500,7 @@ export function computeTrajectory(startX: number, startY: number, dragDx: number
     const substeps = frameSpeed > safeMaxDisplacement ? Math.min(SUBSTEP_MAX_COUNT, Math.ceil(frameSpeed / safeMaxDisplacement)) : 1
 
     for (let sub = 0; sub < substeps; sub++) {
+      const xBefore = x
       const yBefore = y
       x += vx / substeps
       y += vy / substeps
@@ -483,11 +509,15 @@ export function computeTrajectory(startX: number, startY: number, dragDx: number
       // Mirrors stepPhysics' centerInGoalX exactly - see its own comment.
       const centerInGoalX = x > goalAbsLeft && x < goalAbsRight
 
-      // Mirrors stepPhysics' hoisted wasBehindTop/wasBehindBottom + early clean-score return
-      // exactly - see its own comment for why this has to run before the collision block, not after.
+      // Mirrors stepPhysics' hoisted wasBehindTop/wasBehindBottom, its cameFromBehindTop/
+      // cameFromBehindBottom score guard + early clean-score return exactly - see its own comments
+      // for why this has to run before the collision block, not after.
       const wasBehindTop = yBefore + r < board.y
       const wasBehindBottom = yBefore - r > board.y + board.height
-      if (centerInGoalX && ((y + r < board.y && !wasBehindTop) || (y - r > board.y + board.height && !wasBehindBottom))) {
+      const besideNet = board.behindGoalDepth > 0 && !(xBefore > goalAbsLeft && xBefore < goalAbsRight)
+      const cameFromBehindTop = wasBehindTop || (besideNet && yBefore < board.y)
+      const cameFromBehindBottom = wasBehindBottom || (besideNet && yBefore > board.y + board.height)
+      if (centerInGoalX && ((y + r < board.y && !cameFromBehindTop) || (y - r > board.y + board.height && !cameFromBehindBottom))) {
         points.push({ x, y })
         return points
       }
@@ -565,7 +595,7 @@ export function computeTrajectory(startX: number, startY: number, dragDx: number
       // Same check as the early return above, run again here (mirrors stepPhysics exactly): the
       // one-way door just above can push a puck that was behind the line back toward (or past) it,
       // which the early check - evaluated before the collision block ran - couldn't have seen yet.
-      if (centerInGoalX && ((y + r < board.y && !wasBehindTop) || (y - r > board.y + board.height && !wasBehindBottom))) {
+      if (centerInGoalX && ((y + r < board.y && !cameFromBehindTop) || (y - r > board.y + board.height && !cameFromBehindBottom))) {
         points.push({ x, y })
         return points
       }

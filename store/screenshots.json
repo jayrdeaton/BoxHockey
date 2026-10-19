@@ -1,0 +1,14 @@
+{
+  "font": "/System/Library/Fonts/SFNSMono.ttf",
+  "out": "screenshots",
+  "raw": "screenshots/raw",
+  "background": ["#000000", "#000000"],
+  "shots": [
+    { "name": "01-play", "title": "Tabletop Box Hockey, No Ads", "sub": "Flick the puck into their goal" },
+    { "name": "02-home", "title": "Play the CPU or a Friend", "sub": "One Player or Two Player" },
+    { "name": "03-goal", "title": "Every Goal Lights Up", "sub": "First to 3, 5, 7, or 10 goals" },
+    { "name": "04-faceoff", "title": "Win the Face-Off", "sub": "Tap first when your circle lights" },
+    { "name": "05-boards", "title": "Pick Your Board", "sub": "Classic, Gauntlet, or Gravity" },
+    { "name": "06-stats", "title": "Stats and 33 Achievements", "sub": "Bronze, silver, and gold to earn" }
+  ]
+}
