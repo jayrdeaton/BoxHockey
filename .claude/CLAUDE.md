@@ -206,7 +206,7 @@ The web build is meant for https://games.infinitetoken.com/boxhockey/, beside th
 
 ## App Store (2026-10-18)
 
-Jay put BoxHockey in the first iOS pass with Solitaire, Hangman, LightCycles and Snake. Store names are `<Name>Tastic` (`eas.json`'s `submit.production.ios.appName` is `BoxHockeyTastic`); the home-screen name stays `expo.name` BoxHockey.
+Jay put BoxHockey in the first iOS pass with Solitaire, Hangman, LightCycles and Snake. Store names are `<Name>Tastic`, dropping a trailing s from the name first: LightCycles is LightCycleTastic (Jay, 2026-10-19). `eas.json`'s `submit.production.ios.appName` is `BoxHockeyTastic`; the home-screen name stays `expo.name` BoxHockey.
 
 - **Listing:** `store.config.json` (EAS Metadata: title, subtitle "Tabletop Box Hockey. No Ads.", promo text, description, keywords, Games > Sports and Casual, all-None 4+ age rating, URLs on games.infinitetoken.com: `/boxhockey`, `/support`, `/privacy`), modeled on the other four games' files. `eas metadata:lint` passes. Its description counts 33 achievements and names the three tip-offs, the three boards and Rink: recheck it when any of those change. `app.json`'s and `package.json`'s `description` are Games-Web's sentence for the game.
 - **Everything else** (App Privacy, App Review notes, content rights, screenshots, how to redo them, the ship steps) is in `store/README.md`.
