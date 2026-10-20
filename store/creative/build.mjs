@@ -200,7 +200,7 @@ ${puckAt(frame, 8, 3)}
     `
 <div class="overlay" style="left:876px;top:765px;width:1120px;height:1030px;display:flex;flex-direction:column;justify-content:center;gap:70px">
   <div style="font-size:150px;line-height:1.12;font-weight:700">Tabletop<br>Box Hockey</div>
-  <div style="font-size:84px;line-height:1.3;font-weight:700;opacity:0.85">Play the CPU<br>or a Friend</div>
+  <div style="font-size:84px;line-height:1.3;font-weight:700;opacity:0.85">Play a Friend<br>or the CPU</div>
   <div style="display:flex;gap:40px"><div style="width:220px;height:16px;border-radius:8px;background:${p1}"></div><div style="width:220px;height:16px;border-radius:8px;background:${p2}"></div></div>
 </div>
 <div class="overlay" style="left:${phoneLeft - bezel}px;top:${phoneTop - bezel}px;padding:${bezel}px;background:#0a0a0a;border-radius:${radius + bezel}px;box-shadow:0 0 0 4px rgba(255,255,255,0.16),0 50px 140px rgba(255,255,255,0.06)">

@@ -24,7 +24,7 @@ The description names the three ways to tip off, the three boards and Rink, and 
 
 ## Screenshots (uploaded by hand)
 
-Three sets, same six shots and captions in each:
+Three sets, same five shots and captions in each:
 
 - `store/screenshots/iphone-medium/` (1206x2622): **required.** App Store Connect's iPhone slot is "iPhone with Dynamic Island (medium display)", labelled 6.1"/6.3", and only takes 1206x2622 or 1179x2556; a 1320x2868 file there fails with "File dimensions are invalid" (Apple changed this in 2026). Composed from the same 6.9" captures, scaled.
 - `store/screenshots/iphone/` (6.9", 1320x2868): optional slot.
@@ -34,21 +34,22 @@ Check Apple's [screenshot specifications](https://developer.apple.com/help/app-s
 
 The PNGs are build output and are gitignored, along with the raw captures they were made from (`store/screenshots/raw/`). The captions are in `store/screenshots.json`.
 
-How they were made (2026-10-18): a Release build on the iPhone 17 Pro Max and iPad Pro 13" (M5) simulators, status bar pinned to 9:41 with full battery, dark appearance. The saved data was written before first launch (sound off, guide seen, Sam and Riley's profiles, and three weeks of stats and achievements from 53 matches played out on the app's own physics, CPU planner and face-off knock), so every number on the Stats screen is one the app produced. The in-play, goal and face-off shots are frames from screen recordings of real matches (Gravity with Rink against the CPU on Hard, and Classic in Two Player). A compositor puts each capture under its caption in SF Mono Bold (the closest file to the app's Menlo, which macOS only ships as a `.ttc` the compositor can't pick a weight from), on black. The tools (simulator setup, the slim build, frame picking, the compositor) are in Jay's `app-store-prep` skill; the BoxHockey-specific seeding is here in `store/seed/`.
+How they were made (2026-10-18, with 01-play recaptured on Classic and the face-off shot dropped on 2026-10-20): a Release build on the iPhone 17 Pro Max and iPad Pro 13" (M5) simulators, status bar pinned to 9:41 with full battery, dark appearance. The saved data was written before first launch (sound off, guide seen, Sam and Riley's profiles, and three weeks of stats and achievements from 53 matches played out on the app's own physics, CPU planner and face-off knock), so every number on the Stats screen is one the app produced. The in-play and goal shots are frames from screen recordings of real matches (Classic against the CPU on Hard, and Classic in Two Player). The store leads with Classic everywhere: Gravity is still close to experimental, so it is not in the first shot or the search art. A compositor puts each capture under its caption in SF Mono Bold (the closest file to the app's Menlo, which macOS only ships as a `.ttc` the compositor can't pick a weight from), on black. The tools (simulator setup, the slim build, frame picking, the compositor) are in Jay's `app-store-prep` skill; the BoxHockey-specific seeding is here in `store/seed/`.
 
 To redo them:
 
 1. `node store/seed/generate.mjs` (writes `store/seed/seed.json`, gitignored)
 2. Build and install a Release copy on the `AppStore iPhone 6.9` and `AppStore iPad 13` simulators (the skill's `sim-build.sh` and `sim-setup.sh --app`)
 3. `store/seed/reseed.sh <udid> [options]` on each, then capture into `store/screenshots/raw/<device>/<name>.png`:
-   - **01-play:** `--board gravity --rink --difficulty hard`, One Player, Ready, ready up for the face-off, record, then flick a shot up through a gap; use a frame with the puck in flight and no touch ring showing
+   - **01-play:** `--difficulty hard` (Classic, Rink off), One Player, Ready, ready up for the face-off, record, then flick a shot up through a gap; use a frame with the puck in flight and no touch ring showing
    - **02-home:** Home as it opens
    - **03-goal:** `--mode twoPlayer`, Two Player, both Ready, record, and score (you play both seats, so line up a straight shot when the puck stops in the other player's zone); use the frame where the whole board flashes and the crease lights, about 0.1 s after the puck crosses the line
-   - **04-faceoff:** from the same recording, the frame where one circle on each side has lit
-   - **05-boards:** `--mode twoPlayer`, Two Player, tap the board dial (the first one)
-   - **06-stats:** the trophy on Home, scrolled to the Activity box and the first achievements
+   - **04-boards:** `--mode twoPlayer`, Two Player, tap the board dial (the first one)
+   - **05-stats:** the trophy on Home, scrolled to the Activity box and the first achievements
 4. The skill's `compose.mjs store/screenshots.json` (writes all three sets)
 5. Clear Sam and Riley out of the simulators' shared Tastic roster, or Solitaire's next reshoot on them shows them too: BoxHockey copies its seeded profiles into the empty App Group (`@tastic/profile`'s `resolveInitialProfiles`). Shut both simulators down, then remove `sharedProfiles` from `group.com.infinitetoken.tastic.plist` in each one's `data/Containers/Shared/AppGroup/<id>/Library/Preferences/` (`plutil -remove sharedProfiles <plist>`)
+
+The seed writes `boxhockey:root`, which only builds from 2026-10-19 on read: on an older install (the simulators' 2026-10-18 build, as of 2026-10-20) the app ignores it and opens on the guide with sound on, so rebuild, or for a one-off write the same seed under `persist:root`.
 
 Simulator notes from this run: a fresh launch after `reseed.sh` (or after a reboot) can sit on the splash for a minute or two, and `simctl launch` can block that long, so run it in the background. The simulator's touch ring shows in screen recordings for a moment after each tap or swipe. The recorder only writes a frame when the screen changes, so on a still Classic board the skill's `frames.mjs` sheet and grab disagree on timestamps; pull the exact frame with ffmpeg's `select` instead.
 
@@ -57,7 +58,7 @@ Simulator notes from this run: a fresh launch after `reseed.sh` (or after a rebo
 `store/screenshots/header.png` (3840 x 1646) and `store/screenshots/search.png` (3840 x 2560), gitignored like the screenshots. `node store/creative/build.mjs` draws both. Board.tsx is Skia, which doesn't render outside the app, so the header is an SVG redraw of Board's own shapes from the app's real geometry and colors, not a bundled `Board`: `computeBoardLayout` on the iPhone 17 Pro Max layout (Classic, medium puck, Rink off), `faceoffZoneCenters`, `computeGoalWedges`, `DEFAULT_P1_COLOR`/`DEFAULT_P2_COLOR` and Board's dark-mode white walls and lines, with the perimeter walls Board draws on desktop web.
 
 - **Header:** the whole box on its side, red end left and blue end right, red on match point (4 of 5 arcs lit), and the puck just through a divider hole on its way into the blue goal, with fading copies of where it was. The flight is a real shot played out on `stepPhysics` (the script fails if it ever stops scoring). No words: the app's name sits right under it.
-- **Search results:** "Tabletop Box Hockey / Play the CPU or a Friend" in SF Mono Bold (the screenshots' caption font) beside the in-play capture in a phone (`store/screenshots/raw/iphone/01-play.png`, so take the screenshots first).
+- **Search results:** "Tabletop Box Hockey / Play a Friend or the CPU" in SF Mono Bold (the screenshots' caption font) beside the in-play capture in a phone (`store/screenshots/raw/iphone/01-play.png`, so take the screenshots first).
 
 Each comes with `-safe.png` (the safe area from Apple's templates outlined) and `-384.png` (about a search card's size on a phone). They are rendered through the app-store-prep skill's `creative.mjs`, which checks the size and strips any alpha channel.
 
