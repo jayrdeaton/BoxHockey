@@ -2,7 +2,7 @@
   "expo": {
     "name": "BoxHockey",
     "slug": "BoxHockey",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "scheme": "boxhockey",
     "description": "Physics-driven tabletop box hockey. Flick the puck through the gaps and into the other player's goal, against the CPU or a friend across the table.",
     "orientation": "portrait",
