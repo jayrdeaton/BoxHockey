@@ -28,7 +28,9 @@ export interface SeatResultCardsProps {
 // faced player 1). Each card says whether its own player won, with their score first, and has its
 // own Quit and Play Again; either seat's press acts at once, as the single card's did.
 export function SeatResultCards({ winner, scores, playerColor, playerOnColor, spots, onPlayAgain, onQuit }: SeatResultCardsProps) {
-  const { fgMuted } = useOverlayCardColors()
+  // Quit's outlined label is fg, the card's own text color, not Paper's default (the theme's
+  // primary), so neither seat's card shows another seat's color (Jay, 2026-10-20).
+  const { fg, fgMuted } = useOverlayCardColors()
 
   const renderCard = (seat: Player) => {
     const other: Player = seat === 1 ? 2 : 1
@@ -51,7 +53,7 @@ export function SeatResultCards({ winner, scores, playerColor, playerOnColor, sp
         both. Side by side keeps the card short, leaving room in the half for that seat's unlock toasts
         (Jay, 2026-10-20). */}
         <View style={overlayActionStyles.actions}>
-          <Button mode='outlined' onPress={onQuit} style={overlayActionStyles.actionButton}>
+          <Button mode='outlined' onPress={onQuit} style={overlayActionStyles.actionButton} textColor={fg}>
             Quit
           </Button>
           <Button mode='contained' onPress={onPlayAgain} style={overlayActionStyles.actionButton} buttonColor={playerColor[seat]} textColor={playerOnColor[seat]}>

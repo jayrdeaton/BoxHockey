@@ -1096,7 +1096,9 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
   const seatSpots = seatToastSpots(orientation, desktopWeb)
   // The Game Over card and the dialogs' score lines sit on @tastic/hud's OverlayCard, so their text
   // takes its theme colors rather than this screen's literal black/white.
-  const { fgMuted } = useOverlayCardColors()
+  // Quit's outlined label is cardFg, the card's own text color, not Paper's default (the theme's
+  // primary), so neither seat's card shows another seat's color (Jay, 2026-10-20).
+  const { fg: cardFg, fgMuted } = useOverlayCardColors()
   const cardRotationStyle = rotation % 360 !== 0 && { transform: [{ rotate: `${rotation}deg` }] }
   // The 180° upsideDown case also swaps which edge each chip sits on - a pure in-place spin isn't
   // enough there: back is coded at the LEFT edge pointing left, and turning only the glyph 180°
@@ -1163,7 +1165,7 @@ function MatchOverlays({ phase, scores, winner, loser, playerColor, playerOnColo
             </Text>
             {/* hud's action row, as in ConfirmDialog: Quit (outlined) on the left, Play Again (filled) on the right, side by side (Jay, 2026-10-20). */}
             <View style={overlayActionStyles.actions}>
-              <Button mode='outlined' onPress={safeBack} style={overlayActionStyles.actionButton}>
+              <Button mode='outlined' onPress={safeBack} style={overlayActionStyles.actionButton} textColor={cardFg}>
                 Quit
               </Button>
               <Button mode='contained' onPress={onResetGame} style={overlayActionStyles.actionButton} buttonColor={playerColor[loser]} textColor={playerOnColor[loser]}>
