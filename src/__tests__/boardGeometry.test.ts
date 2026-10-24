@@ -1,7 +1,7 @@
-import { FRICTION_LEVELS, GOAL_LINE_STROKE_WIDTH, MAX_SPEED, WALL_POST_RADIUS_RATIO } from '@/constants/game'
-import { BoardVariant, PuckSizeLevel } from '@/types'
-import { computeBoardLayout, faceoffZoneCenters, faceoffZoneRadius } from '@/utils/board'
-import { circleVsRect, computeTrajectory, stepPhysics } from '@/utils/physics'
+import { FRICTION_LEVELS, GOAL_LINE_STROKE_WIDTH, MAX_SPEED, WALL_POST_RADIUS_RATIO } from '@/games/boxhockey/constants/game'
+import { BoardVariant, PuckSizeLevel } from '@/games/boxhockey/types'
+import { computeBoardLayout, faceoffZoneCenters, faceoffZoneRadius } from '@/games/boxhockey/utils/board'
+import { circleVsRect, computeTrajectory, stepPhysics } from '@/games/boxhockey/utils/physics'
 
 // Integration coverage for computeBoardLayout + stepPhysics together, using the REAL layout
 // geometry - unlike physics.test.ts/aiOpponent.test.ts, which construct a synthetic BoardLayout

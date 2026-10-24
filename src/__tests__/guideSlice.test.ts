@@ -1,7 +1,7 @@
 import { createReturningPlayerMigrate, type GuidePersistedState, type GuideStorageReader } from '@tastic/hud/guide'
 
-import { GUIDE_VERSION } from '@/constants/guide'
-import reducer, { guideActions, LEGACY_STORAGE_KEYS, selectGuideVersionSeen } from '@/redux/guideSlice'
+import { GUIDE_VERSION } from '@/games/boxhockey/constants/guide'
+import reducer, { guideActions, LEGACY_STORAGE_KEYS, selectGuideVersionSeen } from '@/games/boxhockey/redux/guideSlice'
 
 const REHYDRATE = 'persist/REHYDRATE'
 // redux-persist's own default persistConfig version (store.ts doesn't set one).
@@ -70,7 +70,7 @@ describe('LEGACY_STORAGE_KEYS', () => {
   })
 })
 
-type StoreModule = typeof import('@/redux/store')
+type StoreModule = typeof import('@/pack')
 type AsyncStorageModule = typeof import('@react-native-async-storage/async-storage')
 
 // The real store.ts, loaded fresh against the in-memory AsyncStorage mock (@infinitetoken/jest-config
@@ -86,7 +86,7 @@ describe('store.ts persistConfig', () => {
       const AsyncStorage = require('@react-native-async-storage/async-storage') as AsyncStorageModule['default']
       // Its multiSet writes before its first await, so storage is seeded before store.ts reads it.
       void AsyncStorage.multiSet(Object.entries(items))
-      loaded = require('@/redux/store') as StoreModule
+      loaded = require('@/pack') as StoreModule
     })
     const { persistor, store } = loaded as StoreModule
     await new Promise<void>((resolve) => {

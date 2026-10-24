@@ -12,20 +12,19 @@
     ],
     "info": {
       "en-US": {
-        "title": "BoxHockeyTastic",
-        "subtitle": "Tabletop Box Hockey. No Ads.",
-        "promoText": "Flick the puck through the gaps and into the other player's goal. Play a friend across the table or the CPU, with no ads and no tracking.",
-        "description": "Physics-driven tabletop box hockey. Flick the puck through the gaps and into the other player's goal, against a friend across the table or the CPU. No ads, no accounts.\n\n• Two Player face to face on one device, or One Player against the CPU (Easy, Medium, or Hard)\n• Take turns shooting, and choose how you shoot, from a fast flick to a slingshot pull\n• Three tip-offs: a Face-Off reaction race, a Coin Flip, or Triple Tap\n• Three boards: Classic, Gauntlet, and Gravity, plus a Rink option with rounded corners and a net behind each goal\n• Set the puck speed, the puck size, and the score to win\n• Player profiles, stats, and 33 achievements\n• Plays offline\n\nPart of the Tastic family of games. Your player profiles are shared with the other Tastic games on your device.\n\nOpen source on GitHub: https://github.com/jayrdeaton/BoxHockey",
+        "title": "PuckTastic",
+        "subtitle": "Four Puck Games. No Ads.",
+        "promoText": "Box Hockey, Air Hockey, Paddles and Breaker in one app. Play a friend across the table or the CPU, with no ads and no tracking.",
+        "description": "Four tabletop puck games in one app: Box Hockey, Air Hockey, Paddles and Breaker. Play a friend face to face on one device, or the CPU. No ads, no accounts.\n\n• Box Hockey: the classic wooden table game. Take turns shooting the puck through the gaps and into their goal. Three tip-offs (a Face-Off reaction race, a Coin Flip, or Triple Tap), three boards (Classic, Gauntlet, and Gravity), a Rink option, and four ways to shoot\n• Air Hockey: the arcade table classic. Guard your goal and fire back, both players at once\n• Paddles: the arcade original. Get the puck past their paddle\n• Breaker: the classic brick breaker. Clear every brick on your own, or play head to head with bricks in the middle\n• Two Player face to face on one device, or One Player against the CPU (Easy, Medium, or Hard)\n• Set each game's score to win, puck speed, and more\n• Player profiles, stats, and 138 achievements across the four games\n• Plays offline\n\nPart of the Tastic family of games. Your player profiles are shared with the other Tastic games on your device.\n\nOpen source on GitHub: https://github.com/jayrdeaton/BoxHockey",
         "keywords": [
-          "air",
+          "air hockey",
+          "box hockey",
           "puck",
+          "paddle",
+          "bricks",
           "table",
-          "flick",
-          "physics",
           "arcade",
           "two player",
-          "multiplayer",
-          "local",
           "versus",
           "pass and play",
           "offline"

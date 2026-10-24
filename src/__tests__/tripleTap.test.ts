@@ -4,10 +4,10 @@
 // the other player's swipe within TRIPLE_TAP_CLASH_WINDOW_MS is added onto the moving puck
 // (combineAndClampVelocity, the same clamp-to-MAX_SPEED helper the ordinary shot mechanic uses).
 
-import { FRICTION_LEVELS, MAX_SPEED, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, TRIPLE_TAP_CLASH_WINDOW_MS, TRIPLE_TAP_TAPS } from '@/constants/game'
-import { canTripleTap, combineAndClampVelocity, makeReducer } from '@/hooks/useGameState'
-import { BoardLayout, ControlScheme, GameState, Player, TripleTapState } from '@/types'
-import { planTripleTapSwipe } from '@/utils/aiOpponent'
+import { FRICTION_LEVELS, MAX_SPEED, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG, TRIPLE_TAP_CLASH_WINDOW_MS, TRIPLE_TAP_TAPS } from '@/games/boxhockey/constants/game'
+import { canTripleTap, combineAndClampVelocity, makeReducer } from '@/games/boxhockey/hooks/useGameState'
+import { BoardLayout, ControlScheme, GameState, Player, TripleTapState } from '@/games/boxhockey/types'
+import { planTripleTapSwipe } from '@/games/boxhockey/utils/aiOpponent'
 
 // Same synthetic board faceoff.test.ts/turnAlternation.test.ts use.
 const board: BoardLayout = {

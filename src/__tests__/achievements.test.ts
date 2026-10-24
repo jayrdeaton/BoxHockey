@@ -1,7 +1,7 @@
-import { ACHIEVEMENT_CATALOG } from '@/constants/achievements'
-import { StatsState } from '@/types'
-import { evaluateUnlockedIds, evaluateUnlockedIdsForProfile, unlockedKey } from '@/utils/achievementEngine'
-import { DEFAULT_PROFILE_STATS, DEFAULT_STATS } from '@/utils/statsValidation'
+import { ACHIEVEMENT_CATALOG } from '@/games/boxhockey/constants/achievements'
+import { StatsState } from '@/games/boxhockey/types'
+import { evaluateUnlockedIds, evaluateUnlockedIdsForProfile, unlockedKey } from '@/games/boxhockey/utils/achievementEngine'
+import { DEFAULT_PROFILE_STATS, DEFAULT_STATS } from '@/games/boxhockey/utils/statsValidation'
 
 function stats(overrides: Partial<StatsState>): StatsState {
   return { ...DEFAULT_STATS, ...overrides }

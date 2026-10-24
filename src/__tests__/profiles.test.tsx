@@ -4,10 +4,10 @@ import { act, render } from '@testing-library/react-native'
 import { AppState } from 'react-native'
 import { Provider } from 'react-redux'
 
-import { ProfilesProvider } from '@/hooks/useProfiles'
-import profileExtensions from '@/redux/profileExtensionsSlice'
-import profileSelection from '@/redux/profileSelectionSlice'
-import { Player } from '@/types'
+import profileExtensions from '@/games/boxhockey/redux/profileExtensionsSlice'
+import { Player } from '@/games/boxhockey/types'
+import { ProfilesProvider } from '@/shell/hooks/useProfiles'
+import profileSelection from '@/shell/redux/profileSelectionSlice'
 
 import { emitAppState } from '../testUtils/appState'
 

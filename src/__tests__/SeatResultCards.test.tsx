@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react-native'
 
-import { SeatResultCards } from '@/components/SeatResultCards'
+import { SeatResultCards } from '@/shared/SeatResultCards'
 
 const COLORS = { 1: '#E53935', 2: '#1E88E5' }
 const ON_COLORS = { 1: '#FFFFFF', 2: '#FFFFFF' }

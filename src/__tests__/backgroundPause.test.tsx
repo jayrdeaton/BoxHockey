@@ -3,12 +3,12 @@ import { act, renderHook } from '@testing-library/react-native'
 import { useEffect } from 'react'
 import { AppState } from 'react-native'
 
-import { FACEOFF_COUNTDOWN_STEP_MS, FRICTION_LEVELS, INTERCEPT_SPEED_THRESHOLDS } from '@/constants/game'
-import { useAIOpponent } from '@/hooks/useAIOpponent'
-import { useFaceoff } from '@/hooks/useFaceoff'
-import { useGameState } from '@/hooks/useGameState'
-import { DEFAULT_SETTINGS } from '@/redux/settingsSlice'
-import { BoardLayout, Player, TipoffMode } from '@/types'
+import { FACEOFF_COUNTDOWN_STEP_MS, FRICTION_LEVELS, INTERCEPT_SPEED_THRESHOLDS } from '@/games/boxhockey/constants/game'
+import { useAIOpponent } from '@/games/boxhockey/hooks/useAIOpponent'
+import { useFaceoff } from '@/games/boxhockey/hooks/useFaceoff'
+import { useGameState } from '@/games/boxhockey/hooks/useGameState'
+import { DEFAULT_SETTINGS } from '@/games/boxhockey/redux/settingsSlice'
+import { BoardLayout, Player, TipoffMode } from '@/games/boxhockey/types'
 
 import { emitAppState } from '../testUtils/appState'
 

@@ -5,8 +5,8 @@ import { readdirSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import type { ReactNode } from 'react'
 
-import { SEAT_TOAST_STACKS, unlockCaption, unlockToasts, useUnlockToasts } from '@/hooks/useUnlockToasts'
-import type { Player } from '@/types'
+import type { Player } from '@/games/boxhockey/types'
+import { SEAT_TOAST_STACKS, unlockCaption, unlockToasts, useUnlockToasts } from '@/shared/useUnlockToasts'
 
 // Every unlock is a toast named for the profile: Vs CPU's on the app's main Toaster, 2 Player's on a Toaster per seat in that seat's half
 // of the screen, turned to face it (SeatToasters), so none is listed on the Game Over card.

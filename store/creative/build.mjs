@@ -3,7 +3,7 @@
 // needs CanvasKit, Reanimated and the theme provider), so the header redraws Board's own shapes as SVG from the app's
 // real geometry and colors: computeBoardLayout on the iPhone 17 Pro Max layout (the screenshots' device), Classic,
 // medium puck, Rink off, faceoffZoneCenters/faceoffZoneRadius for the circles, computeGoalWedges for the score arcs,
-// and the dark theme's colors (DEFAULT_P1_COLOR/DEFAULT_P2_COLOR, Board's white walls and 25% white lines). The puck's
+// and the dark theme's colors (the shell's DEFAULT_SEAT_COLORS, Board's white walls and 25% white lines). The puck's
 // flight is a real shot played out frame by frame on the app's own stepPhysics. The search art's phone shows the
 // in-play screenshot capture (store/screenshots/raw/iphone/01-play.png, so take the screenshots first).
 //
@@ -30,10 +30,11 @@ const CAPTURE = path.join(OUT_DIR, 'raw', 'iphone', '01-play.png')
 const FONT = '/System/Library/Fonts/SFNSMono.ttf'
 
 const ENTRY = `
-export { computeBoardLayout, faceoffZoneCenters, faceoffZoneRadius } from '@/utils/board'
-export { stepPhysics } from '@/utils/physics'
-export { computeGoalWedges } from '@/utils/goalWedges'
-export { DEFAULT_P1_COLOR, DEFAULT_P2_COLOR, FRICTION_LEVELS, GOAL_LINE_STROKE_WIDTH, MAX_SPEED } from '@/constants/game'
+export { computeBoardLayout, faceoffZoneCenters, faceoffZoneRadius } from '@/games/boxhockey/utils/board'
+export { stepPhysics } from '@/games/boxhockey/utils/physics'
+export { computeGoalWedges } from '@tastic/physics'
+export { FRICTION_LEVELS, GOAL_LINE_STROKE_WIDTH, MAX_SPEED } from '@/games/boxhockey/constants/game'
+export { DEFAULT_SEAT_COLORS } from '@/shell/seatColors'
 `
 const RN_STUB = "export const Platform = { OS: 'ios', select: (o) => o.ios ?? o.native ?? o.default }"
 
@@ -57,8 +58,8 @@ try {
   // The iPhone 17 Pro Max's screen and safe area, as in store/seed/generate.mjs.
   const board = m.computeBoardLayout(440, 956, { top: 62, bottom: 34, left: 0, right: 0 }, 'classic', 'medium', false)
   const { x, y, width, height, puckRadius, goalWidth } = board
-  const p1 = m.DEFAULT_P1_COLOR
-  const p2 = m.DEFAULT_P2_COLOR
+  const p1 = m.DEFAULT_SEAT_COLORS[1]
+  const p2 = m.DEFAULT_SEAT_COLORS[2]
   // Board.tsx's dark-mode wallColor and lineColor.
   const wall = '#FFFFFF'
   const line = 'rgba(255,255,255,0.25)'

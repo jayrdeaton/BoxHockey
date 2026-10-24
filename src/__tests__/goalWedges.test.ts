@@ -1,4 +1,4 @@
-import { computeGoalWedges } from '@/utils/goalWedges'
+import { computeGoalWedges } from '@tastic/physics'
 
 describe('computeGoalWedges', () => {
   it('returns exactly `count` wedges', () => {

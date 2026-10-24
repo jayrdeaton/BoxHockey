@@ -1,7 +1,7 @@
-import { FACEOFF_KNOCK_MAX_POWER, FACEOFF_KNOCK_MIN_POWER, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, FRICTION_LEVELS, MAX_SPEED } from '@/constants/game'
-import { makeReducer } from '@/hooks/useGameState'
-import { BoardLayout, ControlScheme, FaceoffState, GameState, Player } from '@/types'
-import { computeFaceoffKnock } from '@/utils/faceoff'
+import { FACEOFF_KNOCK_MAX_POWER, FACEOFF_KNOCK_MIN_POWER, FACEOFF_MARGIN_MAX_MS, FACEOFF_REACTION_MAX_MS, FRICTION_LEVELS, MAX_SPEED } from '@/games/boxhockey/constants/game'
+import { makeReducer } from '@/games/boxhockey/hooks/useGameState'
+import { BoardLayout, ControlScheme, FaceoffState, GameState, Player } from '@/games/boxhockey/types'
+import { computeFaceoffKnock } from '@/games/boxhockey/utils/faceoff'
 
 // Same synthetic board physics.test.ts uses.
 const board: BoardLayout = {

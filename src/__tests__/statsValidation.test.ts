@@ -1,4 +1,4 @@
-import { DEFAULT_PROFILE_STATS, DEFAULT_STATS, isValidStats } from '@/utils/statsValidation'
+import { DEFAULT_PROFILE_STATS, DEFAULT_STATS, isValidStats } from '@/games/boxhockey/utils/statsValidation'
 
 describe('DEFAULT_STATS', () => {
   it('is a zeroed blob that validates', () => {

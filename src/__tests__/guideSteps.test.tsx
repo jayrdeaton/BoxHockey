@@ -1,9 +1,9 @@
 import { render } from '@testing-library/react-native'
 import { View } from 'react-native'
 
-import { getGuideSteps } from '@/constants/guideSteps'
-import { DEFAULT_SETTINGS } from '@/redux/settingsSlice'
-import type { ControlScheme, GameMode, Player, TipoffMode } from '@/types'
+import { getGuideSteps } from '@/games/boxhockey/constants/guideSteps'
+import { DEFAULT_SETTINGS } from '@/games/boxhockey/redux/settingsSlice'
+import type { ControlScheme, GameMode, Player, TipoffMode } from '@/games/boxhockey/types'
 
 // SwipeHint's own rendering is @tastic/hud's to test (it needs Reanimated's useReducedMotion, which
 // this app's Reanimated mock doesn't stub). A plain View stands in for it, so the app-local art
@@ -14,8 +14,9 @@ const SCHEMES: ControlScheme[] = ['flick', 'stick', 'push', 'pull']
 const TIPOFFS: TipoffMode[] = ['faceoff', 'coinFlip', 'tripleTap']
 const MODES: GameMode[] = ['twoPlayer', 'vsCpu']
 
-// A fresh install's live settings: what the auto-shown guide is actually built from.
-const DEFAULTS = { mode: DEFAULT_SETTINGS.gameMode, controls: DEFAULT_SETTINGS.controlScheme, tipoff: DEFAULT_SETTINGS.tipoffMode, scoreToWin: DEFAULT_SETTINGS.scoreToWin }
+// A fresh install's live settings: what the first-tap guide is actually built from. A fresh install
+// starts with the CPU in seat 2 (the shell's opponentSlice.ts).
+const DEFAULTS = { mode: 'vsCpu' as GameMode, controls: DEFAULT_SETTINGS.controlScheme, tipoff: DEFAULT_SETTINGS.tipoffMode, scoreToWin: DEFAULT_SETTINGS.scoreToWin }
 
 function stepsFor(touch: boolean, overrides: Partial<typeof DEFAULTS> = {}) {
   return getGuideSteps({ touch, ...DEFAULTS, ...overrides })
@@ -102,12 +103,12 @@ describe('getGuideSteps', () => {
   it("describes each seat's live shooting style: a shared one in full, different ones per player", () => {
     expect(stepsFor(true, { controls: { 1: 'pull', 2: 'pull' } })[0].body).toBe('Drag from anywhere and let go. The puck flies the opposite way. Longer drags hit harder.')
     expect(stepsFor(true, { controls: { 1: 'push', 2: 'push' } })[0].body).toBe('Drag from anywhere and let go. The puck flies the way you drag. Longer drags hit harder.')
-    expect(stepsFor(true, { controls: { 1: 'flick', 2: 'pull' } })[0].body).toBe('Start anywhere. The puck flies along player 1’s fast swipe and against player 2’s drag.')
-    expect(stepsFor(false, { controls: { 1: 'push', 2: 'flick' } })[0].body).toBe('Start anywhere. The puck flies along player 1’s drag and along player 2’s fast drag.')
+    expect(stepsFor(true, { mode: 'twoPlayer', controls: { 1: 'flick', 2: 'pull' } })[0].body).toBe('Start anywhere. The puck flies along player 1’s fast swipe and against player 2’s drag.')
+    expect(stepsFor(false, { mode: 'twoPlayer', controls: { 1: 'push', 2: 'flick' } })[0].body).toBe('Start anywhere. The puck flies along player 1’s drag and along player 2’s fast drag.')
   })
 
   it("gives a solo player only their own shooting style, never the CPU's leftover one", () => {
-    // vs-CPU has no player 2 picker (loadout.tsx), so controls[2] is whatever it last was.
+    // Against the CPU seat 2 has no shot-style picker (useLoadout.tsx), so controls[2] is whatever it last was.
     expect(stepsFor(true, { mode: 'vsCpu', controls: { 1: 'pull', 2: 'flick' } })[0].body).toBe('Drag from anywhere and let go. The puck flies the opposite way. Longer drags hit harder.')
     expect(stepsFor(false, { mode: 'vsCpu', controls: { 1: 'flick', 2: 'push' } })[0].body).toBe('Drag the mouse fast from anywhere. The puck flies that way. Faster drags hit harder.')
     for (const { mode, steps } of everyGuide()) {

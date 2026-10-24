@@ -1,6 +1,6 @@
-import { BoardLayout } from '@/types'
-import { AIDifficulty, planAIShot, randomAIThinkDelayMs, randomInterceptReactionMs } from '@/utils/aiOpponent'
-import { stepPhysics } from '@/utils/physics'
+import { BoardLayout } from '@/games/boxhockey/types'
+import { AIDifficulty, planAIShot, randomAIThinkDelayMs, randomInterceptReactionMs } from '@/games/boxhockey/utils/aiOpponent'
+import { stepPhysics } from '@/games/boxhockey/utils/physics'
 
 // A standard open board with no obstacles/wells - mirrors the fixture in physics.test.ts.
 const openBoard: BoardLayout = {

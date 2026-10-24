@@ -2,7 +2,7 @@ import { render } from '@testing-library/react-native'
 import { readdirSync, readFileSync, statSync } from 'fs'
 import { join, relative } from 'path'
 
-import { Theme } from '@/components/Theme'
+import { Theme } from '@/shell/components/Theme'
 
 // The status bar is set per screen: the root Stack's screen options (_layout.tsx, from @tastic/core's
 // useRotationAwareStatusBar) hide it while the content is turned, and /game hides it for the whole round.
@@ -18,7 +18,7 @@ jest.mock('@rific/auto-paper', () => ({
   useThemeBridgeProps: (props: object) => props
 }))
 jest.mock('react-redux', () => ({ shallowEqual: () => true, useDispatch: () => () => {}, useSelector: () => ({}) }))
-jest.mock('@/utils/splashGate', () => ({ markSplashReady: () => {}, useSplashReady: () => {} }))
+jest.mock('@/shell/splashGate', () => ({ markSplashReady: () => {}, useSplashReady: () => {} }))
 jest.mock('expo-blur', () => ({ BlurView: () => null }))
 
 const SRC = join(__dirname, '..')

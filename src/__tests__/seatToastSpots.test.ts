@@ -1,4 +1,4 @@
-import { seatToastSpots } from '@/utils/seatToastSpots'
+import { seatToastSpots } from '@/games/boxhockey/utils/seatToastSpots'
 
 // Where each 2 Player seat's unlock toasts go: the half of the screen that's theirs, turned the way they read it.
 describe('seatToastSpots', () => {

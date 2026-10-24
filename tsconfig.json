@@ -2,14 +2,7 @@
   "extends": "@infinitetoken/tsconfig/expo",
   "compilerOptions": {
     "paths": {
-      "@/*": ["./*"],
-      "@/app/*": ["./src/app/*"],
-      "@/components/*": ["./src/components/*"],
-      "@/constants/*": ["./src/constants/*"],
-      "@/hooks/*": ["./src/hooks/*"],
-      "@/redux/*": ["./src/redux/*"],
-      "@/types": ["./src/types/index.ts"],
-      "@/utils/*": ["./src/utils/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"]
