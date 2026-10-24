@@ -42,7 +42,6 @@ args = parser.parse_args()
 
 seed = json.load(open(os.path.join(HERE, 'seed.json')))
 sam, riley = (p['id'] for p in seed['profiles'])
-extensions = {pid: {'controlScheme': args.scheme} for pid in (sam, riley)}
 
 root = {
     'boxhockeyAchievements': {'stats': seed['stats'], 'unlocked': seed['unlocked']},
@@ -53,18 +52,21 @@ root = {
     'paddlesGuide': {'versionSeen': 1},
     'breakerGuide': {'versionSeen': 1},
     'profiles': seed['profiles'],
-    'boxhockeyProfileExtensions': extensions,
     'profileSelection': {'1': sam, '2': riley if args.mode == 'twoPlayer' else None},
     # Seat 2, for the whole pack: a person in Two Player, the CPU otherwise.
     'opponent': {'seatTwo': 'person' if args.mode == 'twoPlayer' else 'cpu'},
+    # Box Hockey's loadout is per player (src/shared/playerSettings.ts): the match settings are
+    # seat 1's player's (Sam's), and each player keeps their own shot style.
     'boxhockeySettings': {
-        'boardVariant': args.board,
-        'rink': args.rink,
-        'shotPreviewLength': args.preview,
-        'aiDifficulty': args.difficulty,
-        'tipoffMode': args.tipoff,
-        'controlScheme': {'1': args.scheme, '2': args.scheme},
+        sam: {
+            'boardVariant': args.board,
+            'rink': args.rink,
+            'shotPreviewLength': args.preview,
+            'aiDifficulty': args.difficulty,
+            'tipoffMode': args.tipoff,
+        },
     },
+    'boxhockeyControls': {sam: args.scheme, riley: args.scheme},
 }
 value = {k: json.dumps(v) for k, v in root.items()}
 value['_persist'] = json.dumps({'version': -1, 'rehydrated': True})

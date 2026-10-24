@@ -1,5 +1,6 @@
 import { GUIDE_VERSION } from '@/games/boxhockey/constants/guide'
 import { selectGuideVersionSeen } from '@/games/boxhockey/redux/guideSlice'
+import { DEFAULT_SETTINGS, playerSettings } from '@/games/boxhockey/redux/settingsSlice'
 
 type StoreModule = typeof import('@/pack')
 type AsyncStorageModule = typeof import('@react-native-async-storage/async-storage')
@@ -85,11 +86,32 @@ describe('a BoxHockey 1.0 save', () => {
     const { store } = await launch({ 'boxhockey:root': oneZero() })
     const state = root(store.getState())
 
-    expect(state.boxhockeySettings).toMatchObject({ boardVariant: 'gravity', scoreToWin: 7 })
+    expect(state.boxhockeySettings).toEqual({ 'guest:1': { boardVariant: 'gravity', scoreToWin: 7 } })
     expect(state.boxhockeyAchievements).toMatchObject({ unlocked: { first_blood: 1760000000000 } })
     expect(selectGuideVersionSeen(store.getState())).toBe(GUIDE_VERSION)
-    expect(state.boxhockeyProfileExtensions).toEqual({ sam: { controlScheme: 'stick' } })
+    expect(state.boxhockeyControls).toEqual({ sam: 'stick' })
     expect(state.sound).toMatchObject({ enabled: false })
+  })
+
+  // 1.0 had one setup for everyone; it's seat 1's player's now. Each seat's shot style goes to the
+  // player in it, and a profile's own saved pick wins over the one it only inherited from its seat.
+  it("gives 1.0's setup to seat 1's guest, and each seat's shot style to its guest", async () => {
+    const { store } = await launch({ 'boxhockey:root': oneZero({ settings: { ...settings, controlScheme: { 1: 'pull', 2: 'push' } } }) })
+    const state = root(store.getState())
+
+    expect(state.boxhockeySettings).toEqual({ 'guest:1': { boardVariant: 'gravity', scoreToWin: 7 } })
+    expect(state.boxhockeyControls).toEqual({ 'guest:1': 'pull', 'guest:2': 'push', sam: 'stick' })
+    expect(playerSettings.select(store.getState())).toEqual({ ...DEFAULT_SETTINGS, boardVariant: 'gravity', scoreToWin: 7, controlScheme: { 1: 'pull', 2: 'flick' } })
+  })
+
+  it("gives 1.0's setup to the profile in seat 1, who loads it with their own shot style", async () => {
+    const twoPlayer = { ...settings, gameMode: 'twoPlayer', controlScheme: { 1: 'pull', 2: 'push' } }
+    const { store } = await launch({ 'boxhockey:root': oneZero({ settings: twoPlayer, profileSelection: { 1: 'sam', 2: 'riley' } }) })
+    const state = root(store.getState())
+
+    expect(state.boxhockeySettings).toEqual({ sam: { boardVariant: 'gravity', scoreToWin: 7 } })
+    expect(state.boxhockeyControls).toEqual({ sam: 'stick', riley: 'push' })
+    expect(playerSettings.select(store.getState())).toEqual({ ...DEFAULT_SETTINGS, boardVariant: 'gravity', scoreToWin: 7, controlScheme: { 1: 'stick', 2: 'push' } })
   })
 
   it("moves 1.0's app-wide settings out of Box Hockey's, and its last mode into seat 2", async () => {
@@ -98,7 +120,7 @@ describe('a BoxHockey 1.0 save', () => {
 
     expect(state.appSettings).toEqual({ lockOrientation: true, lockedRotation: 90, deferBottomEdgeGestures: true })
     expect(state.opponent).toEqual({ seatTwo: 'cpu' })
-    for (const field of ['gameMode', 'lockOrientation', 'lockedRotation', 'deferBottomEdgeGestures']) expect(root(state).boxhockeySettings).not.toHaveProperty(field)
+    for (const field of ['gameMode', 'lockOrientation', 'lockedRotation', 'deferBottomEdgeGestures']) expect(root(state).boxhockeySettings['guest:1']).not.toHaveProperty(field)
   })
 
   it('reads a 2 Player last mode as a person in seat 2', async () => {

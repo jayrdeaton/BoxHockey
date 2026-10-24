@@ -4,7 +4,7 @@ import { act, render } from '@testing-library/react-native'
 import { AppState } from 'react-native'
 import { Provider } from 'react-redux'
 
-import profileExtensions from '@/games/boxhockey/redux/profileExtensionsSlice'
+import { playerSettings } from '@/games/boxhockey/redux/settingsSlice'
 import { Player } from '@/games/boxhockey/types'
 import { ProfilesProvider } from '@/shell/hooks/useProfiles'
 import profileSelection from '@/shell/redux/profileSelectionSlice'
@@ -58,8 +58,8 @@ beforeEach(() => {
 // and seat selection as the persisted state, and lets the initial reconciliation land.
 async function mountProfiles(local: BaseProfile[], selection: Record<Player, string | null>) {
   const store = configureStore({
-    reducer: combineReducers({ profiles: profilesReducer, profileExtensions, profileSelection }),
-    preloadedState: { profiles: local, profileExtensions: { [bo.id]: { controlScheme: 'push' } }, profileSelection: selection }
+    reducer: combineReducers({ profiles: profilesReducer, boxhockeyControls: playerSettings.controlsReducer, profileSelection }),
+    preloadedState: { profiles: local, boxhockeyControls: { [bo.id]: 'push' }, profileSelection: selection }
   })
   await render(
     <Provider store={store}>
@@ -112,6 +112,6 @@ describe('ProfilesProvider seat selection', () => {
     await returnToForeground()
     expect(store.getState().profiles).toEqual([ada, bo])
     expect(store.getState().profileSelection).toEqual({ 1: ada.id, 2: bo.id })
-    expect(store.getState().profileExtensions).toEqual({ [bo.id]: { controlScheme: 'push' } })
+    expect(store.getState().boxhockeyControls).toEqual({ [bo.id]: 'push' })
   })
 })

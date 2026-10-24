@@ -1,22 +1,24 @@
-import { ControlScheme, Player, Settings } from '@/games/airhockey/types'
+import { ControlScheme } from '@/games/airhockey/types'
 import type { GameDefinition } from '@/shell/types'
 
 import { getGuideSteps } from './constants/guideSteps'
 import { achievementsActions, achievementsReducer, GameStatsProvider } from './hooks/useGameStats'
 import PlayScreen from './PlayScreen'
 import guide, { GUIDE_VERSION, guideActions, selectGuideVersionSeen } from './redux/guideSlice'
-import settings from './redux/settingsSlice'
+import { playerSettings } from './redux/settingsSlice'
 import { AchievementList, StatsSections } from './StatsSections'
 import { useLoadout } from './useLoadout'
 
-// What Air Hockey's How to Play cards are built from (see getGuideSteps).
+// What Air Hockey's How to Play cards are built from (see getGuideSteps), flat so the guide's
+// shallow compare sees no change while none of them change.
 interface GuideInput {
-  controlScheme: Record<Player, ControlScheme>
+  control1: ControlScheme
+  control2: ControlScheme
   scoreToWin: number
 }
 
 // Air Hockey, from the AirHockey repo (never released on its own). Its store keys are its own
-// (airhockeySettings, airhockeyAchievements, airhockeyGuide).
+// (airhockeySettings, airhockeyControls, airhockeyAchievements, airhockeyGuide).
 export const airHockey: GameDefinition = {
   id: 'airhockey',
   title: 'Air Hockey',
@@ -26,7 +28,7 @@ export const airHockey: GameDefinition = {
   // Face to face on a phone, never flipped for an upside-down hold; on the web a window seats the
   // two players by its own shape (see the play screen's fixedSeats).
   twoPlayerSeats: { faceToFaceOnWeb: false, followUpsideDown: false },
-  reducers: { airhockeySettings: settings, airhockeyAchievements: achievementsReducer, airhockeyGuide: guide },
+  reducers: { ...playerSettings.reducers, airhockeyAchievements: achievementsReducer, airhockeyGuide: guide },
   Provider: GameStatsProvider,
   useLoadout,
   PlayScreen,
@@ -38,9 +40,12 @@ export const airHockey: GameDefinition = {
     selectVersionSeen: (state) => selectGuideVersionSeen(state),
     markSeen: guideActions.markSeen,
     selectInput: (state): GuideInput => {
-      const s = (state as unknown as { airhockeySettings: Settings }).airhockeySettings
-      return { controlScheme: s.controlScheme, scoreToWin: s.scoreToWin }
+      const s = playerSettings.select(state)
+      return { control1: s.controlScheme[1], control2: s.controlScheme[2], scoreToWin: s.scoreToWin }
     },
-    getSteps: (input, { touch }) => getGuideSteps({ touch, ...(input as GuideInput) })
+    getSteps: (input, { touch }) => {
+      const { control1, control2, scoreToWin } = input as GuideInput
+      return getGuideSteps({ touch, controlScheme: { 1: control1, 2: control2 }, scoreToWin })
+    }
   }
 }

@@ -3,8 +3,7 @@ import { assignSeatScheme } from '@tastic/input'
 import { useCallback, useMemo } from 'react'
 
 import { LOADOUT_SHARED_CONTROLS_IDS, LoadoutSharedControls } from '@/games/airhockey/components/LoadoutSharedControls'
-import { useSettings } from '@/games/airhockey/hooks/useSettings'
-import { DEFAULT_SETTINGS } from '@/games/airhockey/redux/settingsSlice'
+import { DEFAULT_SETTINGS, playerSettings } from '@/games/airhockey/redux/settingsSlice'
 import { ControlScheme, FrictionLevel, PaddleSizeLevel, PuckSizeLevel } from '@/games/airhockey/types'
 import { AIDifficulty } from '@/games/airhockey/utils/aiOpponent'
 import type { GameLoadout, LoadoutOptionsProps, RoundMode, Seat, SeatControlLook } from '@/shell/types'
@@ -67,7 +66,8 @@ function pickRandom<T>(options: readonly { value: T }[]): T {
 // (rink, puck speed and size, paddle size, score to win), each seat's controls on desktop web, and
 // the CPU's difficulty.
 export function useLoadout(mode: RoundMode): GameLoadout {
-  const { settings, setSettings } = useSettings()
+  // Seat 1's player's own setup, and each seat's player's controls (redux/settingsSlice.ts).
+  const { settings, setSettings } = playerSettings.useSettings()
   const p2IsHuman = mode === 'twoPlayer'
 
   // Covers exactly the fields the match options row exposes, plus the CPU's difficulty against the

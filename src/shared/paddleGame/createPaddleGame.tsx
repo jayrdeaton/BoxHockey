@@ -4,7 +4,7 @@ import { getGuideSteps } from '@/shared/paddleGame/constants/guideSteps'
 import { PaddlePlayScreen } from '@/shared/paddleGame/PlayScreen'
 import { createPaddleSettings, DEFAULT_SETTINGS } from '@/shared/paddleGame/settings'
 import { createPaddleGameStats } from '@/shared/paddleGame/stats'
-import type { ControlScheme, Player, Settings } from '@/shared/paddleGame/types'
+import type { ControlScheme } from '@/shared/paddleGame/types'
 import { usePaddleLoadout } from '@/shared/paddleGame/usePaddleLoadout'
 import { createGameGuideSlice } from '@/shell/redux/gameGuideSlice'
 import type { GameDefinition, RoundMode } from '@/shell/types'
@@ -22,18 +22,20 @@ interface PaddleGameOptions {
   guideVersion: number
 }
 
-// What a paddle game's How to Play cards are built from (see getGuideSteps).
+// What a paddle game's How to Play cards are built from (see getGuideSteps), flat so the guide's
+// shallow compare sees no change while none of them change.
 interface GuideInput {
-  controls: Record<Player, ControlScheme>
+  control1: ControlScheme
+  control2: ControlScheme
   scoreToWin: number
 }
 
 // One of the pack's paddle games (Paddles and Breaker, both from Pong): one engine, one play screen,
-// one stats shape, with the game's own store keys (`<id>Settings`, `<id>Achievements`,
-// `<id>Guide`) so each keeps its own settings, stats, achievements and How to Play.
+// one stats shape, with the game's own store keys (`<id>Settings`, `<id>Controls`,
+// `<id>Achievements`, `<id>Guide`) so each keeps its own settings, stats, achievements and How to
+// Play.
 export function createPaddleGame({ id, title, blurb, icon, hasBricks, guideVersion }: PaddleGameOptions): GameDefinition {
-  const settingsKey = `${id}Settings`
-  const settings = createPaddleSettings(settingsKey)
+  const settings = createPaddleSettings(id)
   const stats = createPaddleGameStats({ key: `${id}Achievements`, hasBricks })
   const guide = createGameGuideSlice(`${id}Guide`)
 
@@ -56,7 +58,7 @@ export function createPaddleGame({ id, title, blurb, icon, hasBricks, guideVersi
     // Face to face on a phone, P1 at the bottom unless the phone is held upside down; on the web a
     // window seats the two players by its own shape (see the play screen's fixedSeats).
     twoPlayerSeats: { faceToFaceOnWeb: false, followUpsideDown: true },
-    reducers: { [settingsKey]: settings.reducer, [`${id}Achievements`]: stats.reducer, [`${id}Guide`]: guide.reducer },
+    reducers: { ...settings.reducers, [`${id}Achievements`]: stats.reducer, [`${id}Guide`]: guide.reducer },
     Provider: stats.Provider,
     useLoadout,
     PlayScreen,
@@ -68,10 +70,13 @@ export function createPaddleGame({ id, title, blurb, icon, hasBricks, guideVersi
       selectVersionSeen: (state) => guide.selectVersionSeen(state),
       markSeen: guide.actions.markSeen,
       selectInput: (state): GuideInput => {
-        const s = (state as unknown as Record<string, Settings | undefined>)[settingsKey] ?? DEFAULT_SETTINGS
-        return { controls: s.controlScheme, scoreToWin: s.scoreToWin }
+        const s = settings.select(state)
+        return { control1: s.controlScheme[1], control2: s.controlScheme[2], scoreToWin: s.scoreToWin }
       },
-      getSteps: (input, { touch }) => getGuideSteps({ touch, hasBricks, ...(input as GuideInput) })
+      getSteps: (input, { touch }) => {
+        const { control1, control2, scoreToWin } = input as GuideInput
+        return getGuideSteps({ touch, hasBricks, controls: { 1: control1, 2: control2 }, scoreToWin })
+      }
     }
   }
 }

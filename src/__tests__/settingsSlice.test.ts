@@ -1,30 +1,21 @@
-import reducer, { DEFAULT_SETTINGS, settingsActions } from '@/games/boxhockey/redux/settingsSlice'
+import { DEFAULT_SETTINGS, playerSettings } from '@/games/boxhockey/redux/settingsSlice'
 import appSettingsReducer, { appSettingsActions, DEFAULT_APP_SETTINGS } from '@/shell/redux/appSettingsSlice'
 
 const REHYDRATE = 'persist/REHYDRATE'
 
-describe("Box Hockey's settingsSlice", () => {
-  it('starts from the defaults', () => {
-    expect(reducer(undefined, { type: '@@INIT' })).toEqual(DEFAULT_SETTINGS)
+// The per-player behavior itself is shared/playerSettings.ts's, tested in playerSettings.test.tsx.
+describe("Box Hockey's per-player settings", () => {
+  it('are saved under boxhockeySettings and boxhockeyControls', () => {
+    expect(Object.keys(playerSettings.reducers)).toEqual(['boxhockeySettings', 'boxhockeyControls'])
   })
 
-  it('merges a partial patch over the current settings', () => {
-    const next = reducer(DEFAULT_SETTINGS, settingsActions.initialize({ boardVariant: 'gravity', scoreToWin: 7 }))
-    expect(next).toEqual({ ...DEFAULT_SETTINGS, boardVariant: 'gravity', scoreToWin: 7 })
+  // A player's saved setup only holds what they changed, so a field added since starts at its default.
+  it('fill what a player never changed from the defaults', () => {
+    expect(playerSettings.compose({ sam: { boardVariant: 'gauntlet' } }, {}, { 1: 'sam', 2: null }, false)).toEqual({ ...DEFAULT_SETTINGS, boardVariant: 'gauntlet' })
   })
 
-  // Settings saved by an older build have no value for a field added since; rehydrating must fill it
-  // from the defaults rather than leave it undefined.
-  it('fills fields missing from saved settings with the defaults on rehydrate', () => {
-    const key = (Object.keys(DEFAULT_SETTINGS) as (keyof typeof DEFAULT_SETTINGS)[]).find((k) => k !== 'boardVariant')!
-    const saved: Partial<typeof DEFAULT_SETTINGS> = { ...DEFAULT_SETTINGS, boardVariant: 'gauntlet' }
-    delete saved[key]
-    const next = reducer(undefined, { type: REHYDRATE, payload: { boxhockeySettings: saved } } as { type: string })
-    expect(next).toEqual({ ...DEFAULT_SETTINGS, boardVariant: 'gauntlet' })
-  })
-
-  it('keeps the defaults when nothing was saved', () => {
-    expect(reducer(undefined, { type: REHYDRATE, payload: {} } as { type: string })).toEqual(DEFAULT_SETTINGS)
+  it('let both seats play the same shot style', () => {
+    expect(playerSettings.compose({}, { sam: 'stick', riley: 'stick' }, { 1: 'sam', 2: 'riley' }, true).controlScheme).toEqual({ 1: 'stick', 2: 'stick' })
   })
 })
 

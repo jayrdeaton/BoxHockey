@@ -1,17 +1,12 @@
 import { type MenuOption, type PopoverHost, SectionedDropdown } from '@tastic/hud'
 import { useCallback, useMemo } from 'react'
 import { Platform } from 'react-native'
-import { useDispatch, useSelector } from 'react-redux'
-import type { Action, Dispatch } from 'redux'
 
 import { LOADOUT_SHARED_CONTROLS_IDS, LoadoutSharedControls } from '@/games/boxhockey/components/LoadoutSharedControls'
-import { useSettings } from '@/games/boxhockey/hooks/useSettings'
-import { profileExtensionsActions } from '@/games/boxhockey/redux/profileExtensionsSlice'
-import { DEFAULT_SETTINGS } from '@/games/boxhockey/redux/settingsSlice'
+import { DEFAULT_SETTINGS, playerSettings } from '@/games/boxhockey/redux/settingsSlice'
 import { BoardVariant, ControlScheme, FrictionLevel, InterceptSpeed, PuckSizeLevel, ShotPreviewLength, TipoffMode } from '@/games/boxhockey/types'
 import { AI_DIFFICULTY_LABELS, AIDifficulty } from '@/games/boxhockey/utils/aiOpponent'
 import { BOARD_VARIANT_LABELS } from '@/games/boxhockey/utils/board'
-import type { ShellState } from '@/shell/redux/shellState'
 import type { GameLoadout, LoadoutOptionsProps, RoundMode, Seat, SeatControlLook } from '@/shell/types'
 
 const BOARD_VARIANT_DESCRIPTIONS: Record<BoardVariant, string> = {
@@ -86,23 +81,13 @@ function pickRandom<T>(options: readonly { value: T }[]): T {
 // (board, rink, puck physics, intercepts, score to win, shot preview, tip-off), each seat's shot
 // style, and the CPU's difficulty.
 export function useLoadout(mode: RoundMode): GameLoadout {
-  const { settings, setSettings } = useSettings()
-  const lastSelected = useSelector((state: ShellState) => state.profileSelection)
-  // Typed explicitly because @tastic/profile's action creators return a plain `{ payload, type }`
-  // interface with no index signature, which react-redux's default Dispatch<UnknownAction> rejects.
-  const dispatch = useDispatch<Dispatch<Action>>()
+  // Seat 1's player's own setup, and each seat's player's shot style (redux/settingsSlice.ts).
+  const { settings, setSettings } = playerSettings.useSettings()
 
-  // A seat's shot style is also kept with the profile in it (profileExtensionsSlice.ts), as
-  // BoxHockey 1.0 did. No swap on conflict: Flick, Stick, Pull and Push aren't a shared physical
-  // resource the way a keyboard's key clusters are, so both players can use the same one.
-  const setSeatControl = useCallback(
-    (seat: Seat, value: ControlScheme) => {
-      setSettings({ controlScheme: { ...settings.controlScheme, [seat]: value } })
-      const profileId = lastSelected[seat]
-      if (profileId) dispatch(profileExtensionsActions.set({ extension: { controlScheme: value }, id: profileId }))
-    },
-    [setSettings, settings.controlScheme, lastSelected, dispatch]
-  )
+  // Saved with the player in that seat. No swap on conflict: Flick, Stick, Pull and Push aren't a
+  // shared physical resource the way a keyboard's key clusters are, so both players can use the
+  // same one.
+  const setSeatControl = useCallback((seat: Seat, value: ControlScheme) => setSettings({ controlScheme: { ...settings.controlScheme, [seat]: value } }), [setSettings, settings.controlScheme])
 
   // Covers exactly the fields the match options row exposes, plus the CPU's difficulty against the
   // CPU. Per-seat things (colors, shot style) and pack-wide settings (Lock Orientation) aren't
