@@ -1,36 +1,26 @@
 import { createPaddleSettings, DEFAULT_SETTINGS } from '@/shared/paddleGame/settings'
+import type { ShellState } from '@/shell/redux/shellState'
 
-const REHYDRATE = 'persist/REHYDRATE'
+// Each paddle game keeps its own players' settings under its own keys; Breaker's stands in for both.
+// The per-player behavior itself is shared/playerSettings.ts's, tested in playerSettings.test.tsx.
+const breaker = createPaddleSettings('breaker')
 
-// Each paddle game mounts its own settings under its own key; Breaker's stands in for both.
-const { actions, reducer } = createPaddleSettings('breakerSettings')
+const state = (extra: Record<string, unknown>) => ({ profileSelection: { 1: 'sam', 2: null }, opponent: { seatTwo: 'cpu' }, ...extra }) as unknown as ShellState
 
-describe("a paddle game's settings", () => {
-  it('starts from the defaults', () => {
-    expect(reducer(undefined, { type: '@@INIT' })).toEqual(DEFAULT_SETTINGS)
+describe("a paddle game's per-player settings", () => {
+  it("are saved under the game's own keys", () => {
+    expect(Object.keys(breaker.reducers)).toEqual(['breakerSettings', 'breakerControls'])
   })
 
-  it('merges a partial patch over the current settings', () => {
-    const next = reducer(DEFAULT_SETTINGS, actions.initialize({ ballSpeed: 'fast', scoreToWin: 7 }))
-    expect(next).toEqual({ ...DEFAULT_SETTINGS, ballSpeed: 'fast', scoreToWin: 7 })
+  it('fill what a player never changed from the defaults', () => {
+    expect(breaker.select(state({ breakerSettings: { sam: { ballSpeed: 'slow' } } }))).toEqual({ ...DEFAULT_SETTINGS, ballSpeed: 'slow' })
   })
 
-  // Settings saved by an older build have no value for a field added since; rehydrating must fill it
-  // from the defaults rather than leave it undefined.
-  it('fills fields missing from saved settings with the defaults on rehydrate', () => {
-    const key = (Object.keys(DEFAULT_SETTINGS) as (keyof typeof DEFAULT_SETTINGS)[]).find((k) => k !== 'ballSpeed')!
-    const saved: Partial<typeof DEFAULT_SETTINGS> = { ...DEFAULT_SETTINGS, ballSpeed: 'slow' }
-    delete saved[key]
-    const next = reducer(undefined, { type: REHYDRATE, payload: { breakerSettings: saved } } as { type: string })
-    expect(next).toEqual({ ...DEFAULT_SETTINGS, ballSpeed: 'slow' })
+  it("read only the game's own keys, not another paddle game's", () => {
+    expect(breaker.select(state({ paddlesSettings: { sam: { ballSpeed: 'fast' } }, paddlesControls: { sam: 'arrows' } }))).toEqual(DEFAULT_SETTINGS)
   })
 
-  it("reads only its own key, not another paddle game's", () => {
-    const next = reducer(undefined, { type: REHYDRATE, payload: { paddlesSettings: { ...DEFAULT_SETTINGS, ballSpeed: 'fast' } } } as { type: string })
-    expect(next).toEqual(DEFAULT_SETTINGS)
-  })
-
-  it('keeps the defaults when nothing was saved', () => {
-    expect(reducer(undefined, { type: REHYDRATE, payload: {} } as { type: string })).toEqual(DEFAULT_SETTINGS)
+  it('move seat 2 to the next free control when both players saved the same one', () => {
+    expect(breaker.compose({}, { sam: 'wasd', riley: 'wasd' }, { 1: 'sam', 2: 'riley' }, true).controlScheme).toEqual({ 1: 'wasd', 2: 'mouse' })
   })
 })

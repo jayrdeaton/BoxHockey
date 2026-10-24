@@ -1,13 +1,9 @@
-import { createSettingsSlice } from '@rific/core'
-
 import { SCORE_TO_WIN } from '@/games/airhockey/constants/game'
-import type { Settings } from '@/games/airhockey/types'
+import type { ControlScheme, Settings } from '@/games/airhockey/types'
+import { createPlayerSettings } from '@/shared/playerSettings'
 
-// The persisted settings: a Redux slice like every other persisted value in this app, read and
-// written only through hooks/useSettings.ts. Built on @rific/core's createSettingsSlice: `initialize`
-// in 'merge' mode is the single write path (setSettings' partial patch), and its REHYDRATE handling
-// fills any field added after a player's settings were saved from DEFAULT_SETTINGS, so no
-// validation or migration is needed.
+// What a player who hasn't changed a thing plays with. Each player's own changes are saved over it
+// (see below), so a field added later starts at its default for everyone.
 export const DEFAULT_SETTINGS: Settings = {
   scoreToWin: SCORE_TO_WIN,
   aiDifficulty: 'medium',
@@ -21,11 +17,8 @@ export const DEFAULT_SETTINGS: Settings = {
   controlScheme: { 1: 'mouse', 2: 'wasd' }
 }
 
-const { actions, reducer } = createSettingsSlice<Settings, 'merge', never>('airhockeySettings', {
-  initialState: DEFAULT_SETTINGS,
-  initializeMode: 'merge',
-  fieldSetters: []
-})
-
-export const settingsActions = actions
-export default reducer
+// Air Hockey's loadout, per player (shared/playerSettings.ts): the match settings seat 1's player
+// last set up, under airhockeySettings, and the controls each player last picked, under
+// airhockeyControls. Two seats can't share the mouse or a key cluster, so when both players saved
+// the same one, seat 2 takes the next free one in the loadout's menu order for that match.
+export const playerSettings = createPlayerSettings<Settings, ControlScheme>({ id: 'airhockey', defaults: DEFAULT_SETTINGS, distinctControls: ['mouse', 'wasd', 'arrows', 'ijkl', 'numpad'] })

@@ -1,20 +1,18 @@
-import reducer, { DEFAULT_SETTINGS, settingsActions } from '@/games/airhockey/redux/settingsSlice'
+import { DEFAULT_SETTINGS, playerSettings } from '@/games/airhockey/redux/settingsSlice'
 
-const REHYDRATE = 'persist/REHYDRATE'
-
-describe("Air Hockey's settingsSlice", () => {
-  it('starts from the defaults', () => {
-    expect(reducer(undefined, { type: '@@INIT' })).toEqual(DEFAULT_SETTINGS)
+// The per-player behavior itself is shared/playerSettings.ts's, tested in playerSettings.test.tsx.
+describe("Air Hockey's per-player settings", () => {
+  it('are saved under airhockeySettings and airhockeyControls', () => {
+    expect(Object.keys(playerSettings.reducers)).toEqual(['airhockeySettings', 'airhockeyControls'])
   })
 
-  it('merges a partial patch over the current settings', () => {
-    const next = reducer(DEFAULT_SETTINGS, settingsActions.initialize({ paddleSize: 'large', rink: false }))
-    expect(next).toEqual({ ...DEFAULT_SETTINGS, paddleSize: 'large', rink: false })
+  it('fill what a player never changed from the defaults', () => {
+    expect(playerSettings.compose({ sam: { paddleSize: 'large' } }, {}, { 1: 'sam', 2: null }, false)).toEqual({ ...DEFAULT_SETTINGS, paddleSize: 'large' })
   })
 
-  // Saved under Air Hockey's own key, so Box Hockey's `settings` (BoxHockey 1.0's) can't land here.
-  it('rehydrates from airhockeySettings, filling missing fields from the defaults', () => {
-    const next = reducer(undefined, { type: REHYDRATE, payload: { settings: { scoreToWin: 10 }, airhockeySettings: { scoreToWin: 7 } } } as { type: string })
-    expect(next).toEqual({ ...DEFAULT_SETTINGS, scoreToWin: 7 })
+  // The mouse and each key cluster can only steer one paddle.
+  it('move seat 2 to the next free control when both players saved the same one', () => {
+    expect(playerSettings.compose({}, { sam: 'mouse', riley: 'mouse' }, { 1: 'sam', 2: 'riley' }, true).controlScheme).toEqual({ 1: 'mouse', 2: 'wasd' })
+    expect(playerSettings.compose({}, { sam: 'arrows', riley: 'arrows' }, { 1: 'sam', 2: 'riley' }, true).controlScheme).toEqual({ 1: 'arrows', 2: 'mouse' })
   })
 })

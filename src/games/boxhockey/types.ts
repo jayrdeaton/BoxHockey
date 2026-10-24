@@ -40,7 +40,7 @@ export type AiDifficulty = 'easy' | 'medium' | 'hard'
 export type ControlScheme = 'pull' | 'push' | 'flick' | 'stick'
 
 // A player profile is the pack's (@tastic/profile's base Profile: name, color, tag), shared by
-// every game. Box Hockey's own per-profile shot style lives in redux/profileExtensionsSlice.ts.
+// every game. Box Hockey's own per-player settings and shot style live in redux/settingsSlice.ts.
 export type { Profile } from '@tastic/profile'
 
 // How possession is decided at the start of a game and (for 'faceoff' only) after every goal -

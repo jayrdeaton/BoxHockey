@@ -1,4 +1,4 @@
-import { ControlScheme, Player, Settings, TipoffMode } from '@/games/boxhockey/types'
+import { ControlScheme, TipoffMode } from '@/games/boxhockey/types'
 import type { GameDefinition } from '@/shell/types'
 
 import { GUIDE_VERSION } from './constants/guide'
@@ -6,21 +6,22 @@ import { getGuideSteps } from './constants/guideSteps'
 import { achievementsActions, achievementsReducer as achievements, GameStatsProvider } from './hooks/useGameStats'
 import PlayScreen from './PlayScreen'
 import guide, { guideActions, selectGuideVersionSeen } from './redux/guideSlice'
-import profileExtensions from './redux/profileExtensionsSlice'
-import settings from './redux/settingsSlice'
+import { playerSettings } from './redux/settingsSlice'
 import { AchievementList, StatsSections } from './StatsSections'
 import { useLoadout } from './useLoadout'
 
-// What Box Hockey's How to Play cards are built from (see getGuideSteps).
+// What Box Hockey's How to Play cards are built from (see getGuideSteps), flat so the guide's
+// shallow compare sees no change while none of them change.
 interface GuideInput {
-  controls: Record<Player, ControlScheme>
+  control1: ControlScheme
+  control2: ControlScheme
   tipoff: TipoffMode
   scoreToWin: number
 }
 
 // Box Hockey, the pack's first game and the one BoxHockey 1.0 shipped as. Its store keys are its own
-// (boxhockeySettings, boxhockeyAchievements, boxhockeyGuide, boxhockeyProfileExtensions), like every
-// game's. 1.0's saved state is not read (see pack.ts).
+// (boxhockeySettings, boxhockeyControls, boxhockeyAchievements, boxhockeyGuide), like every game's.
+// A 1.0 save is imported once (importBoxHockey1.ts).
 export const boxHockey: GameDefinition = {
   id: 'boxhockey',
   title: 'Box Hockey',
@@ -30,7 +31,7 @@ export const boxHockey: GameDefinition = {
   seatTwo: ['cpu', 'person'],
   // The board never turns a quarter turn, only flips upside down, on every platform.
   twoPlayerSeats: { faceToFaceOnWeb: true, followUpsideDown: true },
-  reducers: { boxhockeySettings: settings, boxhockeyAchievements: achievements, boxhockeyGuide: guide, boxhockeyProfileExtensions: profileExtensions },
+  reducers: { ...playerSettings.reducers, boxhockeyAchievements: achievements, boxhockeyGuide: guide },
   Provider: GameStatsProvider,
   useLoadout,
   PlayScreen,
@@ -42,9 +43,12 @@ export const boxHockey: GameDefinition = {
     selectVersionSeen: (state) => selectGuideVersionSeen(state),
     markSeen: guideActions.markSeen,
     selectInput: (state): GuideInput => {
-      const s = (state as unknown as { boxhockeySettings: Settings }).boxhockeySettings
-      return { controls: s.controlScheme, tipoff: s.tipoffMode, scoreToWin: s.scoreToWin }
+      const s = playerSettings.select(state)
+      return { control1: s.controlScheme[1], control2: s.controlScheme[2], tipoff: s.tipoffMode, scoreToWin: s.scoreToWin }
     },
-    getSteps: (input, { touch, mode }) => getGuideSteps({ touch, mode: mode === 'twoPlayer' ? 'twoPlayer' : 'vsCpu', ...(input as GuideInput) })
+    getSteps: (input, { touch, mode }) => {
+      const { control1, control2, tipoff, scoreToWin } = input as GuideInput
+      return getGuideSteps({ touch, mode: mode === 'twoPlayer' ? 'twoPlayer' : 'vsCpu', controls: { 1: control1, 2: control2 }, tipoff, scoreToWin })
+    }
   }
 }
