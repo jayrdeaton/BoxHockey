@@ -33,68 +33,101 @@ async function launch(items: Record<string, string>) {
 // On the web every Tastic game shares games.infinitetoken.com's localStorage, where redux-persist's
 // default prefix would make this game's state the same persist:root every game writes.
 describe("the pack store's storage key", () => {
-  it("writes its state under BoxHockey's own prefix, boxhockey:root, and nothing else", async () => {
+  it('writes its state under its own prefix, pucktastic:root, and nothing else', async () => {
     const { storage } = await launch({})
 
-    expect(await storage.getAllKeys()).toEqual(['boxhockey:root'])
+    expect(await storage.getAllKeys()).toEqual(['pucktastic:root'])
   })
 
-  it('reads its state back from boxhockey:root on the next launch', async () => {
-    const { store } = await launch({ 'boxhockey:root': rootBlob({ guide: { versionSeen: GUIDE_VERSION } }) })
+  it('reads its state back from pucktastic:root on the next launch', async () => {
+    const { store } = await launch({ 'pucktastic:root': rootBlob({ boxhockeyGuide: { versionSeen: GUIDE_VERSION }, opponent: { seatTwo: 'person' } }) })
 
     expect(selectGuideVersionSeen(store.getState())).toBe(GUIDE_VERSION)
-  })
-
-  // No migrations: a save under the old key (unshipped builds, or another game's on the web) starts
-  // fresh, so the guide shows once, and the old key is left where it was.
-  it('leaves a save under the old persist:root unread and in place', async () => {
-    const oldSave = rootBlob({ guide: { versionSeen: GUIDE_VERSION } })
-    const { storage, store } = await launch({ 'persist:root': oldSave })
-
-    expect(selectGuideVersionSeen(store.getState())).toBe(0)
-    expect(await storage.getItem('persist:root')).toBe(oldSave)
-  })
-
-  it('still grandfathers a shipped pre-redux player past the guide, under the new key', async () => {
-    const { storage, store } = await launch({ 'boxhockey.settings': JSON.stringify({ gameMode: 'vsCpu' }) })
-
-    expect(selectGuideVersionSeen(store.getState())).toBe(GUIDE_VERSION)
-    expect(JSON.parse(JSON.parse((await storage.getItem('boxhockey:root')) ?? '{}').guide)).toEqual({ versionSeen: GUIDE_VERSION })
-  })
-})
-
-// BoxHockey 1.0 kept Lock Orientation, Edge Guard and the last mode picked on Home in Box Hockey's
-// own settings; the pack's first launch seeds the pack-wide settings and seat 2 from them, and
-// leaves Box Hockey's own keys as they were.
-describe('a BoxHockey 1.0 save in the pack', () => {
-  const settings = { gameMode: 'vsCpu', boardVariant: 'gravity', scoreToWin: 7, lockOrientation: true, lockedRotation: 90, deferBottomEdgeGestures: true }
-
-  it("seeds the pack-wide settings and seat 2 from 1.0's settings", async () => {
-    const { store } = await launch({ 'boxhockey:root': rootBlob({ settings }) })
-    const state = store.getState()
-
-    expect(state.appSettings).toEqual({ lockOrientation: true, lockedRotation: 90, deferBottomEdgeGestures: true })
-    expect(state.opponent).toEqual({ seatTwo: 'cpu' })
-    expect((state as unknown as Record<string, unknown>).settings).toMatchObject({ boardVariant: 'gravity', scoreToWin: 7 })
-  })
-
-  it('reads a 2 Player last mode as a person in seat 2', async () => {
-    const { store } = await launch({ 'boxhockey:root': rootBlob({ settings: { ...settings, gameMode: 'twoPlayer' } }) })
-
     expect(store.getState().opponent).toEqual({ seatTwo: 'person' })
   })
 
-  it('leaves a pack save that already has its own settings alone', async () => {
-    const { store } = await launch({ 'boxhockey:root': rootBlob({ settings, appSettings: { lockOrientation: false, deferBottomEdgeGestures: false }, opponent: { seatTwo: 'person' } }) })
+  // Only BoxHockey 1.0's own key is imported (see below); an older build's save, or another game's
+  // on the web, starts fresh and is left where it was.
+  it('leaves a save under persist:root unread and in place', async () => {
+    const oldSave = rootBlob({ guide: { versionSeen: GUIDE_VERSION }, settings: { gameMode: 'twoPlayer', lockOrientation: true } })
+    const { storage, store } = await launch({ 'persist:root': oldSave })
     const state = store.getState()
 
+    expect(selectGuideVersionSeen(state)).toBe(0)
     expect(state.appSettings.lockOrientation).toBe(false)
-    expect(state.opponent).toEqual({ seatTwo: 'person' })
+    expect(state.opponent).toEqual({ seatTwo: 'cpu' })
+    expect(await storage.getItem('persist:root')).toBe(oldSave)
   })
 
   it('starts a fresh install with the CPU in seat 2', async () => {
     const { store } = await launch({})
 
+    expect(store.getState().opponent).toEqual({ seatTwo: 'cpu' })
+  })
+})
+
+// BoxHockey 1.0 saved under boxhockey:root, Box Hockey's keys unprefixed and Lock Orientation, Edge
+// Guard and the last mode picked on Home inside Box Hockey's own settings (importBoxHockey1.ts).
+describe('a BoxHockey 1.0 save', () => {
+  const settings = { gameMode: 'vsCpu', boardVariant: 'gravity', scoreToWin: 7, lockOrientation: true, lockedRotation: 90, deferBottomEdgeGestures: true }
+  const oneZero = (extra: Record<string, unknown> = {}) =>
+    rootBlob({
+      settings,
+      achievements: { stats: { firstGameResult: 'win' }, unlocked: { first_blood: 1760000000000 } },
+      guide: { versionSeen: GUIDE_VERSION },
+      profileExtensions: { sam: { controlScheme: 'stick' } },
+      sound: { enabled: false },
+      ...extra
+    })
+  const root = (state: unknown) => state as Record<string, Record<string, unknown>>
+
+  it("is imported on the first launch, Box Hockey's keys under their new names", async () => {
+    const { store } = await launch({ 'boxhockey:root': oneZero() })
+    const state = root(store.getState())
+
+    expect(state.boxhockeySettings).toMatchObject({ boardVariant: 'gravity', scoreToWin: 7 })
+    expect(state.boxhockeyAchievements).toMatchObject({ unlocked: { first_blood: 1760000000000 } })
+    expect(selectGuideVersionSeen(store.getState())).toBe(GUIDE_VERSION)
+    expect(state.boxhockeyProfileExtensions).toEqual({ sam: { controlScheme: 'stick' } })
+    expect(state.sound).toMatchObject({ enabled: false })
+  })
+
+  it("moves 1.0's app-wide settings out of Box Hockey's, and its last mode into seat 2", async () => {
+    const { store } = await launch({ 'boxhockey:root': oneZero() })
+    const state = store.getState()
+
+    expect(state.appSettings).toEqual({ lockOrientation: true, lockedRotation: 90, deferBottomEdgeGestures: true })
+    expect(state.opponent).toEqual({ seatTwo: 'cpu' })
+    for (const field of ['gameMode', 'lockOrientation', 'lockedRotation', 'deferBottomEdgeGestures']) expect(root(state).boxhockeySettings).not.toHaveProperty(field)
+  })
+
+  it('reads a 2 Player last mode as a person in seat 2', async () => {
+    const { store } = await launch({ 'boxhockey:root': oneZero({ settings: { ...settings, gameMode: 'twoPlayer' } }) })
+
+    expect(store.getState().opponent).toEqual({ seatTwo: 'person' })
+  })
+
+  it('saves the import under pucktastic:root and leaves the 1.0 save in place', async () => {
+    const save = oneZero()
+    const { storage } = await launch({ 'boxhockey:root': save })
+
+    expect(JSON.parse(JSON.parse((await storage.getItem('pucktastic:root')) ?? '{}').boxhockeyGuide)).toEqual({ versionSeen: GUIDE_VERSION })
+    expect(await storage.getItem('boxhockey:root')).toBe(save)
+  })
+
+  it('is ignored once there is a pack save', async () => {
+    const { store } = await launch({ 'boxhockey:root': oneZero(), 'pucktastic:root': rootBlob({ opponent: { seatTwo: 'person' } }) })
+    const state = store.getState()
+
+    expect(state.opponent).toEqual({ seatTwo: 'person' })
+    expect(selectGuideVersionSeen(state)).toBe(0)
+    expect(state.appSettings.lockOrientation).toBe(false)
+  })
+
+  it('starts fresh when the 1.0 save is unreadable', async () => {
+    const { store } = await launch({ 'boxhockey:root': '{not json' })
+
+    expect(selectGuideVersionSeen(store.getState())).toBe(0)
     expect(store.getState().opponent).toEqual({ seatTwo: 'cpu' })
   })
 })

@@ -19,7 +19,7 @@ describe("Box Hockey's settingsSlice", () => {
     const key = (Object.keys(DEFAULT_SETTINGS) as (keyof typeof DEFAULT_SETTINGS)[]).find((k) => k !== 'boardVariant')!
     const saved: Partial<typeof DEFAULT_SETTINGS> = { ...DEFAULT_SETTINGS, boardVariant: 'gauntlet' }
     delete saved[key]
-    const next = reducer(undefined, { type: REHYDRATE, payload: { settings: saved } } as { type: string })
+    const next = reducer(undefined, { type: REHYDRATE, payload: { boxhockeySettings: saved } } as { type: string })
     expect(next).toEqual({ ...DEFAULT_SETTINGS, boardVariant: 'gauntlet' })
   })
 

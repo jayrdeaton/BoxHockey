@@ -7,7 +7,7 @@ import { DEFAULT_STATS, isValidStats } from '@/games/boxhockey/utils/statsValida
 import { createGameStats } from '@/shared/gameStats'
 
 // Box Hockey's stats and achievements, under the `achievements` key BoxHockey 1.0 saved them under (see the shared createGameStats).
-const gameStats = createGameStats<StatsState, ProfileStats>({ key: 'achievements', defaultStats: DEFAULT_STATS, isValidStats, catalog: ACHIEVEMENT_CATALOG, getProfileStatsView })
+const gameStats = createGameStats<StatsState, ProfileStats>({ key: 'boxhockeyAchievements', defaultStats: DEFAULT_STATS, isValidStats, catalog: ACHIEVEMENT_CATALOG, getProfileStatsView })
 
 export const achievementsReducer = gameStats.reducer
 export const achievementsActions = gameStats.actions

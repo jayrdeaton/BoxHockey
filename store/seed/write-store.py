@@ -13,9 +13,10 @@ seat 1; Riley takes seat 2 in Two Player. The app must not be running.
 
 The store is redux-persist on @react-native-async-storage: on iOS, Library/Application Support/<bundle
 id>/RCTAsyncLocalStorage_V1, with values over 1024 characters in a file named by the MD5 of the key.
-The key is src/redux/store.ts's persistConfig keyPrefix plus its key ('boxhockey:root');
-keep it in step with that file, or the app ignores everything this writes. Slices left out keep their
-initial state, and settings missing a field get it from DEFAULT_SETTINGS.
+The key is src/pack.ts's keyPrefix plus redux-persist's key ('pucktastic:root'), and the slices are
+the store keys the pack mounts (Box Hockey's are boxhockey*); keep both in step with the app, or it
+ignores everything this writes. Slices left out keep their initial state, and settings missing a
+field get it from DEFAULT_SETTINGS.
 """
 import argparse
 import hashlib
@@ -25,7 +26,7 @@ import shutil
 import subprocess
 
 BUNDLE = 'com.infinitetoken.BoxHockey'
-KEY = 'boxhockey:root'
+KEY = 'pucktastic:root'
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 parser = argparse.ArgumentParser()
@@ -44,14 +45,19 @@ sam, riley = (p['id'] for p in seed['profiles'])
 extensions = {pid: {'controlScheme': args.scheme} for pid in (sam, riley)}
 
 root = {
-    'achievements': {'stats': seed['stats'], 'unlocked': seed['unlocked']},
+    'boxhockeyAchievements': {'stats': seed['stats'], 'unlocked': seed['unlocked']},
     'sound': {'enabled': False},
-    'guide': {'versionSeen': 1},
+    # Every game's How to Play seen, so no cards open over a shot.
+    'boxhockeyGuide': {'versionSeen': 1},
+    'airhockeyGuide': {'versionSeen': 1},
+    'paddlesGuide': {'versionSeen': 1},
+    'breakerGuide': {'versionSeen': 1},
     'profiles': seed['profiles'],
-    'profileExtensions': extensions,
+    'boxhockeyProfileExtensions': extensions,
     'profileSelection': {'1': sam, '2': riley if args.mode == 'twoPlayer' else None},
-    'settings': {
-        'gameMode': args.mode,
+    # Seat 2, for the whole pack: a person in Two Player, the CPU otherwise.
+    'opponent': {'seatTwo': 'person' if args.mode == 'twoPlayer' else 'cpu'},
+    'boxhockeySettings': {
         'boardVariant': args.board,
         'rink': args.rink,
         'shotPreviewLength': args.preview,

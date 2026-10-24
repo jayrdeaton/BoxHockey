@@ -18,9 +18,9 @@ interface GuideInput {
   scoreToWin: number
 }
 
-// Box Hockey, the pack's first game and the one BoxHockey 1.0 shipped as. Its store keys keep the
-// names 1.0 saved them under (`settings`, `achievements`, `guide`, `profileExtensions`), so a 1.0
-// player's settings, stats, achievements and How to Play state carry over untouched.
+// Box Hockey, the pack's first game and the one BoxHockey 1.0 shipped as. Its store keys are its own
+// (boxhockeySettings, boxhockeyAchievements, boxhockeyGuide, boxhockeyProfileExtensions), like every
+// game's. 1.0's saved state is not read (see pack.ts).
 export const boxHockey: GameDefinition = {
   id: 'boxhockey',
   title: 'Box Hockey',
@@ -30,7 +30,7 @@ export const boxHockey: GameDefinition = {
   seatTwo: ['cpu', 'person'],
   // The board never turns a quarter turn, only flips upside down, on every platform.
   twoPlayerSeats: { faceToFaceOnWeb: true, followUpsideDown: true },
-  reducers: { settings, achievements, guide, profileExtensions },
+  reducers: { boxhockeySettings: settings, boxhockeyAchievements: achievements, boxhockeyGuide: guide, boxhockeyProfileExtensions: profileExtensions },
   Provider: GameStatsProvider,
   useLoadout,
   PlayScreen,
@@ -42,7 +42,7 @@ export const boxHockey: GameDefinition = {
     selectVersionSeen: (state) => selectGuideVersionSeen(state),
     markSeen: guideActions.markSeen,
     selectInput: (state): GuideInput => {
-      const s = (state as unknown as { settings: Settings }).settings
+      const s = (state as unknown as { boxhockeySettings: Settings }).boxhockeySettings
       return { controls: s.controlScheme, tipoff: s.tipoffMode, scoreToWin: s.scoreToWin }
     },
     getSteps: (input, { touch, mode }) => getGuideSteps({ touch, mode: mode === 'twoPlayer' ? 'twoPlayer' : 'vsCpu', ...(input as GuideInput) })
