@@ -7,7 +7,7 @@ import type { Settings } from '@/games/boxhockey/types'
 // Box Hockey's own settings (the loadout's match options and each seat's shot style). Writes merge,
 // so a patch only changes the fields it names.
 export function useSettings(): { settings: Settings; setSettings: (patch: Partial<Settings>) => void } {
-  const settings = useSelector((state: { settings: Settings }) => state.settings)
+  const settings = useSelector((state: { boxhockeySettings: Settings }) => state.boxhockeySettings)
   const dispatch = useDispatch()
   const setSettings = useCallback(
     (patch: Partial<Settings>) => {

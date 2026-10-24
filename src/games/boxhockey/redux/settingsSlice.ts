@@ -36,7 +36,7 @@ export const DEFAULT_SETTINGS: Settings = {
   rink: false
 }
 
-const { actions, reducer } = createSettingsSlice<Settings, 'merge', never>('settings', {
+const { actions, reducer } = createSettingsSlice<Settings, 'merge', never>('boxhockeySettings', {
   initialState: DEFAULT_SETTINGS,
   initializeMode: 'merge',
   fieldSetters: []

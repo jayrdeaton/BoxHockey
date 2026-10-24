@@ -1,14 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { createReturningPlayerMigrate } from '@tastic/hud/guide'
-import type { PersistedState } from 'redux-persist'
 
 import { airHockey } from '@/games/airhockey'
 import { boxHockey } from '@/games/boxhockey'
-import { LEGACY_STORAGE_KEYS } from '@/games/boxhockey/redux/guideSlice'
 import { breaker } from '@/games/breaker'
 import { paddles } from '@/games/paddles'
+import { createBoxHockey1Import } from '@/importBoxHockey1'
 import { createPackStore } from '@/shell/redux/createPackStore'
-import type { GameDefinition, PackDefinition, SeatTwo } from '@/shell/types'
+import type { GameDefinition, PackDefinition } from '@/shell/types'
 
 // PuckTastic: the pack's identity and its games, in Home's order. Box Hockey first: it's the star,
 // and the game BoxHockey 1.0 shipped as. The App Store record, bundle id, EAS project and URL scheme
@@ -22,40 +20,12 @@ export const pack: PackDefinition = {
   games
 }
 
-// BoxHockey 1.0 kept Lock Orientation, Edge Guard and the last mode picked on Home inside Box
-// Hockey's own `settings`. Once, on the first launch of a pack build, seed the pack-wide settings
-// and seat 2 from them; Box Hockey's own keys stay exactly as 1.0 saved them (no migration). A store
-// that already has `appSettings` passes through untouched.
-interface LegacySettings {
-  gameMode?: 'twoPlayer' | 'vsCpu'
-  lockOrientation?: boolean
-  lockedRotation?: unknown
-  deferBottomEdgeGestures?: boolean
-}
-
-export function seedFromBoxHockey(state: PersistedState): PersistedState {
-  const saved = state as (PersistedState & { appSettings?: unknown; settings?: LegacySettings }) | undefined
-  if (!saved || saved.appSettings !== undefined || !saved.settings) return state
-  const { gameMode, lockOrientation, lockedRotation, deferBottomEdgeGestures } = saved.settings
-  const seatTwo: SeatTwo = gameMode === 'vsCpu' ? 'cpu' : 'person'
-  return {
-    ...saved,
-    appSettings: { lockOrientation: lockOrientation ?? false, deferBottomEdgeGestures: deferBottomEdgeGestures ?? false, ...(lockedRotation !== undefined ? { lockedRotation } : {}) },
-    opponent: { seatTwo }
-  } as PersistedState
-}
-
-// Grandfathers players from BoxHockey's shipped pre-redux builds past Box Hockey's How to Play cards
-// (see LEGACY_STORAGE_KEYS), then seeds the pack-wide settings from 1.0's.
-const returningPlayerMigrate = createReturningPlayerMigrate(AsyncStorage, LEGACY_STORAGE_KEYS)
-async function migrate(state: PersistedState, version: number): Promise<PersistedState> {
-  return seedFromBoxHockey(await returningPlayerMigrate(state, version))
-}
-
-// The one store. Its keyPrefix stays 'boxhockey:' (BoxHockey 1.0's) so a 1.0 player's saved state
-// is the one this build reads.
+// The one store, saved under 'pucktastic:root', every game's keys named for it. A BoxHockey 1.0 save
+// (under 'boxhockey:root', Box Hockey's keys unprefixed) is copied over once, on the first launch of a
+// pack build (see importBoxHockey1.ts). Never change this prefix or a key now: every player would
+// start over.
 export const { store, persistor } = createPackStore({
-  keyPrefix: 'boxhockey:',
+  keyPrefix: 'pucktastic:',
   gameReducers: Object.assign({}, ...games.map((g) => g.reducers)),
-  migrate
+  migrate: createBoxHockey1Import(AsyncStorage)
 })

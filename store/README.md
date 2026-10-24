@@ -49,7 +49,7 @@ To redo them:
 4. The skill's `compose.mjs store/screenshots.json` (writes all three sets)
 5. Clear Sam and Riley out of the simulators' shared Tastic roster, or Solitaire's next reshoot on them shows them too: BoxHockey copies its seeded profiles into the empty App Group (`@tastic/profile`'s `resolveInitialProfiles`). Shut both simulators down, then remove `sharedProfiles` from `group.com.infinitetoken.tastic.plist` in each one's `data/Containers/Shared/AppGroup/<id>/Library/Preferences/` (`plutil -remove sharedProfiles <plist>`)
 
-The seed writes `boxhockey:root`, which only builds from 2026-10-19 on read: on an older install (the simulators' 2026-10-18 build, as of 2026-10-20) the app ignores it and opens on the guide with sound on, so rebuild, or for a one-off write the same seed under `persist:root`.
+The seed writes `pucktastic:root` with the pack's store keys (`boxhockeySettings`, `boxhockeyAchievements`, `opponent` and so on), which only PuckTastic builds (from 2026-10-24) read: on an older install the app ignores it and opens with sound on and How to Play unseen, so rebuild first.
 
 Simulator notes from this run: a fresh launch after `reseed.sh` (or after a reboot) can sit on the splash for a minute or two, and `simctl launch` can block that long, so run it in the background. The simulator's touch ring shows in screen recordings for a moment after each tap or swipe. The recorder only writes a frame when the screen changes, so on a still Classic board the skill's `frames.mjs` sheet and grab disagree on timestamps; pull the exact frame with ffmpeg's `select` instead.
 

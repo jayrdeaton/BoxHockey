@@ -19,3 +19,14 @@ Deferred to ship SDK 58 the same day:
 - **Check it on a device.** Verify, typecheck and an iOS prebuild pass, but nothing ran on hardware: launch (SDK 58's scene life cycle), swiping a toast away (`@rific/toaster` 0.8.1 only had its gesture-handler 3 peer range raised, and its tests mock gesture-handler), the board's aim arrows and chevrons (moved to Skia 2.14's `PathBuilder`), and the edge-gesture guard.
 - **React Native 0.88 strict types.** `@infinitetoken/tsconfig` 0.6 resolves React Native 0.88's legacy types, and React Native drops them after 0.88. This app's own code is already clean under the strict types (checked 2026-10-16 with `customConditions: ["react-native"]` only); the errors it sees are all in package source it type-checks (`@tastic/hud` 15, `@tastic/split-screen` 6, `@rific/auto-paper` 3, `@tastic/profile` 3, `@tastic/core` 1, `@rific/updater` 1). Fix those packages first (their TODO.md files), then drop the deferral.
 - **Web tab title in the static HTML.** Since SDK 58, `expo-router/head`'s `<Head>` (in `src/components/Fonts.tsx`) only sets the title after hydration; the static export's HTML has none, so the tab shows the URL until the JS loads and crawlers see no title. Export `generateMetadata()` (returns `{ title }`) from each route, or from the root layout if Expo Router supports it there, then drop `<Head>`.
+
+## Later: drop the BoxHockey 1.0 import (not before May 2027)
+
+PuckTastic 2.0 copies a BoxHockey 1.0 save into its own store on its first launch (`src/importBoxHockey1.ts`; CLAUDE.md, "Pack structure" > "Saved data"). It only matters for a device that hasn't opened a 2.x build yet, so it can go once almost nobody is still on 1.0: **no earlier than six months after 2.0 is on the App Store, and not before May 2027.** Before deleting, check App Store Connect (App Analytics or Sales and Trends, by app version) that 1.x is down to nothing. Anyone still on 1.0 afterwards just starts fresh.
+
+To remove it:
+1. Delete `src/importBoxHockey1.ts`.
+2. In `src/pack.ts`, drop the `migrate:` line and the `AsyncStorage` and `createBoxHockey1Import` imports.
+3. In `src/__tests__/store.test.ts`, delete the "a BoxHockey 1.0 save" tests.
+4. In CLAUDE.md's "Saved data", replace the import paragraph with a line saying 1.0 saves are no longer read (and when it was removed).
+5. Run `npm run verify`.
