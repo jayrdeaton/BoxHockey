@@ -19,10 +19,10 @@
 // match "conceding player" in the ordinary case but handed the puck to the wrong player - the
 // beneficiary, not the conceder - on an own goal.
 
-import { CONTROL_SCHEME_SIGN, FRICTION_LEVELS, MAX_FLICK_VELOCITY, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/constants/game'
-import { makeReducer } from '@/hooks/useGameState'
-import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, TipoffMode } from '@/types'
-import { computeFaceoffKnock } from '@/utils/faceoff'
+import { CONTROL_SCHEME_SIGN, FRICTION_LEVELS, MAX_FLICK_VELOCITY, MIN_FLICK_VELOCITY, MIN_SHOOT_DRAG } from '@/games/boxhockey/constants/game'
+import { makeReducer } from '@/games/boxhockey/hooks/useGameState'
+import { BoardLayout, ControlScheme, FaceoffState, GameState, Player, TipoffMode } from '@/games/boxhockey/types'
+import { computeFaceoffKnock } from '@/games/boxhockey/utils/faceoff'
 
 // ─── Board fixture (same synthetic board physics.test.ts uses - no obstacles, no gravity wells,
 // no goalposts, cornerRadius 0 / behindGoalDepth 0, so geometry is the simplest possible flat

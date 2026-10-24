@@ -1,6 +1,6 @@
-import { Profile, StatsState } from '@/types'
-import { applyMatchOutcome, getOverallTotals, getProfileRankings, getProfileStatsView, getVariantsWon, MatchContext, MatchOutcome } from '@/utils/statsEngine'
-import { DEFAULT_PROFILE_STATS, DEFAULT_STATS } from '@/utils/statsValidation'
+import { Profile, StatsState } from '@/games/boxhockey/types'
+import { applyMatchOutcome, getOverallTotals, getProfileRankings, getProfileStatsView, getVariantsWon, MatchContext, MatchOutcome } from '@/games/boxhockey/utils/statsEngine'
+import { DEFAULT_PROFILE_STATS, DEFAULT_STATS } from '@/games/boxhockey/utils/statsValidation'
 
 const VS_CPU: MatchContext = { gameMode: 'vsCpu', aiDifficulty: 'medium', boardVariant: 'classic' }
 const TWO_PLAYER: MatchContext = { gameMode: 'twoPlayer', aiDifficulty: 'medium', boardVariant: 'classic' }

@@ -1,6 +1,6 @@
-import { FRICTION_LEVELS } from '@/constants/game'
-import { BoardLayout } from '@/types'
-import { applyGravityWellForces, computeAimVector, computeTrajectory, stepPhysics } from '@/utils/physics'
+import { FRICTION_LEVELS } from '@/games/boxhockey/constants/game'
+import { BoardLayout } from '@/games/boxhockey/types'
+import { applyGravityWellForces, computeAimVector, computeTrajectory, stepPhysics } from '@/games/boxhockey/utils/physics'
 
 // A standard test board with no obstacles
 const board: BoardLayout = {

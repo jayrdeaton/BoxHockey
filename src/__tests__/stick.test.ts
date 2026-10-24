@@ -2,10 +2,10 @@
 // stick blade and the shot is the contact (utils/stick.ts), checked in the reducer on every aim
 // update, and on every physics step during an intercept.
 
-import { FRICTION_LEVELS, MAX_SPEED, STICK_RESTITUTION, STICK_VELOCITY_SCALE } from '@/constants/game'
-import { makeReducer } from '@/hooks/useGameState'
-import { BoardLayout, ControlScheme, GameState, Player } from '@/types'
-import { clampBladeToBoard, planStickSwing, resolveStickContact, stickBladeRadius } from '@/utils/stick'
+import { FRICTION_LEVELS, MAX_SPEED, STICK_RESTITUTION, STICK_VELOCITY_SCALE } from '@/games/boxhockey/constants/game'
+import { makeReducer } from '@/games/boxhockey/hooks/useGameState'
+import { BoardLayout, ControlScheme, GameState, Player } from '@/games/boxhockey/types'
+import { clampBladeToBoard, planStickSwing, resolveStickContact, stickBladeRadius } from '@/games/boxhockey/utils/stick'
 
 // Same synthetic board the other reducer suites use.
 const board: BoardLayout = {

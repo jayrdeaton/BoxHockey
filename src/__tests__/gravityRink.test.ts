@@ -1,7 +1,7 @@
-import { FRICTION_LEVELS, MAX_SPEED } from '@/constants/game'
-import { BoardLayout, BoardVariant, PuckState } from '@/types'
-import { computeBoardLayout } from '@/utils/board'
-import { stepPhysics } from '@/utils/physics'
+import { FRICTION_LEVELS, MAX_SPEED } from '@/games/boxhockey/constants/game'
+import { BoardLayout, BoardVariant, PuckState } from '@/games/boxhockey/types'
+import { computeBoardLayout } from '@/games/boxhockey/utils/board'
+import { stepPhysics } from '@/games/boxhockey/utils/physics'
 
 // The bug seen while capturing App Store screenshots (2026-10-18): on Gravity with Rink, against
 // the CPU on Hard, the puck came to rest behind the bottom goal line beside the goal mouth, outside

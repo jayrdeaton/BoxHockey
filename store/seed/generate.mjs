@@ -18,14 +18,14 @@ const ROOT = path.join(HERE, '../..')
 
 const ENTRY = `
 import { newlyUnlocked, unlockedKey } from '@tastic/achievements'
-import { ACHIEVEMENT_CATALOG } from '@/constants/achievements'
-import { FACEOFF_MARGIN_MAX_MS, FRICTION_LEVELS, MAX_SPEED } from '@/constants/game'
-import { planAIShot, randomFaceoffReactionMs } from '@/utils/aiOpponent'
-import { centerPuck, computeBoardLayout } from '@/utils/board'
-import { computeFaceoffKnock } from '@/utils/faceoff'
-import { stepPhysics } from '@/utils/physics'
-import { applyMatchOutcome, getProfileStatsView } from '@/utils/statsEngine'
-import { DEFAULT_STATS } from '@/utils/statsValidation'
+import { ACHIEVEMENT_CATALOG } from '@/games/boxhockey/constants/achievements'
+import { FACEOFF_MARGIN_MAX_MS, FRICTION_LEVELS, MAX_SPEED } from '@/games/boxhockey/constants/game'
+import { planAIShot, randomFaceoffReactionMs } from '@/games/boxhockey/utils/aiOpponent'
+import { centerPuck, computeBoardLayout } from '@/games/boxhockey/utils/board'
+import { computeFaceoffKnock } from '@/games/boxhockey/utils/faceoff'
+import { stepPhysics } from '@/games/boxhockey/utils/physics'
+import { applyMatchOutcome, getProfileStatsView } from '@/games/boxhockey/utils/statsEngine'
+import { DEFAULT_STATS } from '@/games/boxhockey/utils/statsValidation'
 
 let rng = 20261018
 const rand = () => ((rng = (rng * 1103515245 + 12345) & 0x7fffffff), rng / 0x7fffffff)

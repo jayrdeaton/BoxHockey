@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react-native'
 import { Dimensions, Text } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { SeatToasters } from '@/components/SeatToasters'
+import { SeatToasters } from '@/shared/SeatToasters'
 
 // Each Toaster is drawn as its stack's name in the frame it hands renderFrame, followed by the safe-area insets the frame provides: which
 // toasts a stack shows, and how it lays them out against those insets, are @rific/toaster's to test.

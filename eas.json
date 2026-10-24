@@ -33,7 +33,7 @@
   "submit": {
     "production": {
       "ios": {
-        "appName": "BoxHockeyTastic"
+        "appName": "PuckTastic"
       }
     },
     "preview": {}

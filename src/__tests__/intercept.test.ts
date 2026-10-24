@@ -5,9 +5,9 @@
 // calls - no React, no timers, no physics simulation loop (each test seeds a puck velocity/phase
 // directly rather than simulating a shot down to that state).
 
-import { FRICTION_LEVELS, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS } from '@/constants/game'
-import { makeReducer } from '@/hooks/useGameState'
-import { BoardLayout, ControlScheme, GameState, Player } from '@/types'
+import { FRICTION_LEVELS, MAX_SPEED, MAX_STICK_PULLBACK_PIXELS } from '@/games/boxhockey/constants/game'
+import { makeReducer } from '@/games/boxhockey/hooks/useGameState'
+import { BoardLayout, ControlScheme, GameState, Player } from '@/games/boxhockey/types'
 
 // Same synthetic board turnAlternation.test.ts/physics.test.ts use - flat rectangle, no
 // obstacles/wells/posts, so geometry never interferes with these reducer-level assertions.
